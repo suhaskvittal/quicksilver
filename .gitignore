@@ -1,0 +1,5 @@
+QASMBench/
+build/
+Release/
+Debug/
+benchmarks/bin/*

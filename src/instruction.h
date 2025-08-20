@@ -1,0 +1,124 @@
+/*
+    author: Suhas Vittal
+    date:   19 August 2025
+*/
+
+#ifndef TYPES_h
+#define TYPES_h
+
+#include "fixed_point/angle.h"
+
+#include <cstdint>
+#include <vector>
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+using qubit_type = int64_t;
+
+struct INSTRUCTION
+{
+    constexpr static size_t FPA_PRECISION = 512;
+
+    using fpa_type = fpa_type<FPA_PRECISION>;
+
+    // `io_encoding` is to simplify the serialization of the instruction to a byte stream.
+    struct io_encoding
+    {
+        using gate_id_type = uint8_t;
+
+        uint64_t            ip;
+        uint32_t            inst_number;
+        gate_id_type        type_id;
+        qubit_type          qubits[3];                             // all gates are at most 3-qubit gates
+        uint16_t            fpa_word_count{fpa_type::NUM_WORDS};   // need this for compatibility in case `FPA_PRECISION` changes.
+        fpa_type::word_type angle[fpa_type::NUM_WORDS];
+        uint32_t            urotseq_size;
+        gate_id_type*       urotseq;
+
+        io_encoding(INSTRUCTION*);
+        ~io_encoding();
+
+        // `read_write` requires the function argument to require
+        //  (1) a pointer to a memory location to read from/write to, and (2) the size of the memory location.
+        // We have a single function since the calling code is the same for both reading and writing.
+        // We use templates to abstract away the IO functions. So, zlib, lzma, or stdio work equally well.
+        template <class RW_FUNC> void read_write(const RW_FUNC&) const;
+    };
+
+    enum class TYPE
+    {
+         // supported quantum gates:
+        H, X, Y, Z, S, T, SDG, TDG, CX, CZ, RX, RY, RZ, CCX, MX, MZ
+    };
+
+    uint64_t ip;
+    uint64_t inst_number;
+
+    TYPE type;
+    
+    // depending on the type, not all arguments are used:
+    std::vector<qubit_type> qubits;   // used by all quantum gates
+    fpa_type                angle{};
+    std::vector<TYPE>       unrolled_rotation_sequence{}; // sequence of Clifford+T gates that implement `angle`
+    
+    // statistics (only for simulation):
+    uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
+    uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
+
+    INSTRUCTION(uint64_t ip, uint64_t inst_number, TYPE, std::initializer_list<qubit_type>);
+    INSTRUCTION(io_encoding);
+
+    // we require that the rotations are provided via iterators instead of an `initializer_list` 
+    // since the sequence can be rather long.
+    template <class ITER_TYPE> INSTRUCTION(uint64_t ip, 
+                                            uint64_t inst_number,
+                                            TYPE, 
+                                            std::initializer_list<qubit_type>, 
+                                            fpa_type, 
+                                            ITER_TYPE urotseq_begin, 
+                                            ITER_TYPE urotseq_end);
+
+    io_encoding serialize() const;
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class RW_FUNC> void
+INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
+{
+    rwf(&ip, sizeof(ip));
+    rwf(&inst_number, sizeof(inst_number));
+    rwf(&type_id, sizeof(type_id));
+    rwf(qubits, sizeof(qubits));
+
+    // fixed point angle:
+    rwf(&fpa_word_count, sizeof(fpa_word_count));
+    rwf(angle, fpa_word_count * sizeof(fpa_type::word_type));
+
+    // unrolled rotation sequence:
+    rwf(&urotseq_size, sizeof(urotseq_size));
+    rwf(urotseq, urotseq * sizeof(gate_id_type));
+}
+
+template <class ITER_TYPE>
+INSTRUCTION::INSTRUCTION(uint64_t _ip, 
+                         uint64_t _inst_number, 
+                         TYPE _type, 
+                         std::initializer_list<qubit_type> _qubits, 
+                         fpa_type _angle, 
+                         ITER_TYPE urotseq_begin, 
+                         ITER_TYPE urotseq_end)
+    :ip{_ip},
+    inst_number{_inst_number},
+    type{_type},
+    qubits(_qubits),
+    angle(_angle),
+    unrolled_rotation_sequence(urotseq_begin, urotseq_end)
+{}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+#endif
