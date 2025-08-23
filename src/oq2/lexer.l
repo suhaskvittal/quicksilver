@@ -25,15 +25,17 @@ using token = yy::parser::token;
 %option c++
 %option yyclass="OQ2_LEXER"
 %option noyywrap
+%option yylineno
 
 DECIMAL     [0-9]*"."[0-9]+
 
+%x VERSION
 %x LINE_COMMENT
 %x BLOCK_COMMENT
 
 %%
 
-OPENQASM        { return token::OPENQASM; }
+OPENQASM        { BEGIN(VERSION); return token::OPENQASM; }
 include         { return token::INCLUDE; }
 [qc]reg         { return token::REGISTER; }
 gate            { return token::GATE; }
@@ -41,6 +43,11 @@ opaque          { return token::OPAQUE; }
 if              { return token::IF; }
 measure         { return token::MEASURE; }
 
+<VERSION>[0-9]+(\.[0-9]+)+        { 
+                                yylval->emplace<std::string>(std::string{yytext}); 
+                                BEGIN(INITIAL); 
+                                return token::VERSION_STRING;
+                            }
 
 [_a-zA-Z][_a-zA-Z0-9]*  { yylval->emplace<std::string>(std::string{yytext}); return token::IDENTIFIER; }
 \".+\"                  { yylval->emplace<std::string>(std::string{yytext}); return token::STRING_LITERAL; }

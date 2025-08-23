@@ -50,5 +50,10 @@ add_executable(oq2bf main/oq2.cpp
             ${BISON_OQ2Parser_OUTPUTS} 
             ${FLEX_OQ2Lexer_OUTPUTS})
 
+# need to add flex headers manually on macos
+if (UNIX AND APPLE)
+    target_include_directories(oq2bf PRIVATE "/opt/homebrew/opt/flex/include")
+endif()
+
 target_include_directories(oq2bf PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_options(oq2bf PRIVATE ${COMPILE_OPTIONS})
