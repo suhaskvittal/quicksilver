@@ -5,14 +5,18 @@
 
 #include "instruction.h"
 
+#include <iomanip>
+#include <iostream>
+
+#define INSTRUCTION_ALSO_SHOW_ROTATION_AS_FLOAT
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-INSTRUCTION::io_encoding::io_encoding(INSTRUCTION* inst)
+INSTRUCTION::io_encoding::io_encoding(const INSTRUCTION* inst)
     :ip{inst->ip},
-    inst_number{inst->inst_number},
     type_id{static_cast<gate_id_type>(inst->type)},
-    urotseq_size{inst->urotseq.size()},
+    urotseq_size{static_cast<uint32_t>(inst->urotseq.size())},
     urotseq{new gate_id_type[urotseq_size]}
 {
     // initialize `qubits`
@@ -23,7 +27,8 @@ INSTRUCTION::io_encoding::io_encoding(INSTRUCTION* inst)
     std::move(words.begin(), words.end(), std::begin(angle));
 
     // initialize `urotseq`
-    std::copy(inst->urotseq.begin(), inst->urotseq.end(), urotseq);
+    std::transform(inst->urotseq.begin(), inst->urotseq.end(), urotseq,
+                       [] (TYPE t) { return static_cast<gate_id_type>(t); });
 }
 
 INSTRUCTION::io_encoding::~io_encoding()
@@ -34,26 +39,49 @@ INSTRUCTION::io_encoding::~io_encoding()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-INSTRUCTION::INSTRUCTION(uint64_t _ip, uint64_t _inst_number, TYPE _type, std::initializer_list<qubit_type> _qubits)
+INSTRUCTION::INSTRUCTION(uint64_t _ip, TYPE _type, std::vector<qubit_type> _qubits)
     :ip{_ip},
-    inst_number{_inst_number},
     type{_type},
     qubits(_qubits)
 {}
 
 INSTRUCTION::INSTRUCTION(io_encoding e)
     :ip{e.ip},
-    inst_number{e.inst_number},
     type{static_cast<TYPE>(e.type_id)},
     qubits(std::begin(e.qubits), std::end(e.qubits)),
     angle(std::begin(e.angle), std::end(e.angle)),
-    unrolled_rotation_sequence(e.urotseq, e.urotseq + e.urotseq_size)
-{}
+    urotseq(e.urotseq_size)
+{
+    std::transform(e.urotseq, e.urotseq + e.urotseq_size, urotseq.begin(),
+                       [] (auto t) { return static_cast<TYPE>(t); });
+}
 
 INSTRUCTION::io_encoding
 INSTRUCTION::serialize() const
 {
     return io_encoding(this);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::ostream&
+operator<<(std::ostream& os, const INSTRUCTION& inst)
+{
+    os << "( ip = " << inst.ip << " ) " << BASIS_GATES[static_cast<size_t>(inst.type)];
+    if (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ)
+    {
+        os << "( " << fpa::to_string(inst.angle);
+#if defined(INSTRUCTION_ALSO_SHOW_ROTATION_AS_FLOAT)
+        os << " = " << convert_fpa_to_float(inst.angle);
+#endif
+        os << " )";
+    }
+
+    for (size_t i = 0; i < inst.qubits.size(); ++i)
+        os << " " << inst.qubits[i];
+
+    return os;
 }
 
 ////////////////////////////////////////////////////////////

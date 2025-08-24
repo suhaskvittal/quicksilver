@@ -21,8 +21,12 @@ class OQ2_LEXER;
 }
 
 %parse-param { OQ2_LEXER& oq2lx }
+%parse-param { PROGRAM_INFO& prog }
+%parse-param { std::string curr_relative_path }
+
 %define api.value.type variant
 %define parse.error verbose
+%define parse.trace
 
 %code
 {
@@ -30,17 +34,16 @@ class OQ2_LEXER;
 #include "oq2/lexer_wrapper.h"
 #define yylex oq2lx.yylex
 
-
 }
 
 // Keyword tokens:
-%token OPENQASM
-%token INCLUDE
-%token REGISTER
-%token GATE
-%token OPAQUE
-%token IF
-%token MEASURE
+%token                  OPENQASM
+%token                  INCLUDE
+%token <std::string>    REGISTER
+%token                  GATE
+%token                  OPAQUE
+%token                  IF
+%token                  MEASURE
 
 // Identifier and literal tokens:
 %token <int64_t>        INTEGER_LITERAL;
@@ -59,10 +62,10 @@ class OQ2_LEXER;
 %token <std::string>    VERSION_STRING;
 
 // nonterminals (see `oq2/types.h`)
-%nterm <PROGRAM_INFO>                               program
+%nterm                                              program
 %nterm <PROGRAM_INFO>                               line
 %nterm <PROGRAM_INFO>                               include_stmt
-%nterm <oq2::REGISTER>                              register_decl
+%nterm <prog::REGISTER>                             register_decl
 
 %nterm <prog::GATE_DEFINITION>                      gate_decl
 %nterm <std::vector<std::string>>                   optional_gate_params
@@ -85,7 +88,8 @@ class OQ2_LEXER;
 
 %%
 
-program: OPENQASM VERSION_STRING ';' line   { $$ = std::move($4); $$.version_ = $2; }
+program: OPENQASM VERSION_STRING ';' line   { prog = std::move($4); prog.version_ = $2; }
+        | line                               { prog = std::move($1); prog.version_ = "2.0"; }    
         ;
 
 line: line include_stmt                     { $$ = std::move($1); $$.merge(std::move($2)); }
@@ -94,19 +98,24 @@ line: line include_stmt                     { $$ = std::move($1); $$.merge(std::
     | line conditional_instruction          { $$ = std::move($1); $$.add_instruction(std::move($2)); }
     | line instruction                      { $$ = std::move($1); $$.add_instruction(std::move($2)); }
     | line measurement                      { $$ = std::move($1); $$.add_instruction(std::move($2)); }
+    | /* empty */                           { $$ = PROGRAM_INFO{}; }
     ;
 
 include_stmt: INCLUDE STRING_LITERAL ';'    {
                                                 std::string file_to_read = $2;
-                                                /* parse file here... */
+                                                if (file_to_read == "qelib1.inc")
+                                                    file_to_read = QELIB1_INC_PATH;
+                                                else
+                                                    file_to_read = curr_relative_path + "/" + file_to_read;
+                                                $$ = PROGRAM_INFO::from_file(file_to_read);
                                             }
             ; 
 
 register_decl: REGISTER argument ';'        {
-                                                $$.type = ($1 == "creg") ? REGISTER::TYPE::BIT
-                                                                         : REGISTER::TYPE::QUBIT;
+                                                $$.type = ($1 == "creg") ? prog::REGISTER::TYPE::BIT
+                                                                         : prog::REGISTER::TYPE::QUBIT;
                                                 $$.name = $2.name;
-                                                if ($2.index != NO_INDEX)
+                                                if ($2.index >= 0)
                                                     $$.width = $2.index;
                                             }
             ;
@@ -120,28 +129,28 @@ gate_decl: GATE IDENTIFIER optional_gate_params gate_params_or_arguments '{' gat
                     }
             ;
 optional_gate_params: '(' gate_params_or_arguments ')'          { $$ = $2; }
-                    | 
+                    | /* empty */                               { $$ = {}; }
                     ;
 gate_params_or_arguments: IDENTIFIER                            { $$.push_back($1); }
                     | gate_params_or_arguments ',' IDENTIFIER   { $$ = std::move($1); $$.push_back($3); }
                     ;
 gate_decl_body: gate_decl_body instruction                      { $$ = std::move($1); $$.push_back($2); }
-                |
+                | /* empty */                                   { $$ = {}; }
                 ;
 
 conditional_instruction: IF '(' IDENTIFIER COMPARISON_OPERATOR expression ')' instruction
                         {
-                            $$ = std::move($1);
-                            $$.conditional = true;
+                            $$ = std::move($7);
+                            $$.is_conditional = true;
                         }
             ;
 instruction: IDENTIFIER optional_instruction_params instruction_arguments ';'  
                         {
-                            $$ = QASM_INST_INFO{$1, $2, $3};
+                            $$ = prog::QASM_INST_INFO{$1, $2, $3};
                         }
             ;
 optional_instruction_params: '(' instruction_params ')'     { $$ = $2; }
-                            |
+                            | /* empty */                   { $$ = {}; }
                             ;
 instruction_params: instruction_params ',' expression       { $$ = std::move($1); $$.push_back($3); }
                     | expression                            { $$.push_back($1); }
@@ -156,44 +165,41 @@ measurement: MEASURE argument ARROW argument ';'    {
                                                     }
             ;
 
-expression: term                                { $$.emplace_back($1, OPERATOR::ADD); }
+expression: term                                { $$.termseq.emplace_back($1, prog::EXPRESSION::OPERATOR::ADD); }
             | expression PLUS_MINUS term        { 
-                                                    auto op = ($2 == "-") ? EXPRESSION::OPERATOR::ADD
-                                                                          : EXPRESSION::OPERATOR::SUBTRACT;
+                                                    auto op = static_cast<prog::EXPRESSION::OPERATOR>($2);
                                                     $$ = std::move($1);
-                                                    $$.emplace_back($3, op);
+                                                    $$.termseq.emplace_back($3, op);
                                                 }
             ;
 term: term MULTIPLY_DIVIDE signed_expval        {
-                                                    auto op = ($2 == "*") ? EXPRESSION::OPERATOR::MULTPLY
-                                                                          : EXPRESSION::OPERATOR::DIVIDE;
+                                                    auto op = static_cast<prog::EXPRESSION::OPERATOR>($2 + 2);
                                                     $$ = std::move($1); 
-                                                    $$.emplace_back($2, op);
+                                                    $$.emplace_back($3, op);
                                                 }
-    | signed_expval                             {  $$.emplace_back($1, EXPRESSION::OPERATOR::MULTIPLY); }
+    | signed_expval                             {  $$.emplace_back($1, prog::EXPRESSION::OPERATOR::MULTIPLY); }
     ;
-signed_expval: expval
+signed_expval: expval                           { $$ = $1; }
              | PLUS_MINUS expval                {
-                                                    if ($1 == "-")
-                                                        $2.second = true;
+                                                    $2.second = ($1 > 0);
                                                     $$ = std::move($2);
                                                 }
              ;
 expval: generic_value                           { $$.first.push_back($1); }
         | expval POWER generic_value            { $$ = std::move($1); $$.first.push_back($3); }
         ;
-generic_value: INTEGER_LITERAL                  { $$.emplace<int64_t>($1); }
-            | FLOAT_LITERAL                     { $$.emplace<double>($1); }
-            | IDENTIFIER                        { $$.emplace<std::string>($1); }
-            | '(' expression ')'                {  
-                                                    auto expr_p = std::make_unique<EXPRESSION>();
-                                                    *expr_p = $1;
-                                                    $$.emplace<std::unique_ptr<EXPRESSION>>(std::move(expr_p));
+generic_value: INTEGER_LITERAL                  { $$ = $1; }
+            | FLOAT_LITERAL                     { $$ = $1; }
+            | IDENTIFIER                        { $$ = $1; }
+            | '(' expression ')'                { 
+                                                    prog::EXPRESSION::expr_ptr e_p{new prog::EXPRESSION}; 
+                                                    *e_p = $2;
+                                                    $$ = std::move(e_p); 
                                                 }
             ;
 
 argument: IDENTIFIER                            { $$.name = $1; }
-        | IDENTIFIER '[' INTEGER_LITERAL ']'    { $$ = prog::QASM_INST_INFO::operand_type{$1,$3}; }
+        | IDENTIFIER '[' INTEGER_LITERAL ']'    { $$.name = $1; $$.index = $3; }
         ;
 
 %%

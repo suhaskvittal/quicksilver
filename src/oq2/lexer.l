@@ -37,20 +37,20 @@ DECIMAL     [0-9]*"."[0-9]+
 
 OPENQASM        { BEGIN(VERSION); return token::OPENQASM; }
 include         { return token::INCLUDE; }
-[qc]reg         { return token::REGISTER; }
+[qc]reg         { yylval->emplace<std::string>(yytext); return token::REGISTER; }
 gate            { return token::GATE; }
 opaque          { return token::OPAQUE; }
 if              { return token::IF; }
 measure         { return token::MEASURE; }
 
 <VERSION>[0-9]+(\.[0-9]+)+        { 
-                                yylval->emplace<std::string>(std::string{yytext}); 
+                                yylval->emplace<std::string>(yytext); 
                                 BEGIN(INITIAL); 
                                 return token::VERSION_STRING;
                             }
 
-[_a-zA-Z][_a-zA-Z0-9]*  { yylval->emplace<std::string>(std::string{yytext}); return token::IDENTIFIER; }
-\".+\"                  { yylval->emplace<std::string>(std::string{yytext}); return token::STRING_LITERAL; }
+[_a-zA-Z][_a-zA-Z0-9]*  { yylval->emplace<std::string>(yytext); return token::IDENTIFIER; }
+\".+\"                  { yylval->emplace<std::string>(yytext+1, yytext+yyleng-1); return token::STRING_LITERAL; }
 [0-9]+                  { yylval->emplace<int64_t>(atoll(yytext)); return token::INTEGER_LITERAL; }
 
 {DECIMAL}                   {
@@ -80,11 +80,11 @@ measure         { return token::MEASURE; }
 [\(\)\[\]\{\}\,\;]          { return yytext[0]; }
 
 
-[=!]= | [><]=?              { yylval->emplace<std::string>(std::string{yytext}); return token::COMPARISON_OPERATOR; }
+[=!]=|[><]=?                { yylval->emplace<std::string>(yytext); return token::COMPARISON_OPERATOR; }
 "->"                        { return token::ARROW; }
-"**" | "^"                  { return token::POWER; }
-[\+\-]                      { yylval->emplace<int64_t>((yytext[0] == '+') ? 0 : 1); return token::PLUS_MINUS; }
-[\*\\]                      { yylval->emplace<int64_t>((yytext[0] == '*') ? 0 : 1); return token::MULTIPLY_DIVIDE; }
+"^"|"**"                    { return token::POWER; }
+[\+\-]                      { yylval->emplace<int64_t>(yytext[0] == '-'); return token::PLUS_MINUS; }
+[\*\/]                      { yylval->emplace<int64_t>(yytext[0] == '/'); return token::MULTIPLY_DIVIDE; }
 
 
 [ \t\n\r]                   ;

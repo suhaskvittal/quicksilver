@@ -9,6 +9,7 @@
 #include "fixed_point/angle.h"
 
 #include <cstdint>
+#include <iosfwd>
 #include <vector>
 
 ////////////////////////////////////////////////////////////
@@ -16,11 +17,22 @@
 
 using qubit_type = int64_t;
 
+constexpr std::string_view BASIS_GATES[] = 
+{
+    "h", "x", "y", "z", 
+    "s", "sx", "sdg", "sxdg",
+    "t", "tdg", 
+    "cx", "cz", "swap",
+    "rx", "rz",
+    "ccx", "ccz",
+    "mz", "mx"
+};
+
 struct INSTRUCTION
 {
     constexpr static size_t FPA_PRECISION = 512;
 
-    using fpa_type = fpa_type<FPA_PRECISION>;
+    using fpa_type = FPA_TYPE<FPA_PRECISION>;
 
     // `io_encoding` is to simplify the serialization of the instruction to a byte stream.
     struct io_encoding
@@ -28,7 +40,6 @@ struct INSTRUCTION
         using gate_id_type = uint8_t;
 
         uint64_t            ip;
-        uint32_t            inst_number;
         gate_id_type        type_id;
         qubit_type          qubits[3];                             // all gates are at most 3-qubit gates
         uint16_t            fpa_word_count{fpa_type::NUM_WORDS};   // need this for compatibility in case `FPA_PRECISION` changes.
@@ -36,7 +47,7 @@ struct INSTRUCTION
         uint32_t            urotseq_size;
         gate_id_type*       urotseq;
 
-        io_encoding(INSTRUCTION*);
+        io_encoding(const INSTRUCTION*);
         ~io_encoding();
 
         // `read_write` requires the function argument to require
@@ -49,32 +60,37 @@ struct INSTRUCTION
     enum class TYPE
     {
          // supported quantum gates:
-        H, X, Y, Z, S, T, SDG, TDG, CX, CZ, RX, RY, RZ, CCX, MX, MZ
+        H, X, Y, Z, 
+        S, SX, SDG, SXDG, 
+        T, TDG, 
+        CX, CZ, SWAP,
+        RX, RZ, 
+        CCX, CCZ, 
+        MZ, MX
     };
 
     uint64_t ip;
-    uint64_t inst_number;
 
     TYPE type;
     
     // depending on the type, not all arguments are used:
     std::vector<qubit_type> qubits;   // used by all quantum gates
     fpa_type                angle{};
-    std::vector<TYPE>       unrolled_rotation_sequence{}; // sequence of Clifford+T gates that implement `angle`
+    std::vector<TYPE>       urotseq{}; // "unrolled rotation sequence" of Clifford+T gates that implement `angle`
     
     // statistics (only for simulation):
     uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
     uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
 
-    INSTRUCTION(uint64_t ip, uint64_t inst_number, TYPE, std::initializer_list<qubit_type>);
+    INSTRUCTION(uint64_t ip, TYPE, std::vector<qubit_type>);
     INSTRUCTION(io_encoding);
+    INSTRUCTION(const INSTRUCTION&) =default;
 
     // we require that the rotations are provided via iterators instead of an `initializer_list` 
     // since the sequence can be rather long.
     template <class ITER_TYPE> INSTRUCTION(uint64_t ip, 
-                                            uint64_t inst_number,
                                             TYPE, 
-                                            std::initializer_list<qubit_type>, 
+                                            std::vector<qubit_type>, 
                                             fpa_type, 
                                             ITER_TYPE urotseq_begin, 
                                             ITER_TYPE urotseq_end);
@@ -85,11 +101,15 @@ struct INSTRUCTION
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 template <class RW_FUNC> void
-INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
+INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
 {
     rwf(&ip, sizeof(ip));
-    rwf(&inst_number, sizeof(inst_number));
     rwf(&type_id, sizeof(type_id));
     rwf(qubits, sizeof(qubits));
 
@@ -99,23 +119,21 @@ INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
 
     // unrolled rotation sequence:
     rwf(&urotseq_size, sizeof(urotseq_size));
-    rwf(urotseq, urotseq * sizeof(gate_id_type));
+    rwf(urotseq, urotseq_size * sizeof(gate_id_type));
 }
 
 template <class ITER_TYPE>
 INSTRUCTION::INSTRUCTION(uint64_t _ip, 
-                         uint64_t _inst_number, 
                          TYPE _type, 
-                         std::initializer_list<qubit_type> _qubits, 
+                         std::vector<qubit_type> _qubits, 
                          fpa_type _angle, 
                          ITER_TYPE urotseq_begin, 
                          ITER_TYPE urotseq_end)
     :ip{_ip},
-    inst_number{_inst_number},
     type{_type},
     qubits(_qubits),
     angle(_angle),
-    unrolled_rotation_sequence(urotseq_begin, urotseq_end)
+    urotseq(urotseq_begin, urotseq_end)
 {}
 
 ////////////////////////////////////////////////////////////

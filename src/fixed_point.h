@@ -6,8 +6,11 @@
 #ifndef FIXED_POINT_h
 #define FIXED_POINT_h
 
-#include <cstdint>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <utility>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -17,7 +20,7 @@ class FIXED_POINT
 {
 public:
     using word_type = WORD_TYPE;
-    using index_pair = std::pair<size_t, size_t>;
+    using index_pair = std::pair<int, int>;
 
     constexpr static size_t NUM_BITS{W},
                             BITS_PER_WORD{sizeof(WORD_TYPE)*8},
@@ -41,13 +44,20 @@ public:
     void set_word(size_t idx, WORD_TYPE);
     word_type test_word(size_t idx) const;
 
+    // bit shift operations:
+    void lshft(int);
+    void rshft(int);
+
     // other useful operations:
     size_t popcount() const;
+    int        join_word_and_bit_idx(index_pair) const;
     index_pair get_word_and_bit_idx(size_t idx) const;
     index_pair msb() const;   // returns {-1, -1} if all bits are 0
     index_pair lsb() const;   // returns {-1, -1} if all bits are 0
 
     std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
+
+    std::string to_hex_string() const;
 };
 
 ////////////////////////////////////////////////////////////

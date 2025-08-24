@@ -4,19 +4,28 @@
 */
 
 #include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W> fpa_type<W> 
-convert_float_to_fpa(double x)
+template <size_t W> FPA_TYPE<W> 
+convert_float_to_fpa(double x, double tol)
 {
-    fpa_type<W> out{};
+    // bound `x` to the range [0, 2*M_PI)
+    while (x > 2*M_PI)
+        x -= 2*M_PI;
+    while (x < 0)
+        x += 2*M_PI;
+
+    FPA_TYPE<W> out{};
     auto fpeq = [tol] (double x, double y) { return x > y-tol && x < y+tol; };
     
-    size_t idx{fpa_type<W>::NUM_BITS-1};
+    size_t idx{FPA_TYPE<W>::NUM_BITS-1};
     double m{M_PI};
-    while (x > 1e-18)
+    while (x > tol)
     {
         bool b = (x > m || fpeq(x,m));
         out.set(idx, b);
@@ -29,13 +38,11 @@ convert_float_to_fpa(double x)
 }
 
 template <size_t W> double
-convert_fpa_to_float(const fpa_type<W>& x)
+convert_fpa_to_float(const FPA_TYPE<W>& x)
 {
-    const double tol{1e-18};
-
     double out{0.0};
     double m{M_PI};
-    for (size_t i = 0; i < fpa_type<W>::NUM_BITS; i++)
+    for (ssize_t i = FPA_TYPE<W>::NUM_BITS-1; i >= 0; i--)
     {
         out += x.test(i) ? m : 0.0;
         m *= 0.5;
@@ -53,9 +60,9 @@ namespace fpa
 ////////////////////////////////////////////////////////////
 
 template <size_t W> void
-negate_inplace(fpa_type<W>& x)
+negate_inplace(FPA_TYPE<W>& x)
 {
-    using typename fpa_type<W>::word_type;
+    using word_type = typename FPA_TYPE<W>::word_type;
     /*
         Examples with a four-bit FPA:
             negation of PI (1000) is just PI (1000)
@@ -64,27 +71,31 @@ negate_inplace(fpa_type<W>& x)
             negation of 3PI/4 (0110) is -3PI/4 = 5I/4 (1010)
             etc.
         Algorithm:
-            find msb.
-            flip all bits after the msb.
+            find lsb.
+            flip all bits after the lsb.
     */
 
-    auto [msb_word_idx, msb_bit_idx] = x.msb();
+    auto [word_idx, bit_idx] = x.lsb();
     
-    // for the msb word, we need to flip all bits after the msb bit.
-    word_type w = x.test_word(msb_word_idx);
-    word_type mask = (1L << (fpa_type<W>::BITS_PER_WORD-msb_bit_idx-1)) - 1;
-    w ^= mask << (msb_bit_idx+1);
-    x.set_word(msb_word_idx, w);
+    // for the lsb word, we need to flip all bits after the lsb bit.
+    if (bit_idx < FPA_TYPE<W>::BITS_PER_WORD-1)
+    {
+        word_type w = x.test_word(word_idx);
+        size_t shift = FPA_TYPE<W>::BITS_PER_WORD-bit_idx-1;
+        word_type mask = (word_type{1} << shift) - 1;
+        w ^= (mask << (bit_idx+1));
+        x.set_word(word_idx, w);
+    }
 
-    // now flip all bits in the remaining words above the msb word
-    for (size_t i = msb_word_idx+1; i < fpa_type<W>::NUM_WORDS; i++)
+    // now flip all bits in the remaining words above the lsb word
+    for (size_t i = word_idx+1; i < FPA_TYPE<W>::NUM_WORDS; i++)
         x.set_word(i, ~x.test_word(i));
 }
 
 template <size_t W> void
-add_inplace(fpa_type<W>& x, fpa_type<W> y)
+add_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
 {
-    using typename fpa_type<W>::word_type;
+    using word_type = typename FPA_TYPE<W>::word_type;
     /*
         Examples with a four-bit FPA:
             PI (1000) + PI/2 (0100) = 3PI/2 (1100)
@@ -93,7 +104,7 @@ add_inplace(fpa_type<W>& x, fpa_type<W> y)
         so it is just simple addition. We need to handle the carryout.
     */
     word_type cout{0};
-    for (size_t i = 0; i < fpa_type<W>::NUM_WORDS; i++)
+    for (size_t i = 0; i < FPA_TYPE<W>::NUM_WORDS; i++)
     {
         word_type u = x.test_word(i),
                   v = y.test_word(i);
@@ -104,7 +115,7 @@ add_inplace(fpa_type<W>& x, fpa_type<W> y)
 }
 
 template <size_t W> void
-sub_inplace(fpa_type<W>& x, fpa_type<W> y)
+sub_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
 {
     negate_inplace(y);
     add_inplace(x, y);
@@ -113,25 +124,82 @@ sub_inplace(fpa_type<W>& x, fpa_type<W> y)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W> fpa_type<W>
-negate(fpa_type<W> x)
+template <size_t W> FPA_TYPE<W>
+negate(FPA_TYPE<W> x)
 {
     negate_inplace(x);
     return x;
 }
 
-template <size_t W> fpa_type<W>
-add(fpa_type<W> x, fpa_type<W> y)
+template <size_t W> FPA_TYPE<W>
+add(FPA_TYPE<W> x, FPA_TYPE<W> y)
 {
     add_inplace(x, y);
     return x;
 }
 
-template <size_t W> fpa_type<W>
-sub(fpa_type<W> x, fpa_type<W> y)
+template <size_t W> FPA_TYPE<W>
+sub(FPA_TYPE<W> x, FPA_TYPE<W> y)
 {
     sub_inplace(x, y);
     return x;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <size_t W> std::string
+to_string(const FPA_TYPE<W>& x)
+{
+    // number of tolerated bits before we return the floating point representation
+    // we will use an expression as sums of pi if either `x` or `-x` has
+    // `popcount <= MAX_POPCOUNT_BEFORE_FLOAT_CONV`
+    constexpr size_t MAX_POPCOUNT_BEFORE_FLOAT_CONV{3};
+
+    auto nx = negate(x);
+
+    size_t cnt = x.popcount();
+    size_t cnt_neg = nx.popcount();
+
+    std::stringstream ss;
+    if (cnt == 0)
+    {
+        ss << "0";
+    }
+    else if (cnt <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || cnt_neg <= MAX_POPCOUNT_BEFORE_FLOAT_CONV)
+    {
+        bool use_negative = cnt_neg < cnt;
+        FPA_TYPE<W> y = use_negative ? negate(x) : x;
+        bool first{true};
+        for (size_t i = 0; i < FPA_TYPE<W>::NUM_BITS; i++)
+        {
+            if (y.test(i))
+            {
+                if (!first)
+                    ss << (use_negative ? " - " : " + ");
+                else if (use_negative)
+                    ss << "-";
+
+                ss << "pi";
+                if (i < FPA_TYPE<W>::NUM_BITS-1)
+                {
+                    size_t exp = FPA_TYPE<W>::NUM_BITS-i-1;
+                    if (exp == 1)
+                        ss << "/2";
+                    else if (exp >= 2 && exp <= 13)
+                        ss << "/" << (1L<<exp);
+                    else
+                        ss << "/2^" << exp;
+                }
+                first = false;
+            }
+        }
+    }
+    else
+    {
+        ss << std::setprecision(5) << convert_fpa_to_float(x);
+    }
+    return ss.str();
 }
 
 ////////////////////////////////////////////////////////////

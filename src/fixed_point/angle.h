@@ -8,25 +8,29 @@
 
 #include "fixed_point.h"
 
+#include <string>
+
 template <size_t W>
-using fpa_type = FIXED_POINT<W, uint64_t>;
+using FPA_TYPE = FIXED_POINT<W, uint64_t>;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W=512> fpa_type<W>  convert_float_to_fpa(double);
-template <size_t W>     double       convert_fpa_to_float(const fpa_type<W>&);
+template <size_t W=512> FPA_TYPE<W>  convert_float_to_fpa(double, double tol=1e-18);
+template <size_t W>     double       convert_fpa_to_float(const FPA_TYPE<W>&);
 
 namespace fpa
 {
 
-template <size_t W> void negate_inplace(fpa_type<W>&);
-template <size_t W> void add_inplace(fpa_type<W>&, fpa_type<W>);
-template <size_t W> void sub_inplace(fpa_type<W>&, fpa_type<W>);
+template <size_t W> void negate_inplace(FPA_TYPE<W>&);
+template <size_t W> void add_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
+template <size_t W> void sub_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
 
-template <size_t W> fpa_type<W> negate(fpa_type<W>);
-template <size_t W> fpa_type<W> add(fpa_type<W>, fpa_type<W>);
-template <size_t W> fpa_type<W> sub(fpa_type<W>, fpa_type<W>);
+template <size_t W> FPA_TYPE<W> negate(FPA_TYPE<W>);
+template <size_t W> FPA_TYPE<W> add(FPA_TYPE<W>, FPA_TYPE<W>);
+template <size_t W> FPA_TYPE<W> sub(FPA_TYPE<W>, FPA_TYPE<W>);
+
+template <size_t W> std::string to_string(const FPA_TYPE<W>&);
 
 } // namespace fpa
 

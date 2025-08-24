@@ -1,5 +1,10 @@
 QASMBench/
+
 build/
 Release/
 Debug/
+
 benchmarks/bin/*
+
+venv/
+venv/*

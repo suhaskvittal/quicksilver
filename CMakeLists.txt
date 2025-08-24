@@ -8,7 +8,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
             -Wall
             -Wextra
             -Wpedantic
-            -Werror
             -Wunused
             )
 else()
@@ -45,10 +44,15 @@ add_flex_bison_dependency(OQ2Lexer OQ2Parser)
 
 message(STATUS "BISON_OQ2Parser_OUTPUTS: ${BISON_OQ2Parser_OUTPUTS}")
 
+set(BINARY_GEN_FILES
+    ${BISON_OQ2Parser_OUTPUTS} 
+    ${FLEX_OQ2Lexer_OUTPUTS}
+    src/instruction.cpp
+    src/program.cpp
+    src/program/expression.cpp)
+
 # bison/flex testing executable:
-add_executable(oq2bf main/oq2.cpp 
-            ${BISON_OQ2Parser_OUTPUTS} 
-            ${FLEX_OQ2Lexer_OUTPUTS})
+add_executable(oq2bf main/oq2.cpp ${BINARY_GEN_FILES})
 
 # need to add flex headers manually on macos
 if (UNIX AND APPLE)
@@ -57,3 +61,4 @@ endif()
 
 target_include_directories(oq2bf PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_options(oq2bf PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(oq2bf PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
