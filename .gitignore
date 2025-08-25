@@ -5,6 +5,7 @@ Release/
 Debug/
 
 benchmarks/bin/*
+benchmarks/stats/*
 
 venv/
 venv/*
