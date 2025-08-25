@@ -160,6 +160,10 @@ VALUE_INFO::operator*=(VALUE_INFO v)
     {
         fixed_point.lshft(v.power_of_two_exponent);
     }
+    else if (can_use_fixed_point() && v.is_integral())
+    {
+        fpa::scalar_mul_inplace(fixed_point, v.integral_value);
+    }
     else if (is_power_of_two() && v.can_use_fixed_point())
     {
         fixed_point = v.fixed_point;
@@ -223,7 +227,7 @@ VALUE_INFO::operator^=(VALUE_INFO v)
     {
         if (is_power_of_two() && v.is_power_of_two())
             power_of_two_exponent *= (1LL << v.power_of_two_exponent);
-        else if (is_power_of_two() && v.state == STATE::IS_INTEGRAL)
+        else if (is_power_of_two() && v.is_integral())
             power_of_two_exponent *= v.integral_value;
         else
             state = STATE::DEFAULT;

@@ -14,8 +14,7 @@
 ////////////////////////////////////////////////////////////
 
 INSTRUCTION::io_encoding::io_encoding(const INSTRUCTION* inst)
-    :ip{inst->ip},
-    type_id{static_cast<gate_id_type>(inst->type)},
+    :type_id{static_cast<gate_id_type>(inst->type)},
     urotseq_size{static_cast<uint32_t>(inst->urotseq.size())},
     urotseq{new gate_id_type[urotseq_size]}
 {
@@ -39,15 +38,13 @@ INSTRUCTION::io_encoding::~io_encoding()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-INSTRUCTION::INSTRUCTION(uint64_t _ip, TYPE _type, std::vector<qubit_type> _qubits)
-    :ip{_ip},
-    type{_type},
+INSTRUCTION::INSTRUCTION(TYPE _type, std::vector<qubit_type> _qubits)
+    :type{_type},
     qubits(_qubits)
 {}
 
 INSTRUCTION::INSTRUCTION(io_encoding e)
-    :ip{e.ip},
-    type{static_cast<TYPE>(e.type_id)},
+    :type{static_cast<TYPE>(e.type_id)},
     qubits(std::begin(e.qubits), std::end(e.qubits)),
     angle(std::begin(e.angle), std::end(e.angle)),
     urotseq(e.urotseq_size)
@@ -68,7 +65,7 @@ INSTRUCTION::serialize() const
 std::ostream&
 operator<<(std::ostream& os, const INSTRUCTION& inst)
 {
-    os << "( ip = " << inst.ip << " ) " << BASIS_GATES[static_cast<size_t>(inst.type)];
+    os << BASIS_GATES[static_cast<size_t>(inst.type)];
     if (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ)
     {
         os << "( " << fpa::to_string(inst.angle);

@@ -21,7 +21,7 @@ constexpr std::string_view BASIS_GATES[] =
 {
     "h", "x", "y", "z", 
     "s", "sx", "sdg", "sxdg",
-    "t", "tdg", 
+    "t", "tx", "tdg", "txdg",
     "cx", "cz", "swap",
     "rx", "rz",
     "ccx", "ccz",
@@ -30,7 +30,7 @@ constexpr std::string_view BASIS_GATES[] =
 
 struct INSTRUCTION
 {
-    constexpr static size_t FPA_PRECISION = 512;
+    constexpr static size_t FPA_PRECISION = 2048;
 
     using fpa_type = FPA_TYPE<FPA_PRECISION>;
 
@@ -39,7 +39,6 @@ struct INSTRUCTION
     {
         using gate_id_type = uint8_t;
 
-        uint64_t            ip;
         gate_id_type        type_id;
         qubit_type          qubits[3];                             // all gates are at most 3-qubit gates
         uint16_t            fpa_word_count{fpa_type::NUM_WORDS};   // need this for compatibility in case `FPA_PRECISION` changes.
@@ -62,14 +61,13 @@ struct INSTRUCTION
          // supported quantum gates:
         H, X, Y, Z, 
         S, SX, SDG, SXDG, 
-        T, TDG, 
+        T, TX, TDG, TXDG, 
         CX, CZ, SWAP,
         RX, RZ, 
         CCX, CCZ, 
-        MZ, MX
+        MZ, MX,
+        NIL
     };
-
-    uint64_t ip;
 
     TYPE type;
     
@@ -82,14 +80,13 @@ struct INSTRUCTION
     uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
     uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
 
-    INSTRUCTION(uint64_t ip, TYPE, std::vector<qubit_type>);
+    INSTRUCTION(TYPE, std::vector<qubit_type>);
     INSTRUCTION(io_encoding);
     INSTRUCTION(const INSTRUCTION&) =default;
 
     // we require that the rotations are provided via iterators instead of an `initializer_list` 
     // since the sequence can be rather long.
-    template <class ITER_TYPE> INSTRUCTION(uint64_t ip, 
-                                            TYPE, 
+    template <class ITER_TYPE> INSTRUCTION(TYPE, 
                                             std::vector<qubit_type>, 
                                             fpa_type, 
                                             ITER_TYPE urotseq_begin, 
@@ -109,7 +106,6 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 template <class RW_FUNC> void
 INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
 {
-    rwf((void*)&ip, sizeof(ip));
     rwf((void*)&type_id, sizeof(type_id));
     rwf((void*)qubits, sizeof(qubits));
 
@@ -123,14 +119,12 @@ INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
 }
 
 template <class ITER_TYPE>
-INSTRUCTION::INSTRUCTION(uint64_t _ip, 
-                         TYPE _type, 
+INSTRUCTION::INSTRUCTION(TYPE _type, 
                          std::vector<qubit_type> _qubits, 
                          fpa_type _angle, 
                          ITER_TYPE urotseq_begin, 
                          ITER_TYPE urotseq_end)
-    :ip{_ip},
-    type{_type},
+    :type{_type},
     qubits(_qubits),
     angle(_angle),
     urotseq(urotseq_begin, urotseq_end)

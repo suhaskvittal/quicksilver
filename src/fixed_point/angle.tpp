@@ -8,6 +8,8 @@
 #include <iostream>
 #include <sstream>
 
+#include <strings.h>
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -121,6 +123,30 @@ sub_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
     add_inplace(x, y);
 }
 
+template <size_t W> void
+scalar_mul_inplace(FPA_TYPE<W>& x, int64_t y)
+{
+    if (y < 0) // transfer the negative to `x` and multiply by `-y`
+    {
+        negate_inplace(x);
+        scalar_mul_inplace(x, -y);
+        return;
+    }
+
+    // algorithm, mostly because I am too lazy to implement FFT:
+    //  for each set bit in `y`, compute `x << i` and add it to `x`
+    //  can quickly do this with ffsll
+    FPA_TYPE<W> x_base{x};
+    while (y)
+    {
+        size_t lsb = ffsll(*(long long*)&y)-1;
+        FPA_TYPE<W> tmp{x_base};
+        tmp.lshft(lsb);
+        add_inplace(x, tmp);
+        y &= ~(1L << lsb);
+    }
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -145,11 +171,19 @@ sub(FPA_TYPE<W> x, FPA_TYPE<W> y)
     return x;
 }
 
+template <size_t W> FPA_TYPE<W>
+scalar_mul(FPA_TYPE<W> x, int64_t y)
+{
+    FPA_TYPE<W> out{x};
+    scalar_mul_inplace(out, y);
+    return out;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 template <size_t W> std::string
-to_string(const FPA_TYPE<W>& x)
+to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
 {
     // number of tolerated bits before we return the floating point representation
     // we will use an expression as sums of pi if either `x` or `-x` has
@@ -166,7 +200,7 @@ to_string(const FPA_TYPE<W>& x)
     {
         ss << "0";
     }
-    else if (cnt <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || cnt_neg <= MAX_POPCOUNT_BEFORE_FLOAT_CONV)
+    else if (cnt <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || cnt_neg <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || use_gridsynth_format)
     {
         bool use_negative = cnt_neg < cnt;
         FPA_TYPE<W> y = use_negative ? negate(x) : x;
@@ -175,10 +209,27 @@ to_string(const FPA_TYPE<W>& x)
         {
             if (y.test(i))
             {
-                if (!first)
-                    ss << (use_negative ? " - " : " + ");
-                else if (use_negative)
-                    ss << "-";
+                // add operand in front of term
+                if (use_gridsynth_format)
+                {
+                    if (!first)
+                        ss << " + ";
+                }
+                else
+                {
+                    if (!first)
+                        ss << (use_negative ? " - " : " + ");
+                    else if (use_negative)
+                        ss << "-";
+                }
+
+                // need parentheses for gridsynth format:
+                if (use_gridsynth_format)
+                {
+                    ss << "(";
+                    if (use_negative)
+                        ss << "-";
+                }
 
                 ss << "pi";
                 if (i < FPA_TYPE<W>::NUM_BITS-1)
@@ -191,6 +242,10 @@ to_string(const FPA_TYPE<W>& x)
                     else
                         ss << "/2^" << exp;
                 }
+
+                if (use_gridsynth_format)
+                    ss << ")";
+
                 first = false;
             }
         }

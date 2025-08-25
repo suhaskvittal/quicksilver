@@ -9,6 +9,9 @@
 #include "oq2/lexer_wrapper.h"
 #include "parser.tab.h"
 
+#include <cstdio>
+#include <deque>
+#include <initializer_list>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -17,6 +20,8 @@
 // have invalid measurement syntax
 #define DROP_MEASUREMENT_GATES
 #define ALLOW_GATE_DECL_OVERRIDES
+
+//#define PROGRAM_INFO_VERBOSE
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -116,6 +121,10 @@ using namespace prog;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+PROGRAM_INFO::PROGRAM_INFO(ssize_t urot_precision)
+    :urot_precision_(urot_precision)
+{}
 
 PROGRAM_INFO
 PROGRAM_INFO::from_file(std::string filename)
@@ -273,14 +282,13 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
                 }
 
                 // create and push the instruction:
-                INSTRUCTION inst{ip_, inst_type, qubits, rotation, urotseq.begin(), urotseq.end()};
+                INSTRUCTION inst{inst_type, qubits, rotation, urotseq.begin(), urotseq.end()};
 
 #if defined(PROGRAM_INFO_VERBOSE)
                 std::cout << "\t\t( " << i << " ) " << inst << "\n";
 #endif
 
                 instructions_.push_back(inst);
-                ip_++;
             }
         }
         else
@@ -290,14 +298,13 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
             std::transform(qasm_inst.args.begin(), qasm_inst.args.end(), qubits.begin(), 
                         [this] (const auto& x) { return this->get_qubit_id_from_operand(x); });
 
-            INSTRUCTION inst{ip_, inst_type, qubits, rotation, urotseq.begin(), urotseq.end()};
+            INSTRUCTION inst{inst_type, qubits, rotation, urotseq.begin(), urotseq.end()};
 
 #if defined(PROGRAM_INFO_VERBOSE)
             std::cout << "\tevaluated as: " << inst << "\n";
 #endif
 
             instructions_.push_back(inst);
-            ip_++;
         }
     }
     else
@@ -406,11 +413,6 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
     user_defined_gates_.merge(std::move(other.user_defined_gates_));
 
     // merge instructions: 
-    // first, we need to update the instruction pointers for each instruction in `other`
-    for (auto& inst : other.instructions_)
-        inst.ip += ip_;
-
-    // now we can extend `instructions_`
     instructions_.reserve(instructions_.size() + other.instructions_.size());
     std::move(std::make_move_iterator(other.instructions_.begin()),
               std::make_move_iterator(other.instructions_.end()), std::back_inserter(instructions_));
@@ -506,7 +508,6 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
     //                    
     // Note that there is a common pattern: CX RZ(x) CX RZ(x) -- if x = 0, then we have removed,
     // the RZs, so we now have CX CX, which can be removed. So we first optimize for this:
-    std::vector<bool> bitvec_rmv(instructions_.size(), false);
 
     auto inv_map = _make_inverse_map();
 
@@ -524,8 +525,8 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
                 auto angle_sum = fpa::add(curr_inst.angle, prev_inst.angle);
                 if (angle_sum.popcount() == 0)
                 {
-                    bitvec_rmv[i-1] = true;
-                    bitvec_rmv[i] = true;
+                    prev_inst.type = INSTRUCTION::TYPE::NIL;
+                    curr_inst.type = INSTRUCTION::TYPE::NIL;
                     i += 2;  // since `instructions_[i]` was removed, jump 2 instructions ahead
                     continue;
                 }
@@ -542,8 +543,8 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
 
             if (same)
             {
-                bitvec_rmv[i-1] = true;
-                bitvec_rmv[i] = true;
+                prev_inst.type = INSTRUCTION::TYPE::NIL;
+                curr_inst.type = INSTRUCTION::TYPE::NIL;
                 i += 2;  // since `instructions_[i]` was removed, jump 2 instructions ahead
                 continue;
             }
@@ -551,9 +552,8 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
         i++;
     }
 
-    i = 0;
     it = std::remove_if(instructions_.begin(), instructions_.end(),
-                    [&i, &bitvec_rmv] (const auto& inst) { return bitvec_rmv[i++]; });
+                    [] (const auto& inst) { return inst.type == INSTRUCTION::TYPE::NIL; });
     instructions_.erase(it, instructions_.end());
 
     size_t removed_this_pass = num_gates_before_opt - instructions_.size();
@@ -569,7 +569,7 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
 template <class T> double
 _mean(T x, T y)
 {
-    return double{x} / double{y};
+    return static_cast<double>(x) / static_cast<double>(y);
 }
 
 PROGRAM_INFO::stats_type
@@ -615,6 +615,10 @@ PROGRAM_INFO::analyze_program() const
                                                                 uint64_t{inst->urotseq.size()});
                     tot_rotation_unrolled_count += inst->urotseq.size();
                 }
+                else
+                {
+                    out.unrolled_inst_count++;
+                }
 
                 conc_rotations += is_rot;
                 conc_cxz += is_cxz;
@@ -624,7 +628,7 @@ PROGRAM_INFO::analyze_program() const
             tot_conc_rotations += conc_rotations;
             tot_conc_cxz += conc_cxz;
 
-            out.max_instruction_level_parallelism = std::max(out.max_instruction_level_parallelism, layer.size());
+            out.max_instruction_level_parallelism = std::max(out.max_instruction_level_parallelism, uint64_t{layer.size()});
             out.max_concurrent_rotation_count = std::max(out.max_concurrent_rotation_count, conc_rotations);
             out.max_concurrent_cxz_count = std::max(out.max_concurrent_cxz_count, conc_cxz);
 
@@ -643,10 +647,223 @@ PROGRAM_INFO::analyze_program() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+// declared some constexpr `INSTRUCTION::TYPE`s to make the code more readable:
+constexpr static INSTRUCTION::TYPE H = INSTRUCTION::TYPE::H;
+constexpr static INSTRUCTION::TYPE X = INSTRUCTION::TYPE::X;
+constexpr static INSTRUCTION::TYPE Z = INSTRUCTION::TYPE::Z;
+constexpr static INSTRUCTION::TYPE S = INSTRUCTION::TYPE::S;
+constexpr static INSTRUCTION::TYPE SDG = INSTRUCTION::TYPE::SDG;
+constexpr static INSTRUCTION::TYPE T = INSTRUCTION::TYPE::T;
+constexpr static INSTRUCTION::TYPE TDG = INSTRUCTION::TYPE::TDG;
+constexpr static INSTRUCTION::TYPE SX = INSTRUCTION::TYPE::SX;
+constexpr static INSTRUCTION::TYPE SXDG = INSTRUCTION::TYPE::SXDG;
+constexpr static INSTRUCTION::TYPE TX = INSTRUCTION::TYPE::TX;
+constexpr static INSTRUCTION::TYPE TXDG = INSTRUCTION::TYPE::TXDG;
+
+template <class ITERABLE> std::string
+_urotseq_to_string(ITERABLE iterable)
+{
+    std::stringstream strm;
+    bool first{true};
+    for (auto x : iterable)
+    {
+        if (!first)
+            strm << "'";
+        first = false;
+        std::string_view sx = BASIS_GATES[static_cast<size_t>(x)];
+        strm << sx;
+    }
+    return strm.str();
+}
+
+void
+_replace_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq, 
+                        std::initializer_list<INSTRUCTION::TYPE> subseq, 
+                        INSTRUCTION::TYPE replacement)
+{
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "\t\turotseq: " << _urotseq_to_string(urotseq)
+                    << ", replace: " << _urotseq_to_string(subseq)
+                    << " -> " << BASIS_GATES[static_cast<size_t>(replacement)] << "\n";
+#endif
+
+    size_t width = subseq.size();
+    std::deque<INSTRUCTION::TYPE> buf;
+    for (size_t i = 0; i < urotseq.size(); i++)
+    {
+        if (buf.size() == width)
+            buf.pop_front();
+        buf.push_back(urotseq[i]);
+
+        bool match = buf.size() == width && std::equal(buf.begin(), buf.end(), subseq.begin());
+        if (match)
+        {
+            // set `i-width+1` to `replacement
+            urotseq[i-width+1] = replacement;
+            // delete `i-width+2` through `i`
+            for (size_t j = i-width+2; j <= i; j++)
+                urotseq[j] = INSTRUCTION::TYPE::NIL;
+            buf.clear();
+        }
+    }
+
+    // finally, remove any `NIL` gates:
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(),
+                        [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    urotseq.erase(it, urotseq.end());
+}
+
+void
+_flip_h_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq)
+{
+    // find the largest such subsequence sandwiched by `H` and replace those gates with the X/Z rotation alternative
+    std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE> xz_map
+    {
+        {X, Z}, {Z, X},
+        {S, SX}, {SX, S},
+        {SDG, SXDG}, {SXDG, SDG},
+        {T, TX}, {TX, T},
+        {TXDG, TDG}, {TDG, TXDG}
+    };
+
+    // find the first two H gates:
+    auto h_max_begin = std::find(urotseq.begin(), urotseq.end(), H);
+    if (h_max_begin == urotseq.end())
+        return;
+
+    auto h_max_end = std::find(h_max_begin+1, urotseq.end(), H);
+    if (h_max_end == urotseq.end())
+        return;
+
+    size_t max_len = std::distance(h_max_begin, h_max_end);
+
+    // now search for a better subsequence:
+    auto h_begin = std::find(h_max_end+1, urotseq.end(), H);
+    while (h_begin != urotseq.end())
+    {
+        auto h_end = std::find(h_begin+1, urotseq.end(), H);
+        if (h_end == urotseq.end())
+            break;
+
+        size_t len = std::distance(h_begin, h_end);
+        if (len > max_len)
+        {
+            max_len = len;
+            h_max_begin = h_begin;
+            h_max_end = h_end;
+        }
+
+        // recompute `h_begin` and try again:
+        h_begin = std::find(h_end+1, urotseq.end(), H);
+    }
+
+    // now, we should have the best subsequence: flip all gates in between:
+    for (auto it = h_max_begin+1; it != h_max_end; it++)
+        *it = xz_map[*it];
+
+    // set the H gates to nil and remove them:
+    *h_max_begin = INSTRUCTION::TYPE::NIL;
+    *h_max_end = INSTRUCTION::TYPE::NIL;
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    urotseq.erase(it, urotseq.end());
+
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "\t\turotseq: " << _urotseq_to_string(urotseq) << "\n";
+#endif
+}
+
+std::vector<INSTRUCTION::TYPE>
+_gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
+{
+    std::stringstream cli_strm;
+    // determine the CLI arguments for gridsynth:
+    constexpr size_t ROTW = PROGRAM_INFO::fpa_type::NUM_BITS;
+    size_t precision = urot_precision == PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION
+                        ? ROTW - rotation.join_word_and_bit_idx(rotation.msb()) + 8
+                        : urot_precision;
+
+    cli_strm << "gridsynth -b " << precision << " -p \"" << fpa::to_string(rotation, true) << "\"";
+    std::string cmd = cli_strm.str();
+    
+    std::vector<INSTRUCTION::TYPE> out{};
+    out.reserve(2*precision);
+
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`"
+            << "\n\t\tgridsynth output: ";
+#endif
+    
+    // run gridsynth and read its output:
+    FILE* gs = popen(cmd.c_str(), "r");
+    char c;
+    while ((c=fgetc(gs)) != EOF)
+    {
+#if defined(PROGRAM_INFO_VERBOSE)
+        std::cout << c;
+#endif
+        if (c == 'H')
+            out.push_back(H);
+        else if (c == 'T')
+            out.push_back(T);
+        else if (c == 'X')
+            out.push_back(X);
+        else if (c == 'Z')
+            out.push_back(Z);
+        else if (c == 'S')
+            out.push_back(S);
+    }
+
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "\n";
+#endif
+
+    pclose(gs);
+
+    // now we need to coalesce gates inplace:
+
+    [[maybe_unused]] size_t urotseq_original_size = out.size();
+
+    // first, convert all SS -> Z
+    _replace_subsequence(out, {S, S}, Z);
+    // then, convert all SZ and ZS -> SDG
+    _replace_subsequence(out, {S, Z}, SDG);
+    _replace_subsequence(out, {Z, S}, SDG);
+    // then, convert all T*SDG and SDG*T -> TDG
+    _replace_subsequence(out, {T, SDG}, TDG);
+    _replace_subsequence(out, {SDG, T}, TDG);
+    // then, convert all H*S*H -> S and H*SDG*H -> SXDG
+    _replace_subsequence(out, {H, S, H}, S);
+    _replace_subsequence(out, {H, SDG, H}, SXDG);
+    // then, convert all H*TX*H -> TX and H*TXDG*H -> TXDG
+    _replace_subsequence(out, {H, T, H}, TX);
+    _replace_subsequence(out, {H, TDG, H}, TXDG);
+
+    // finally, flip any subsequences sandwiched by `H` gates:
+    size_t h_count = std::count(out.begin(), out.end(), H);
+    while (h_count > 1)
+    {
+        _flip_h_subsequence(out);
+        h_count -= 2;
+    }
+    [[maybe_unused]] size_t urotseq_reduced_size = out.size();
+
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
+#endif
+
+    return out;
+}
+
 std::vector<INSTRUCTION::TYPE>
 PROGRAM_INFO::unroll_rotation(fpa_type rotation)
 {
-    return {};
+    auto it = rotation_cache_.find(rotation);
+    if (it != rotation_cache_.end())
+        return it->second;
+
+    std::vector<INSTRUCTION::TYPE> out = _gs_cli_call(rotation, urot_precision_);
+    rotation_cache_.insert({rotation, out});
+    return out;
 }
 
 ////////////////////////////////////////////////////////////

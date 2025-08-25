@@ -55,9 +55,12 @@ public:
     index_pair msb() const;   // returns {-1, -1} if all bits are 0
     index_pair lsb() const;   // returns {-1, -1} if all bits are 0
 
-    std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
-
     std::string to_hex_string() const;
+
+    bool operator==(const FIXED_POINT&) const;
+    bool operator!=(const FIXED_POINT&) const;
+
+    std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
 };
 
 ////////////////////////////////////////////////////////////

@@ -8,11 +8,36 @@
 
 #include "instruction.h"
 
+#include <memory>
+#include <numeric>
 #include <string>
 #include <unordered_map>
-#include <memory>
 #include <variant>
 #include <vector>
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+// Implementation of `std::hash` for `fpa_type`
+namespace std
+{
+
+template <>
+struct hash<INSTRUCTION::fpa_type>
+{
+    using value_type = INSTRUCTION::fpa_type;
+
+    size_t
+    operator()(const value_type& x) const 
+    { 
+        const auto& words = x.get_words();
+        uint64_t out = std::reduce(words.begin(), words.end(), uint64_t{0},
+                            [] (uint64_t acc, uint64_t word) { return acc ^ word; });
+        return out;
+    }
+};
+
+}   // namespace std
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -79,12 +104,12 @@ struct GATE_DEFINITION
 class PROGRAM_INFO
 {
 public:
-    constexpr static size_t FPA_PRECISION = INSTRUCTION::FPA_PRECISION;
-
-    using fpa_type = FPA_TYPE<FPA_PRECISION>;
+    using fpa_type = INSTRUCTION::fpa_type;
 
     using register_table = std::unordered_map<std::string, prog::REGISTER>;
     using gate_decl_table = std::unordered_map<std::string, prog::GATE_DEFINITION>;
+
+    using rotation_cache_type = std::unordered_map<fpa_type, std::vector<INSTRUCTION::TYPE>>;
 
     struct stats_type
     {
@@ -112,6 +137,8 @@ public:
         uint64_t max_rotation_unrolled_count{0};
     };
 
+    constexpr static ssize_t USE_MSB_TO_DETERMINE_UROT_PRECISION{-1};
+
     std::string version_;
 private:
     register_table  registers_;
@@ -119,14 +146,16 @@ private:
 
     std::vector<INSTRUCTION> instructions_;
 
-    uint64_t ip_{0};
+    rotation_cache_type rotation_cache_{};
+
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
+
+    ssize_t urot_precision_{USE_MSB_TO_DETERMINE_UROT_PRECISION};
 public:
-    PROGRAM_INFO() =default;
+    PROGRAM_INFO(ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
     static PROGRAM_INFO from_file(std::string);
-
     /*
         These are the public member functions that are used to build the program from the Bison parser.
     */
@@ -134,7 +163,6 @@ public:
     void declare_register(prog::REGISTER&&);
     void declare_gate(prog::GATE_DEFINITION&&);
     void merge(PROGRAM_INFO&&);
-
     /*
         Basic optimizations:
     */
@@ -143,7 +171,7 @@ public:
     stats_type analyze_program() const;
 
     const std::vector<INSTRUCTION>& get_instructions() const { return instructions_; }
-private:
+
     qubit_type get_qubit_id_from_operand(const prog::QASM_INST_INFO::operand_type&) const;
 
     /*

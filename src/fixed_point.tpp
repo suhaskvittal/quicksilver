@@ -221,5 +221,20 @@ TEMPL_CLASS::to_hex_string() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TEMPL_PARAMS bool
+TEMPL_CLASS::operator==(const TEMPL_CLASS& other) const
+{
+    return std::equal(backing_array_.begin(), backing_array_.end(), other.backing_array_.begin());
+}
+
+TEMPL_PARAMS bool
+TEMPL_CLASS::operator!=(const TEMPL_CLASS& other) const
+{
+    return !(*this == other);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 #undef TEMPL_PARAMS
 #undef TEMPL_CLASS

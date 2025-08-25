@@ -25,12 +25,14 @@ namespace fpa
 template <size_t W> void negate_inplace(FPA_TYPE<W>&);
 template <size_t W> void add_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
 template <size_t W> void sub_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
+template <size_t W> void scalar_mul_inplace(FPA_TYPE<W>&, int64_t);
 
 template <size_t W> FPA_TYPE<W> negate(FPA_TYPE<W>);
 template <size_t W> FPA_TYPE<W> add(FPA_TYPE<W>, FPA_TYPE<W>);
 template <size_t W> FPA_TYPE<W> sub(FPA_TYPE<W>, FPA_TYPE<W>);
+template <size_t W> FPA_TYPE<W> scalar_mul(FPA_TYPE<W>, int64_t);
 
-template <size_t W> std::string to_string(const FPA_TYPE<W>&);
+template <size_t W> std::string to_string(const FPA_TYPE<W>&, bool use_gridsynth_format=false);
 
 } // namespace fpa
 
