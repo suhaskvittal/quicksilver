@@ -27,6 +27,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Find required packages
 find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # compile bison/flex files:
 flex_target(OQ2Lexer 
@@ -52,13 +53,15 @@ set(BINARY_GEN_FILES
     src/program/expression.cpp)
 
 # bison/flex testing executable:
-add_executable(oq2bf main/oq2.cpp ${BINARY_GEN_FILES})
+add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
 
 # need to add flex headers manually on macos
 if (UNIX AND APPLE)
-    target_include_directories(oq2bf PRIVATE "/opt/homebrew/opt/flex/include")
+    target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
 endif()
 
-target_include_directories(oq2bf PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR})
-target_compile_options(oq2bf PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(oq2bf PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR})
+target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+
+target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)

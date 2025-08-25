@@ -1,0 +1,12 @@
+TOTAL_GATE_COUNT                                                      515683
+SOFTWARE_GATE_COUNT                                                   191243
+T_GATE_COUNT                                                           19200
+CXZ_GATE_COUNT                                                         92420
+ROTATION_COUNT                                                           800
+CCXZ_COUNT                                                            173620
+VIRTUAL_INSTRUCTION_COUNT                                             515683
+UNROLLED_INSTRUCTION_COUNT                                                 0
+MEAN_INSTRUCTION_LEVEL_PARALLELISM                                1.63561943
+MEAN_CONCURRENT_ROTATION_COUNT                                    0.00253740
+MEAN_CONCURRENT_CXZ_COUNT                                         0.29313347
+MEAN_ROTATION_UNROLLED_COUNT                                      0.00000000

@@ -566,6 +566,83 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+template <class T> double
+_mean(T x, T y)
+{
+    return double{x} / double{y};
+}
+
+PROGRAM_INFO::stats_type
+PROGRAM_INFO::analyze_program() const
+{
+    stats_type out{};
+
+    uint64_t tot_inst_per_layer{0};
+    uint64_t tot_conc_rotations{0};
+    uint64_t tot_conc_cxz{0};
+    uint64_t tot_rotation_unrolled_count{0};
+    uint64_t num_layers{0};
+
+    // first, we need to reorganize the instructions into layers:
+    iterate_through_instructions_by_layer(
+        [&out, &tot_inst_per_layer, &tot_conc_rotations, &tot_conc_cxz, &num_layers, &tot_rotation_unrolled_count] 
+        (size_t layer_id, std::vector<const INSTRUCTION*> layer)
+        {
+            uint64_t conc_rotations{0};
+            uint64_t conc_cxz{0};
+
+            for (const auto* inst : layer)
+            {
+                bool is_sw_gate = (inst->type == INSTRUCTION::TYPE::X 
+                                    || inst->type == INSTRUCTION::TYPE::Y 
+                                    || inst->type == INSTRUCTION::TYPE::Z);
+                bool is_t_like = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TDG);
+                bool is_cxz = (inst->type == INSTRUCTION::TYPE::CX || inst->type == INSTRUCTION::TYPE::CZ);
+                bool is_rot = (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ);
+                bool is_ccxz = (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
+
+                out.software_gate_count += is_sw_gate;
+                out.t_gate_count += is_t_like;
+                out.cxz_gate_count += is_cxz;
+                out.rotation_count += is_rot;
+                out.ccxz_count += is_ccxz;
+
+                out.virtual_inst_count++;
+                if (is_rot)
+                {
+                    out.unrolled_inst_count += inst->urotseq.size();
+                    out.max_rotation_unrolled_count = std::max(out.max_rotation_unrolled_count, 
+                                                                uint64_t{inst->urotseq.size()});
+                    tot_rotation_unrolled_count += inst->urotseq.size();
+                }
+
+                conc_rotations += is_rot;
+                conc_cxz += is_cxz;
+            }
+
+            tot_inst_per_layer += layer.size();
+            tot_conc_rotations += conc_rotations;
+            tot_conc_cxz += conc_cxz;
+
+            out.max_instruction_level_parallelism = std::max(out.max_instruction_level_parallelism, layer.size());
+            out.max_concurrent_rotation_count = std::max(out.max_concurrent_rotation_count, conc_rotations);
+            out.max_concurrent_cxz_count = std::max(out.max_concurrent_cxz_count, conc_cxz);
+
+            num_layers++;
+        }
+    );
+
+    out.mean_instruction_level_parallelism = _mean(tot_inst_per_layer, num_layers);
+    out.mean_concurrent_rotation_count = _mean(tot_conc_rotations, num_layers);
+    out.mean_concurrent_cxz_count = _mean(tot_conc_cxz, num_layers);
+    out.mean_rotation_unrolled_count = _mean(tot_rotation_unrolled_count, out.rotation_count);
+
+    return out;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 std::vector<INSTRUCTION::TYPE>
 PROGRAM_INFO::unroll_rotation(fpa_type rotation)
 {

@@ -109,17 +109,17 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 template <class RW_FUNC> void
 INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
 {
-    rwf(&ip, sizeof(ip));
-    rwf(&type_id, sizeof(type_id));
-    rwf(qubits, sizeof(qubits));
+    rwf((void*)&ip, sizeof(ip));
+    rwf((void*)&type_id, sizeof(type_id));
+    rwf((void*)qubits, sizeof(qubits));
 
     // fixed point angle:
-    rwf(&fpa_word_count, sizeof(fpa_word_count));
-    rwf(angle, fpa_word_count * sizeof(fpa_type::word_type));
+    rwf((void*)&fpa_word_count, sizeof(fpa_word_count));
+    rwf((void*)angle, fpa_word_count * sizeof(fpa_type::word_type));
 
     // unrolled rotation sequence:
-    rwf(&urotseq_size, sizeof(urotseq_size));
-    rwf(urotseq, urotseq_size * sizeof(gate_id_type));
+    rwf((void*)&urotseq_size, sizeof(urotseq_size));
+    rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
 }
 
 template <class ITER_TYPE>
