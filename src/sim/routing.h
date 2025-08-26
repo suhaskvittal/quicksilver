@@ -31,9 +31,9 @@ struct ROUTING_BASE
 
     using ptr_type = std::shared_ptr<ROUTING_BASE>;
 
-    bool                  occupied{false};
     TYPE                  type;
     std::vector<ptr_type> connections;
+    uint64_t              t_free{0};
 };
 
 std::vector<ROUTING_BASE::ptr_type> route_path_from_src_to_dst(ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type);

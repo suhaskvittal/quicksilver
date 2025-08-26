@@ -77,6 +77,7 @@ int main(int argc, char* argv[])
         std::ofstream stats_out(stats_output_file);
         print_stats(stats_out, num_gates_post_opt, prog.analyze_program());
     }
+    const uint32_t num_qubits = static_cast<uint32_t>(prog.get_num_qubits());
 
     // write binary file:
     bool is_gz_file = output_file.find(".gz") != std::string::npos;
@@ -84,6 +85,9 @@ int main(int argc, char* argv[])
     if (is_gz_file)
     {
         gzFile gzstrm = gzopen(output_file.c_str(), "wb");
+        
+        gzwrite(gzstrm, &num_qubits, 4);
+
         auto write_func = [&gzstrm] (const void* data, size_t size) { gzwrite(gzstrm, data, size); };
         for (const auto& inst : prog.get_instructions())
         {
@@ -95,6 +99,9 @@ int main(int argc, char* argv[])
     else
     {
         std::ofstream strm(output_file, std::ios::binary);
+
+        strm.write(reinterpret_cast<const char*>(&num_qubits), 4);
+         
         auto write_func = [&strm] (const void* data, size_t size) { strm.write(static_cast<const char*>(data), size); };
         for (const auto& inst : prog.get_instructions())
         {

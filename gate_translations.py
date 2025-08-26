@@ -13,7 +13,6 @@ BASIS_GATES = [
     "t", "tdg", 
     "rx", "rz", 
     "cx", "cz", 
-    "ccx", "ccz", 
     "measure"]
 
 def translate(circ: QuantumCircuit) -> QuantumCircuit:
@@ -70,3 +69,6 @@ show_gate_xla(RZZGate, 1, 2, "RZZ")
 show_gate_xla(RZXGate, 1, 2, "RZX")
 show_gate_xla(RYYGate, 1, 2, "RYY")
 show_gate_xla(RXXGate, 1, 2, "RXX")
+
+show_gate_xla(CCXGate, 0, 3, "CCX")
+show_gate_xla(CCZGate, 0, 3, "CCZ")

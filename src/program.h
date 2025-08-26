@@ -171,7 +171,8 @@ public:
     stats_type analyze_program() const;
 
     const std::vector<INSTRUCTION>& get_instructions() const { return instructions_; }
-
+    size_t get_num_qubits() const { return num_qubits_declared_; }
+private:
     qubit_type get_qubit_id_from_operand(const prog::QASM_INST_INFO::operand_type&) const;
 
     /*

@@ -52,7 +52,14 @@ set(BINARY_GEN_FILES
     src/program.cpp
     src/program/expression.cpp)
 
-# bison/flex testing executable:
+set(SIM_FILES
+    instruction.cpp
+    sim.cpp
+    src/client.cpp
+    src/magic_state.cpp
+    src/routing.cpp)
+
+# binary generation executable:
 add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
 
 # need to add flex headers manually on macos
@@ -65,3 +72,12 @@ target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
 
 target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
+
+# simulator:
+add_executable(qs_sim main/qs_sim.cpp ${SIM_FILES})
+
+target_include_directories(qs_sim PRIVATE "src")
+target_compile_options(qs_sim PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_sim PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+
+target_link_libraries(qs_sim PRIVATE ZLIB::ZLIB)

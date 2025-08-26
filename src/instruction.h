@@ -71,17 +71,25 @@ struct INSTRUCTION
 
     TYPE type;
     
-    // depending on the type, not all arguments are used:
     std::vector<qubit_type> qubits;   // used by all quantum gates
     fpa_type                angle{};
     std::vector<TYPE>       urotseq{}; // "unrolled rotation sequence" of Clifford+T gates that implement `angle`
-    
-    // statistics (only for simulation):
+    /*
+        Statistics (only for simulation):
+    */
     uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
     uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
+    /*
+        Simulation variables:
+    */
+    bool     is_running{false};
+    uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
 
-    // simulation variables:
-    uint64_t cycles_until_done{0};
+    // gates like RZ/RX require multiple sub-operations to complete, so `uop_completed` 
+    // is used to track the progress of the instruction.
+    INSTRUCTION* curr_uop{nullptr};
+    size_t   uop_completed{0};
+    size_t   num_uops{0};
 
     INSTRUCTION(TYPE, std::vector<qubit_type>);
     INSTRUCTION(io_encoding);
