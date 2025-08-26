@@ -9,9 +9,10 @@
 #include "instruction.h"
 #include "sim/meminfo.h"
 
+#include <cstdio>
 #include <cstdint>
+#include <deque>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 #include <zlib.h>
@@ -26,7 +27,6 @@ struct CLIENT
 {
     using inst_ptr = INSTRUCTION*;
     using inst_window_type = std::deque<inst_ptr>;
-    using strm_variant_type = std::variant<std::ifstream, gzFile>;
 
     enum class TRACE_FILE_TYPE { BINARY, GZ };
 
@@ -38,6 +38,7 @@ struct CLIENT
 
     uint64_t s_inst_read{0};
     uint64_t s_inst_done{0};
+    uint64_t s_unrolled_inst_done{0};
     uint64_t s_cycles_stalled{0};
     uint64_t s_cycles_stalled_by_mem{0};
     uint64_t s_cycles_stalled_by_routing{0};
@@ -47,12 +48,15 @@ struct CLIENT
 
     std::string       trace_file;
     TRACE_FILE_TYPE   trace_file_type;
-    strm_variant_type trace_istrm;
-
+    FILE*             trace_bin_istrm;
+    gzFile            trace_gz_istrm;
+    
     CLIENT(std::string trace_file);
     ~CLIENT();
 
     INSTRUCTION read_instruction_from_trace();
+    bool eof() const;
+    size_t open_file(const std::string& trace_file);  // returns number of qubits
 };
 
 ////////////////////////////////////////////////////////////

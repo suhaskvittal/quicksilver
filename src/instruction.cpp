@@ -7,6 +7,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #define INSTRUCTION_ALSO_SHOW_ROTATION_AS_FLOAT
 
@@ -32,7 +33,8 @@ INSTRUCTION::io_encoding::io_encoding(const INSTRUCTION* inst)
 
 INSTRUCTION::io_encoding::~io_encoding()
 {
-    delete[] urotseq;
+    if (urotseq_size > 0)
+        delete[] urotseq;
 }
 
 ////////////////////////////////////////////////////////////
@@ -43,12 +45,16 @@ INSTRUCTION::INSTRUCTION(TYPE _type, std::vector<qubit_type> _qubits)
     qubits(_qubits)
 {}
 
-INSTRUCTION::INSTRUCTION(io_encoding e)
+INSTRUCTION::INSTRUCTION(io_encoding&& e)
     :type{static_cast<TYPE>(e.type_id)},
-    qubits(std::begin(e.qubits), std::end(e.qubits)),
     angle(std::begin(e.angle), std::end(e.angle)),
     urotseq(e.urotseq_size)
 {
+    auto q_begin = std::begin(e.qubits);
+    auto q_end = std::end(e.qubits);
+    auto it = std::find(q_begin, q_end, -1);
+    qubits = std::vector<qubit_type>(q_begin, it);
+
     std::transform(e.urotseq, e.urotseq + e.urotseq_size, urotseq.begin(),
                        [] (auto t) { return static_cast<TYPE>(t); });
 }
@@ -57,6 +63,14 @@ INSTRUCTION::io_encoding
 INSTRUCTION::serialize() const
 {
     return io_encoding(this);
+}
+
+std::string
+INSTRUCTION::to_string() const
+{
+    std::stringstream ss;
+    ss << *this;
+    return ss.str();
 }
 
 ////////////////////////////////////////////////////////////

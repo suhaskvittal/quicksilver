@@ -5,6 +5,12 @@
 
 #include "routing.h"
 
+#include <algorithm>
+#include <iostream>
+#include <unordered_map>
+
+extern uint64_t GL_CYCLE;
+
 namespace sim
 {
 
@@ -17,6 +23,7 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
     // run dfs to compute the path:
     std::vector<ROUTING_BASE::ptr_type> dfs{src};
     std::unordered_map<ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type> prev;
+    prev[src] = src;
 
     while (dfs.size() > 0)
     {
@@ -34,7 +41,7 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
         // traverse to `connections`
         for (auto& conn : curr->connections)
         {
-            if (conn->occupied)
+            if (conn->t_free > GL_CYCLE)
                 continue;
             dfs.push_back(conn);
             prev[conn] = curr;
@@ -50,7 +57,7 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
     {
         path.push_back(dst);
 
-        auto& curr = *it;
+        auto& curr = it->second;
         while (curr != src)
         {
             path.push_back(curr);
@@ -61,6 +68,17 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
         std::reverse(path.begin(), path.end());
     }
     return path;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::ostream& 
+operator<<(std::ostream& os, const ROUTING_BASE& r)
+{
+    constexpr std::string_view TYPE_STRING[] = { "b", "j" };
+    os << "ROUTING_BASE(" << TYPE_STRING[static_cast<size_t>(r.type)] << r.id << ")";
+    return os;
 }
 
 ////////////////////////////////////////////////////////////

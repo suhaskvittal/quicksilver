@@ -7,10 +7,29 @@
 
 #include <random>
 
+uint64_t     GL_CYCLE{0};
 std::mt19937 GL_RNG{0};
 
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
+
+static std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
+
+//#define QS_SIM_DEBUG
+
+constexpr uint64_t QS_SIM_DEBUG_CYCLE_INTERVAL = 1;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+_is_software_instruction(INSTRUCTION::TYPE type)
+{
+    return type == INSTRUCTION::TYPE::X 
+        || type == INSTRUCTION::TYPE::Y
+        || type == INSTRUCTION::TYPE::Z
+        || type == INSTRUCTION::TYPE::SWAP;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -38,21 +57,45 @@ _acc_fact_count(const std::vector<size_t>& num_factories_by_level)
 }
 
 SIM::SIM(CONFIG cfg)
-    :clients_(cfg.client_trace_files.size()),
-    compute_((cfg.num_rows+1) * cfg.patches_per_row),
+    :compute_((cfg.num_rows+1) * cfg.patches_per_row),
     inst_warmup_(cfg.inst_warmup),
     inst_sim_(cfg.inst_sim),
     compute_speed_khz_(1.0 / (cfg.compute_syndrome_extraction_time_ns * cfg.compute_rounds_per_cycle)),
-    required_msfact_level_(cfg.num_15to1_factories_by_level.size() - 1)
+    target_t_fact_level_(cfg.num_15to1_factories_by_level.size() - 1)
 {
     // initialize the magic state factories:
     init_t_state_factories(cfg);
 
     // initialize routing space:
-    init_routing_space(cfg);
+    auto [junctions, buses] = init_routing_space(cfg);
 
     // initialize the compute memory:
-    init_compute(cfg);
+    init_compute(cfg, junctions, buses);
+
+    // finally, initialize the clients: we need to assign each client's qubits to patches
+    size_t total_qubits_required = std::transform_reduce(clients_.begin(), clients_.end(), 
+                                            size_t{0}, 
+                                            std::plus<size_t>{},
+                                            [] (const client_ptr& c) { return c->qubits.size(); });
+    size_t avail_patches = compute_.size() - patches_reserved_for_resource_pins_;
+    if (avail_patches < total_qubits_required)
+        throw std::runtime_error("Not enough space to allocate all program qubits");
+
+    size_t patch_idx{patches_reserved_for_resource_pins_};
+    clients_.reserve(cfg.client_trace_files.size());
+    for (size_t i = 0; i < cfg.client_trace_files.size(); i++)
+    {
+        client_ptr c{new sim::CLIENT(cfg.client_trace_files[i])};
+        for (auto& q : c->qubits)
+            q.memloc_info.patch_idx = patch_idx++;
+        clients_.push_back(std::move(c));
+    }
+}
+
+SIM::~SIM()
+{
+    for (auto* f : t_fact_)
+        delete f;
 }
 
 ////////////////////////////////////////////////////////////
@@ -65,15 +108,16 @@ constexpr size_t ROUTING_STALL_IDX{1};
 constexpr size_t RESOURCE_STALL_IDX{2};
 
 std::array<size_t, NUM_STALL_TYPES>
-_count_stall_types(const std::vector<EXEC_RESULT>& exec_results)
+_count_stall_types(const std::vector<SIM::EXEC_RESULT>& exec_results)
 {
+    auto _count = [&exec_results] (SIM::EXEC_RESULT r) 
+                    { 
+                        return std::count_if(exec_results.begin(), exec_results.end(), [r] (SIM::EXEC_RESULT rr) { return rr == r; });
+                    };
     std::array<size_t, NUM_STALL_TYPES> stall_counts{};
-    stall_counts[MEMORY_STALL_IDX] = std::count_if(exec_results.begin(), exec_results.end(),
-                                                   [] (EXEC_RESULT r) { return r == EXEC_RESULT::MEMORY_STALL; });
-    stall_counts[ROUTING_STALL_IDX] = std::count_if(exec_results.begin(), exec_results.end(),
-                                                   [] (EXEC_RESULT r) { return r == EXEC_RESULT::ROUTING_STALL; });
-    stall_counts[RESOURCE_STALL_IDX] = std::count_if(exec_results.begin(), exec_results.end(),
-                                                   [] (EXEC_RESULT r) { return r == EXEC_RESULT::RESOURCE_STALL; });
+    stall_counts[MEMORY_STALL_IDX] = _count(SIM::EXEC_RESULT::MEMORY_STALL);
+    stall_counts[ROUTING_STALL_IDX] = _count(SIM::EXEC_RESULT::ROUTING_STALL);
+    stall_counts[RESOURCE_STALL_IDX] = _count(SIM::EXEC_RESULT::RESOURCE_STALL);
     return stall_counts;
 }
 
@@ -84,29 +128,44 @@ SIM::tick()
     {
         // check if all clients have completed `inst_warmup_` instructions:
         bool all_clients_done_with_warmup = std::all_of(clients_.begin(), clients_.end(),
-                                                    [] (const sim::CLIENT& c) 
+                                                    [w=inst_warmup_] (const client_ptr& c) 
                                                     { 
-                                                        return c.s_inst_done >= inst_warmup_;
+                                                        return c->s_inst_done >= w;
                                                     });
         if (all_clients_done_with_warmup)
         {
             warmup_ = false;
             // reset their stats:
-            for (sim::CLIENT& c : clients_)
+            for (const client_ptr& c : clients_)
             {
-                c.s_inst_done = 0;
-                c.s_cycles_stalled = 0;
-                c.s_cycles_stalled_by_mem = 0;
-                c.s_cycles_stalled_by_routing = 0;
-                c.s_cycles_stalled_by_resource = 0;
+                c->s_inst_done = 0;
+                c->s_unrolled_inst_done = 0;
+                c->s_cycles_stalled = 0;
+                c->s_cycles_stalled_by_mem = 0;
+                c->s_cycles_stalled_by_routing = 0;
+                c->s_cycles_stalled_by_resource = 0;
             }
+            std::cout << "warmup done\n";
         }
     }
+#if defined(QS_SIM_DEBUG)
+    if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+    {
+        std::cout << "-----------------------------------\n";
+        std::cout << "GL_CYCLE = " << GL_CYCLE << "\n";
+    }
+#endif
 
     // tick each client:
-    for (sim::CLIENT& c : clients_)
+    for (size_t i = 0; i < clients_.size(); i++)
     {
+        client_ptr& c = clients_[i];
         exec_results_.clear();
+
+#if defined(QS_SIM_DEBUG)
+        if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+            std::cout << "CLIENT " << i << " (trace = " << c->trace_file << ", #qubits = " << c->qubits.size() << ")\n";
+#endif
 
         // 1. retire any instructions at the head of a window,
         //    or update the number of cycles until done
@@ -127,10 +186,10 @@ SIM::tick()
         if (!any_success)
         {
             auto stall_counts = _count_stall_types(exec_results_);
-            c.s_cycles_stalled++;
-            c.s_cycles_stalled_by_mem += (stall_counts[MEMORY_STALL_IDX] > 0);
-            c.s_cycles_stalled_by_routing += (stall_counts[ROUTING_STALL_IDX] > 0);
-            c.s_cycles_stalled_by_resource += (stall_counts[RESOURCE_STALL_IDX] > 0);
+            c->s_cycles_stalled++;
+            c->s_cycles_stalled_by_mem += (stall_counts[MEMORY_STALL_IDX] > 0);
+            c->s_cycles_stalled_by_routing += (stall_counts[ROUTING_STALL_IDX] > 0);
+            c->s_cycles_stalled_by_resource += (stall_counts[RESOURCE_STALL_IDX] > 0);
         }
     }
 
@@ -141,16 +200,33 @@ SIM::tick()
     for (size_t i = 0; i < t_fact_.size(); i++)
     {
         auto& fact_clk = t_fact_clk_info_[i];
-        sim::T_FACTORY& fact = t_fact_[i];
+        sim::T_FACTORY* fact = t_fact_[i];
 
         if (fact_clk.update_post_cpu_tick())
-            fact.tick();
+        {
+            fact->tick();
+
+#if defined(QS_SIM_DEBUG)
+            if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+            {
+            // print factory state:
+                std::cout << "FACTORY " << i
+                << " (level = " << fact->level 
+                    << "): occu = " << fact->buffer_occu 
+                    << ", step = " << fact->step << "\n";
+            }
+#endif
+        }
     }
 
     // tick the memory (TODO: make the memory system):
 
     done_ = !warmup_ && std::all_of(clients_.begin(), clients_.end(),
-                                    [] (const sim::CLIENT& c) { return c.s_inst_done >= inst_sim_; });
+                                    [s=inst_sim_] (const client_ptr& c) { return c->s_inst_done >= s; });
+    if (done_)
+    {
+        std::cout << "sim done\n";
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -173,16 +249,26 @@ SIM::init_t_state_factories(const CONFIG& cfg)
     {
         for (size_t j = 0; j < cfg.num_15to1_factories_by_level[i]; j++)
         {
-            sim::T_FACTORY f = sim::T_FACTORY::f15to1(i, cfg.t_round_ns, 4, patch_idx);
-            t_fact_.push_back(f);
-            t_fact_clk_info_.push_back(sim::clk_info(compute_speed_khz_, f.freq_khz));
+            sim::T_FACTORY* f = new sim::T_FACTORY
+                                {
+                                    sim::T_FACTORY::f15to1(i, cfg.compute_syndrome_extraction_time_ns, 4, patch_idx)
+                                };
 
-            level_to_fact_ptrs[f.level].push_back(&t_fact_.back());
+            t_fact_.push_back(f);
+            t_fact_clk_info_.push_back(clk_info(compute_speed_khz_, f->freq_khz));
+
+            level_to_fact_ptrs[f->level].push_back(f);
+
+            if (i == target_t_fact_level_)
+            {
+                patches_reserved_for_resource_pins_++;
+                patch_idx++;
+            }
         }
     }
 
     // connect the magic state factories to each other:
-    for (auto& f : t_fact_)
+    for (auto* f : t_fact_)
     {
         if (f->level > 0)
             f->resource_producers = level_to_fact_ptrs[f->level-1];
@@ -192,17 +278,19 @@ SIM::init_t_state_factories(const CONFIG& cfg)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
+SIM::bus_info
 SIM::init_routing_space(const CONFIG& cfg)
 {
     // number of junctions is num_rows + 1
     // number of buses is 2*num_rows + 1
     std::vector<sim::ROUTING_BASE::ptr_type> junctions(cfg.num_rows + 1);
     std::vector<sim::ROUTING_BASE::ptr_type> buses(2*cfg.num_rows + 1);
+    
     for (size_t i = 0; i < junctions.size(); i++)
-        junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{sim::ROUTING_BASE::TYPE::JUNCTION});
+        junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i, sim::ROUTING_BASE::TYPE::JUNCTION});
+
     for (size_t i = 0; i < buses.size(); i++)
-        buses[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{sim::ROUTING_BASE::TYPE::BUS});
+        buses[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i,sim::ROUTING_BASE::TYPE::BUS});
 
     // connect the junctions and buses:
     auto connect_jb = [] (sim::ROUTING_BASE::ptr_type j, sim::ROUTING_BASE::ptr_type b)
@@ -219,22 +307,25 @@ SIM::init_routing_space(const CONFIG& cfg)
     }
     // and the last remaining pair:
     connect_jb(junctions[cfg.num_rows], buses[2*cfg.num_rows]);
+
+    return bus_info{junctions, buses};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-SIM::init_compute(const CONFIG& cfg)
+SIM::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_array& buses)
 {
-    size_t patch_idx{0};
+    size_t patch_idx{patches_reserved_for_resource_pins_};
 
     // First setup the magic state pins:
-    std::vector<sim::T_FACTORY*> top_level_t_fact(cfg.num_15to1_factories_by_level[required_msfact_level_]);
+    std::vector<sim::T_FACTORY*> top_level_t_fact;
+    top_level_t_fact.reserve(cfg.num_15to1_factories_by_level[target_t_fact_level_]);
     for (size_t i = 0; i < t_fact_.size(); i++)
     {
-        if (t_fact_[i].level == required_msfact_level_)
-            top_level_t_fact[i] = &t_fact_[i];
+        if (t_fact_[i]->level == target_t_fact_level_)
+            top_level_t_fact.push_back(t_fact_[i]);
     }
 
     if (top_level_t_fact.size() > cfg.patches_per_row+1)
@@ -242,13 +333,12 @@ SIM::init_compute(const CONFIG& cfg)
 
     for (size_t i = 0; i < top_level_t_fact.size(); i++)
     {
+        auto* fact = top_level_t_fact[i];
         // `i == 0` will connect to a junction immediately
-        top_level_t_fact[i]->output_patch_idx = patch_idx;
         if (i == 0)
-            compute_[patch_idx].buses.push_back(junctions[0]);
+            compute_[fact->output_patch_idx].buses.push_back(junctions[0]);
         else
-            compute_[patch_idx].buses.push_back(buses[0]);
-        patch_idx++;
+            compute_[fact->output_patch_idx].buses.push_back(buses[0]);
     }
 
     // now connect the program memory patches:
@@ -267,6 +357,8 @@ SIM::init_compute(const CONFIG& cfg)
 
             if (is_left)
                 compute_[patch_idx].buses.push_back(buses[2*i+1]);
+
+            patch_idx++;
         }
     }
 }
@@ -276,11 +368,10 @@ SIM::init_compute(const CONFIG& cfg)
 
 // returns true if the instruction is deleted:
 bool
-_update_instruction_and_delete_on_completion(inst_ptr inst)
+_update_instruction_and_check_if_done(SIM::inst_ptr inst)
 {
     if (inst->cycle_done <= GL_CYCLE)
     {
-        delete inst;
         return true;
     }
     else
@@ -291,19 +382,36 @@ _update_instruction_and_delete_on_completion(inst_ptr inst)
 }
 
 void
-_retire_instruction(sim::CLIENT& c, inst_ptr inst)
+_retire_instruction(SIM::client_ptr& c, SIM::inst_ptr inst)
 {
     // update stats:
-    c.s_inst_done++;
+    c->s_inst_done++;
+    if (inst->num_uops > 0)
+        c->s_unrolled_inst_done += inst->num_uops;
+    else
+        c->s_unrolled_inst_done++;
+
+    // remove the instruction from all windows it is in
+    for (qubit_type qid : inst->qubits)
+    {
+        auto& q = c->qubits[qid];
+        if (q.inst_window.front() != inst)
+        {
+            throw std::runtime_error("instruction `" + inst->to_string() 
+                                    + "` is not at the head of qubit " 
+                                    + std::to_string(qid) + " window");
+        }
+        q.inst_window.pop_front();
+    }
     delete inst;
 }
 
 void
-SIM::client_try_retire(sim::CLIENT& c)
+SIM::client_try_retire(client_ptr& c)
 {
     // retire any instructions at the head of a window,
     // or update the number of cycles until done
-    for (auto& q : c.qubits)
+    for (auto& q : c->qubits)
     {
         if (q.inst_window.empty())
             continue;
@@ -313,22 +421,19 @@ SIM::client_try_retire(sim::CLIENT& c)
         // once there are no uops left, we can retire the instruction.
         if (inst->num_uops > 0)
         {
-            if (_update_instruction_and_delete_on_completion(inst->curr_uop))
+            if (inst->curr_uop != nullptr && _update_instruction_and_check_if_done(inst->curr_uop))
             {
+                delete inst->curr_uop;
                 inst->curr_uop = nullptr;
                 inst->uop_completed++;
                 inst->is_running = false;
                 if (inst->uop_completed == inst->num_uops)
-                {
                     _retire_instruction(c, inst);
-                    q.inst_window.pop_front();
-                }
             }
         }
-        else if (_update_instruction_and_delete_on_completion(inst))
+        else if (_update_instruction_and_check_if_done(inst))
         {
             _retire_instruction(c, inst);
-            q.inst_window.pop_front();
         }
     }
 }
@@ -337,41 +442,62 @@ SIM::client_try_retire(sim::CLIENT& c)
 ////////////////////////////////////////////////////////////
 
 void
-SIM::client_try_execute(sim::CLIENT& c)
+SIM::client_try_execute(client_ptr& c)
 {
     // check if any instruction is ready to be executed. 
     //    An instruction is ready to be executed if it is at the head of all its arguments' windows.
-    for (auto& q : c.qubits)
+    for (auto& q : c->qubits)
     {
-        // We will keep selecting instructions until we find one that is not a ready software instruction
-select_inst:
         if (q.inst_window.empty())
             continue;
 
         inst_ptr& inst = q.inst_window.front();
 
-        bool all_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(), 
-                                    [&c] (qubit_type id) 
-                                    {
-                                        return c.qubits[id].inst_window.front() == inst;
-                                    });
-
-        // if the instruction is a software instruction, we can complete it immediately
-        if (inst->type == INSTRUCTION::TYPE::X 
-            || inst->type == INSTRUCTION::TYPE::Y
-            || inst->type == INSTRUCTION::TYPE::Z
-            || inst->type == INSTRUCTION::TYPE::SWAP)
+#if defined(QS_SIM_DEBUG)
+        if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
         {
-            _retire_instruction(c, inst);
-            goto select_inst;
-        }
+            // verify that all arguments have a nonempty instruction window:
+            for (qubit_type qid : inst->qubits)
+            {
+                if (c->qubits[qid].inst_window.empty())
+                    throw std::runtime_error("instruction `" + inst->to_string() 
+                                            + "`: qubit " + std::to_string(qid) + " has an empty instruction window");
+            }
 
-        // TODO: we may need to decompose the instruction
+            std::cout << "\tfound ready instruction: " << (*inst) << ", args ready =";
+
+            for (qubit_type qid : inst->qubits)
+                std::cout << " " << static_cast<int>(c->qubits[qid].inst_window.front() == inst);
+
+            std::cout << ", is running = " << static_cast<int>(inst->is_running) 
+                    << "\n";
+        }
+#endif
+
+        bool all_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(), 
+                                    [&c, &inst] (qubit_type id) 
+                                    {
+                                        return c->qubits[id].inst_window.front() == inst;
+                                    });
 
         if (all_ready && !inst->is_running)
         {
             auto result = execute_instruction(c, inst);
             exec_results_.push_back(result);
+            
+#if defined(QS_SIM_DEBUG)
+            if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+            {
+                constexpr std::string_view RESULT_STRINGS[]
+                {
+                    "SUCCESS", "MEMORY_STALL", "ROUTING_STALL", "RESOURCE_STALL", "WAITING_FOR_QUBIT_TO_BE_READY"
+                };
+
+                std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
+                if (result == EXEC_RESULT::SUCCESS)
+                    std::cout << "\t\twill be done @ cycle " << inst->cycle_done << "\n";
+            }
+#endif
         }
     }
 }
@@ -380,19 +506,48 @@ select_inst:
 ////////////////////////////////////////////////////////////
 
 void
-SIM::client_try_fetch(sim::CLIENT& c)
+SIM::client_try_fetch(client_ptr& c)
 {
+#if defined(QS_SIM_DEBUG)
+    if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+    {
+        // print instruction window states:
+        std::cout << "\tINSTRUCTION WINDOW:\n";
+        for (size_t i = 0; i < c->qubits.size(); i++)
+        {
+            if (!c->qubits[i].inst_window.empty())
+            {
+                std::cout << "\t\tQUBIT " << i << ": " 
+                        << *(c->qubits[i].inst_window.front()) 
+                        << " (count = " << c->qubits[i].inst_window.size() << ")\n";
+            }
+        }
+    }
+#endif
+
     // read instructions from the trace and add them to instruction windows.
     // stop when all windows have at least one instruction.
-    auto it = std::find_if(c.qubits.begin(), c.qubits.end(),
+    auto it = std::find_if(c->qubits.begin(), c->qubits.end(),
                            [] (const auto& q) { return q.inst_window.empty(); });
-    while (it != c.qubits.end())
+    qubit_type target_qubit = std::distance(c->qubits.begin(), it);
+
+#if defined(QS_SIM_DEBUG)
+    if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+        std::cout << "\tsearching for instructions that operate on qubit " << target_qubit << "\n";
+#endif
+
+    size_t limit{8};
+    while (it != c->qubits.end() && limit > 0)
     {
-        qubit_type target_qubit = it->qubit_id;
-        while (true) // keep going until we get an instruction that operates on `target_qubit`
+        while (limit > 0) // keep going until we get an instruction that operates on `target_qubit`
         {
-            inst_ptr inst{new INSTRUCTION(c.read_instruction_from_trace())};
-            c.s_inst_read++;
+            inst_ptr inst{new INSTRUCTION(c->read_instruction_from_trace())};
+            c->s_inst_read++;
+            
+#if defined(QS_SIM_DEBUG)
+            if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+                std::cout << "\t\tREAD instruction: " << (*inst) << "\n";
+#endif
 
             // set the number of uops (may depend on simulator config)
             if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
@@ -404,25 +559,32 @@ SIM::client_try_fetch(sim::CLIENT& c)
 
             // add the instruction to the windows of all the qubits it operates on
             for (qubit_type q : inst->qubits)
-                c.qubits[q].inst_window.push_back(inst);
+                c->qubits[q].inst_window.push_back(inst);
 
             // check if the instruction operates on `target_qubit`
             auto qubits_it = std::find(inst->qubits.begin(), inst->qubits.end(), target_qubit);
             if (qubits_it != inst->qubits.end())
                 break;
+
+            limit--;
         }
 
         // check again for any empty windows
-        it = std::find_if(c.qubits.begin(), c.qubits.end(),
+        it = std::find_if(c->qubits.begin(), c->qubits.end(),
                            [] (const auto& q) { return q.inst_window.empty(); });
     }   
+
+#if defined(QS_SIM_DEBUG)
+    if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+        std::cout << "\t\tno more instructions to read\n";
+#endif
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PATCH::bus_array::iterator
-_find_free_bus(PATCH& p, uint64_t t_free)
+sim::PATCH::bus_array::iterator
+_find_free_bus(sim::PATCH& p, uint64_t t_free)
 {
     return std::find_if(p.buses.begin(), p.buses.end(), 
                         [t_free] (const auto& b) { return b->t_free <= t_free; });
@@ -430,7 +592,7 @@ _find_free_bus(PATCH& p, uint64_t t_free)
 
 // Returns true if the path was allocated, false otherwise.
 bool
-_allocate_bus_path_for_cx_like(PATCH& src, PATCH& dst, uint64_t endpoint_latency=2, uint64_t path_latency=2)
+_allocate_bus_path_for_cx_like(sim::PATCH& src, sim::PATCH& dst, uint64_t endpoint_latency=2, uint64_t path_latency=2)
 {
     // check if the bus is free
     auto src_it = _find_free_bus(src, GL_CYCLE);
@@ -439,31 +601,46 @@ _allocate_bus_path_for_cx_like(PATCH& src, PATCH& dst, uint64_t endpoint_latency
         return false;
 
     // now check if we can route:
-    auto path = route_path_from_src_to_dst(*src_it, *dst_it);
-    for (auto& r : path)
-        r->t_free = GL_CYCLE + path_latency;
+    if (src_it == dst_it)
+    {
+        (*src_it)->t_free = GL_CYCLE + endpoint_latency;
+    }
+    else
+    {
+        auto path = sim::route_path_from_src_to_dst(*src_it, *dst_it);
+        for (auto& r : path)
+            r->t_free = GL_CYCLE + path_latency;
 
-    // hold the endpoints for `endpoint_latency` cycles:
-    (*src_it)->t_free = GL_CYCLE + endpoint_latency;
-    (*dst_it)->t_free = GL_CYCLE + endpoint_latency;
+        // hold the endpoints for `endpoint_latency` cycles:
+        (*src_it)->t_free = GL_CYCLE + endpoint_latency;
+        (*dst_it)->t_free = GL_CYCLE + endpoint_latency;
+    }
 
     return true;
 }
 
-EXEC_RESULT
-SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
+SIM::EXEC_RESULT
+SIM::execute_instruction(client_ptr& c, inst_ptr inst)
 {
+    // complete immediately -- do not have to wait for qubits to be ready
+    if (_is_software_instruction(inst->type))
+    {
+        inst->cycle_done = GL_CYCLE + 1;
+        inst->is_running = true;
+        return EXEC_RESULT::SUCCESS;
+    }
+
     // check if all qubits are in compute memory:
     for (qubit_type qid : inst->qubits)
     {
-        const auto& q = clients_[client_id].qubits[qid];
+        auto& q = c->qubits[qid];
 
         // ensure all instructions are ready:
         if (q.memloc_info.t_free > GL_CYCLE)
             return EXEC_RESULT::WAITING_FOR_QUBIT_TO_BE_READY;
 
         // if a qubit is not in memory, we need to make a memory request:
-        if (q.memloc_info.where == MEMINFO::LOCATION::MEMORY)
+        if (q.memloc_info.where == sim::MEMINFO::LOCATION::MEMORY)
         {
             // set `t_until_in_compute` and `t_free` 
             // to `std::numeric_limits<uint64_t>::max()` to indicate that
@@ -474,6 +651,11 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
             return EXEC_RESULT::MEMORY_STALL;
         }
     }
+
+#if defined(QS_SIM_DEBUG)
+    if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+        std::cout << "\t\tall qubits are available -- trying to execute instruction: " << (*inst) << "\n";
+#endif
 
     EXEC_RESULT result{EXEC_RESULT::SUCCESS};
 
@@ -491,8 +673,19 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
         //    instruction. 
 
         // check if the bus is free
-        QUBIT& q = c.qubits[inst->qubits[0]];
-        PATCH& p = compute_[q.memloc_info.patch_idx];
+        auto& q = c->qubits[inst->qubits[0]];
+        auto& p = compute_[q.memloc_info.patch_idx];
+        
+#if defined(QS_SIM_DEBUG)
+        if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+        {
+            std::cout << "\t\tfree buses near qubit " << inst->qubits[0] << " (patch = " << q.memloc_info.patch_idx << "):";
+            for (auto& b : p.buses)
+                std::cout << " " << b->t_free;
+            std::cout << "\n";
+        }
+#endif
+
         auto it = _find_free_bus(p, GL_CYCLE);
         if (it == p.buses.end())
         {
@@ -512,11 +705,11 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
         // As we allocate an ancilla on the bus that needs to connect to the control and target
         // qubits, we need to route from the control to the target and occupy all bus components.
         // on the path.
-        QUBIT& ctrl = c.qubits[inst->qubits[0]];
-        QUBIT& target = c.qubits[inst->qubits[1]];
+        auto& ctrl = c->qubits[inst->qubits[0]];
+        auto& target = c->qubits[inst->qubits[1]];
 
-        PATCH& c_patch = compute_[ctrl.memloc_info.patch_idx];
-        PATCH& t_patch = compute_[target.memloc_info.patch_idx];
+        auto& c_patch = compute_[ctrl.memloc_info.patch_idx];
+        auto& t_patch = compute_[target.memloc_info.patch_idx];
 
         if (_allocate_bus_path_for_cx_like(c_patch, t_patch))
         {
@@ -544,23 +737,23 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
         bool any_factory_has_resource{false};
         for (size_t i = 0; i < t_fact_.size() && !inst->is_running; i++)
         {
-            auto& fact = t_fact_[i];
-            if (fact.level != required_msfact_level_ || fact.buffer_occu == 0)
+            auto* fact = t_fact_[i];
+            if (fact->level != target_t_fact_level_ || fact->buffer_occu == 0)
                 continue;
 
             any_factory_has_resource = true;
             // get the factory's output patch and consume the magic state:
-            PATCH& f_patch = compute_[fact.output_patch_idx];
+            auto& f_patch = compute_[fact->output_patch_idx];
 
-            QUBIT& q = c.qubits[inst->qubits[0]];
-            PATCH& p = compute_[q.memloc_info.patch_idx];
+            auto& q = c->qubits[inst->qubits[0]];
+            auto& p = compute_[q.memloc_info.patch_idx];
 
             if (_allocate_bus_path_for_cx_like(f_patch, p, endpoint_latency, path_latency))
             {
                 inst->cycle_done = GL_CYCLE + 2 + 2*static_cast<int>(clifford_correction);
                 inst->is_running = true;
 
-                fact.buffer_occu--;
+                fact->buffer_occu--;
             }
             else
             {
@@ -576,12 +769,12 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
         // create uop and run it:
         size_t uop_idx = inst->uop_completed;
         inst->curr_uop = new INSTRUCTION(inst->urotseq[uop_idx], inst->qubits);
-        result = execute_instruction(client_id, inst->curr_uop);
+        result = execute_instruction(c, inst->curr_uop);
         inst->is_running = (result == EXEC_RESULT::SUCCESS);
     }
     else if (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ)
     {
-        using uop_spec_type = std::pair<INSTRUCTION::TYPE, std::initializer_list<size_t>>;
+        using uop_spec_type = std::pair<INSTRUCTION::TYPE, std::array<ssize_t, 2>>;
 
         // gate declaration to make this very simple:
         constexpr INSTRUCTION::TYPE CX = INSTRUCTION::TYPE::CX;
@@ -590,39 +783,58 @@ SIM::execute_instruction(sim::CLIENT& c, inst_ptr inst)
         constexpr uop_spec_type CCZ_UOPS[]
         {
             {CX, {1,2}},
-            {TDG, {2}},
+            {TDG, {2,-1}},
             {CX, {0,2}},
-            {T, {2}},
+            {T, {2,-1}},
             {CX, {1,2}},
-            {T, {1}},
-            {TDG, {2}},
+            {T, {1,-1}},
+            {TDG, {2,-1}},
             {CX, {0,2}},
-            {T, {2}},
+            {T, {2,-1}},
             {CX, {0,1}},
-            {T, {0}},
-            {TDG, {1}},
+            {T, {0,-1}},
+            {TDG, {1,-1}},
             {CX, {0,1}}
         };
 
         // depending on simulator config, we will want to use magic states or synthillation
 
         // T state implementation:
-        uint64_t uop_idx = inst->uop_completed;
-        if (inst->type == INSTRUCTION::TYPE::CCX)
+        int64_t uop_idx = static_cast<int64_t>(inst->uop_completed);
+        if (inst->curr_uop == nullptr)
         {
-            if (uop_idx == 0 || uop_idx == NUM_CCX_UOPS-1)
+            if (inst->type == INSTRUCTION::TYPE::CCX)
             {
-                inst->curr_uop = new INSTRUCTION(INSTRUCTION::TYPE::H, {inst->qubits[2]});
-                goto ccxz_execute_uop;
+                if (uop_idx == 0 || uop_idx == NUM_CCX_UOPS-1)
+                {
+                    inst->curr_uop = new INSTRUCTION(INSTRUCTION::TYPE::H, {inst->qubits[2]});
+                }
+                else
+                {
+                    std::vector<qubit_type> qubits;
+                    const auto& uop = CCZ_UOPS[uop_idx-1];
+                    for (ssize_t idx : uop.second)
+                    {
+                        if (idx >= 0)
+                            qubits.push_back(inst->qubits[idx]);
+                    }
+                    inst->curr_uop = new INSTRUCTION(uop.first, qubits);
+                }
             }
-
-            // otherwise, decrement `uop_idx` by 2 so we can index into the `CCZ_UOPS` array:
-            uop_idx -= 2;
+            else
+            {
+                std::vector<qubit_type> qubits;
+                const auto& uop = CCZ_UOPS[uop_idx];
+                for (ssize_t idx : uop.second)
+                {
+                    if (idx >= 0)
+                        qubits.push_back(inst->qubits[idx]);
+                }
+                inst->curr_uop = new INSTRUCTION(uop.first, qubits);
+            }
         }
-        inst->curr_uop = new INSTRUCTION(CCZ_UOPS[uop_idx].first, CCZ_UOPS[uop_idx].second);
 
-ccxz_execute_uop:
-        result = execute_instruction(client_id, inst->curr_uop);
+        result = execute_instruction(c, inst->curr_uop);
         inst->is_running = (result == EXEC_RESULT::SUCCESS);
     }
     else if (inst->type == INSTRUCTION::TYPE::MZ || inst->type == INSTRUCTION::TYPE::MX)
@@ -631,8 +843,12 @@ ccxz_execute_uop:
         inst->cycle_done = GL_CYCLE + 1;
         inst->is_running = true;
     }
+    else
+    {
+        throw std::runtime_error("unsupported instruction: " + inst->to_string());
+    }
         
-    return EXEC_RESULT::SUCCESS;
+    return result;
 }
 
 ////////////////////////////////////////////////////////////

@@ -84,6 +84,7 @@ int main(int argc, char* argv[])
 
     if (is_gz_file)
     {
+        std::cout << "writing as gzipped file: " << output_file << "\n";
         gzFile gzstrm = gzopen(output_file.c_str(), "wb");
         
         gzwrite(gzstrm, &num_qubits, 4);

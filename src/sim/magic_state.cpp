@@ -5,10 +5,13 @@
 
 #include "sim/magic_state.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 #include <random>
 
+extern std::mt19937 GL_RNG;
 static std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
 
 namespace sim
@@ -19,7 +22,7 @@ namespace sim
 
 T_FACTORY::T_FACTORY(
     double _freq_khz,
-    double _failure_prob, 
+    double _output_error_prob, 
     size_t _initial_input_count, 
     size_t _output_count, 
     size_t _num_rotation_steps,
@@ -27,7 +30,7 @@ T_FACTORY::T_FACTORY(
     ssize_t _output_patch_idx,
     size_t _level)
     : freq_khz(_freq_khz),
-      failure_prob(_failure_prob),
+      output_error_prob(_output_error_prob),
       initial_input_count(_initial_input_count),
       output_count(_output_count),
       num_rotation_steps(_num_rotation_steps),
@@ -70,8 +73,8 @@ T_FACTORY::tick()
     if (buffer_occu >= buffer_capacity)
         return;
 
-    double tick_ok_prob;
-    if (tick == 0)
+    double step_ok_prob;
+    if (step == 0)
     {
         // check if we have enough resources to start the factory
         double input_error_prob;
@@ -92,7 +95,7 @@ T_FACTORY::tick()
 
             if (resources_avail < initial_input_count)
                 return;
-            size_t required_resources{initial_input_count - resources_avail};
+            size_t required_resources{initial_input_count};
             // take resources in a round robin until we have enough.
             double tot_error_prob{0.0};  // because I am lazy, just take the average of all producers
             while (required_resources > 0)
@@ -104,7 +107,7 @@ T_FACTORY::tick()
                     {
                         f_p->buffer_occu--;
                         required_resources--;
-                        tot_error_prob += f_p->failure_prob;
+                        tot_error_prob += f_p->output_error_prob;
                     }
                 }
             }
@@ -116,14 +119,14 @@ T_FACTORY::tick()
         // will fail slightly more often than in reality (but since undetectable errors are like p^3 or higher,
         // this is a good approximation).
 
-        tick_ok_prob = pow(1.0 - input_error_prob, initial_input_count);
+        step_ok_prob = pow(1.0 - input_error_prob, initial_input_count);
     }
     else 
     {
         // get one resource state
         if (level == 0)
         {
-            tick_ok_prob = 1.0 - INJECTED_STATE_FAILURE_PROB;
+            step_ok_prob = 1.0 - INJECTED_STATE_FAILURE_PROB;
         }
         else
         {
@@ -133,24 +136,24 @@ T_FACTORY::tick()
                 return;
             auto* f_p = *prod_it;
             f_p->buffer_occu--;
-            tick_ok_prob = 1.0 - f_p->failure_prob;
+            step_ok_prob = 1.0 - f_p->output_error_prob;
         }
     }
 
-    if (FP_RAND(GL_RNG) < tick_ok_prob)
+    if (FP_RAND(GL_RNG) < step_ok_prob)
     {
-        tick++;
-        if (tick == 1+num_rotation_steps)
+        step++;
+        if (step == 1+num_rotation_steps)
         {
             // factory is done -- add to buffer
             buffer_occu++;
-            tick = 0;
+            step = 0;
         }
     }
     else
     {
         // need to reset:
-        tick = 0;
+        step = 0;
     }
 }
 

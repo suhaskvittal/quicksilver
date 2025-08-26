@@ -5,6 +5,9 @@
 
 #include "client.h"
 
+#include <fstream>
+#include <iostream>
+
 namespace sim
 {
 
@@ -14,16 +17,16 @@ namespace sim
 CLIENT::CLIENT(std::string _trace_file)
     :trace_file(_trace_file)
 {
-    if (trace_file.find(".gz") != std::string::npos)
-        trace_file_type = TRACE_FILE_TYPE::GZ;
-    else
-        trace_file_type = TRACE_FILE_TYPE::BINARY;
+    size_t num_qubits = open_file(trace_file);
+    qubits = std::vector<qubit_info_type>(num_qubits);
 }
 
 CLIENT::~CLIENT()
 {
     if (trace_file_type == TRACE_FILE_TYPE::GZ)
-        gzclose(std::get<gzFile>(trace_istrm));
+        gzclose(trace_gz_istrm);
+    else
+        fclose(trace_bin_istrm);
 }
 
 ////////////////////////////////////////////////////////////
@@ -32,20 +35,53 @@ CLIENT::~CLIENT()
 INSTRUCTION
 CLIENT::read_instruction_from_trace()
 {
-    INSTRUCTION::io_encoding enc;
+    INSTRUCTION::io_encoding enc{};
+    
+    // reopen the file if we hit EOF
+    if (eof())
+    {
+        if (trace_file_type == TRACE_FILE_TYPE::GZ)
+            gzclose(trace_gz_istrm);
+        else
+            fclose(trace_bin_istrm);
+
+        open_file(trace_file);
+    }
 
     if (trace_file_type == TRACE_FILE_TYPE::GZ)
+        enc.read_write([this] (void* buf, size_t size) { return gzread(this->trace_gz_istrm, buf, size); });
+    else
+        enc.read_write([this] (void* buf, size_t size) { return fread(buf, 1, size, this->trace_bin_istrm); });
+
+    INSTRUCTION out(std::move(enc));
+    return out;
+}
+
+bool
+CLIENT::eof() const
+{
+    return trace_file_type == TRACE_FILE_TYPE::GZ ? gzeof(trace_gz_istrm) : feof(trace_bin_istrm);
+}
+
+size_t
+CLIENT::open_file(const std::string& trace_file)
+{
+    uint32_t num_qubits;
+    if (trace_file.find(".gz") != std::string::npos)
     {
-        auto& strm = std::get<gzFile>(trace_istrm);
-        enc.read_write([&strm] (void* buf, size_t size) { return gzread(strm, buf, size); });
+        trace_file_type = TRACE_FILE_TYPE::GZ;
+        trace_gz_istrm = gzopen(trace_file.c_str(), "rb");
+
+        gzread(trace_gz_istrm, &num_qubits, 4);
     }
     else
     {
-        auto& strm = std::get<std::ifstream>(trace_istrm);
-        enc.read_write([&strm] (void* buf, size_t size) { return strm.read(static_cast<char*>(buf), size); });
-    }
+        trace_file_type = TRACE_FILE_TYPE::BINARY;
+        trace_bin_istrm = fopen(trace_file.c_str(), "rb");
 
-    return INSTRUCTION(enc);
+        fread(&num_qubits, 4, 1, trace_bin_istrm);
+    }
+    return num_qubits;
 }
 
 ////////////////////////////////////////////////////////////

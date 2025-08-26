@@ -7,10 +7,9 @@
 #define SIM_MAGIC_STATE_h
 
 #include <cstddef>
+#include <random>
 
 #include <sys/types.h>
-
-extern std::mt19937 GL_RNG;
 
 namespace sim
 {
@@ -34,9 +33,9 @@ struct T_FACTORY
     const ssize_t output_patch_idx;
     const size_t level;
 
-    // `tick` tracks the progress of the factory. Since, there are `1 + num_rotation_steps` 
-    // steps before the factory is done, `0 <= tick < 1 + num_rotation_steps`.
-    size_t tick{0};
+    // `step` tracks the progress of the factory. Since, there are `1 + num_rotation_steps` 
+    // steps before the factory is done, `0 <= step < 1 + num_rotation_steps`.
+    size_t step{0};
     size_t buffer_occu{0};
 
     // `resource_producers` are the factories that produce the resource states for this factory.

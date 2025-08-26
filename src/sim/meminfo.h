@@ -6,6 +6,11 @@
 #ifndef SIM_MEMINFO_h
 #define SIM_MEMINFO_h
 
+#include "sim/routing.h"
+
+#include <cstdint>
+#include <vector>
+
 namespace sim
 {
 

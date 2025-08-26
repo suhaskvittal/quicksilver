@@ -8,6 +8,7 @@
 
 #include "instruction.h"
 #include "sim/client.h"
+#include "sim/magic_state.h"
 #include "sim/meminfo.h"
 #include "sim/routing.h"
 
@@ -28,12 +29,13 @@ extern std::mt19937 GL_RNG;
 class SIM
 {
 public:
-    using inst_ptr = CLIENT::inst_ptr;
+    using inst_ptr = sim::CLIENT::inst_ptr;
+    using client_ptr = std::unique_ptr<sim::CLIENT>;
 
     struct CONFIG
     {
-        uint64_t inst_warmup{100};
-        uint64_t inst_sim{10'000};
+        uint64_t inst_warmup{2'500'00};
+        uint64_t inst_sim{10'000'00};
 
         std::vector<std::string> client_trace_files;
         /*
@@ -70,7 +72,7 @@ public:
             Magic state factory config: by default, we have set 15 level 1 factories,
             and 1 level 2 factory.        
         */
-        std::vector<size_t> num_15to1_factories_by_level{15,1};
+        std::vector<size_t> num_15to1_factories_by_level{27,3};
     };
 
     struct clk_info
@@ -93,15 +95,16 @@ public:
         RESOURCE_STALL,
         // this is not a stall -- we need to wait for instructions to complete
         WAITING_FOR_QUBIT_TO_BE_READY
-    }
+    };
 private:
-    std::vector<sim::CLIENT> clients_;
+    std::vector<client_ptr> clients_;
     
     // this is compute storage: can only perform operations on qubits in compute:
     std::vector<sim::PATCH> compute_;
+    size_t patches_reserved_for_resource_pins_{0};
 
     // magic state factories: magic states can be accessed from their respective patches:
-    std::vector<sim::T_FACTORY> t_fact_;
+    std::vector<sim::T_FACTORY*> t_fact_;
     std::vector<clk_info> t_fact_clk_info_;
 
     // a buffer for accumulating all execution results each cycle:
@@ -120,25 +123,28 @@ private:
     bool           warmup_{true};
 
     const double compute_speed_khz_;
-    const size_t required_msfact_level_{1};  // indexed from 0, so 1 is a two-level factory
+    const size_t target_t_fact_level_{1};  // indexed from 0, so 1 is a two-level factory
 public:
-    SIM(CONFIG=CONFIG{});
+    SIM(CONFIG);
     ~SIM();
 
     void tick();
 
     bool is_done() const { return done_; }
-    const std::vector<sim::CLIENT>& clients() const { return clients_; }
+    const std::vector<client_ptr>& clients() const { return clients_; }
 private:
+    using bus_array = std::vector<sim::ROUTING_BASE::ptr_type>;
+    using bus_info = std::pair<bus_array, bus_array>;
+
     void init_t_state_factories(const CONFIG&);
-    void init_routing_space(const CONFIG&);
-    void init_compute(const CONFIG&);
+    bus_info init_routing_space(const CONFIG&);
+    void init_compute(const CONFIG&, const bus_array& junctions, const bus_array& buses);
 
-    void client_try_retire(sim::CLIENT&);
-    void client_try_execute(sim::CLIENT&);
-    void client_try_fetch(sim::CLIENT&);
+    void client_try_retire(client_ptr&);
+    void client_try_execute(client_ptr&);
+    void client_try_fetch(client_ptr&);
 
-    EXEC_RESULT execute_instruction(sim::CLIENT&, inst_ptr);
+    EXEC_RESULT execute_instruction(client_ptr&, inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////

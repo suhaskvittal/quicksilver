@@ -7,6 +7,7 @@
 #define SIM_ROUTING_h
 
 #include <memory>
+#include <vector>
 
 namespace sim
 {
@@ -31,12 +32,15 @@ struct ROUTING_BASE
 
     using ptr_type = std::shared_ptr<ROUTING_BASE>;
 
+    uint16_t              id;
     TYPE                  type;
     std::vector<ptr_type> connections;
     uint64_t              t_free{0};
 };
 
 std::vector<ROUTING_BASE::ptr_type> route_path_from_src_to_dst(ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type);
+
+std::ostream& operator<<(std::ostream&, const ROUTING_BASE&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

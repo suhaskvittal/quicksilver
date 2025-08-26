@@ -25,7 +25,8 @@ constexpr std::string_view BASIS_GATES[] =
     "cx", "cz", "swap",
     "rx", "rz",
     "ccx", "ccz",
-    "mz", "mx"
+    "mz", "mx",
+    "nil"
 };
 
 struct INSTRUCTION
@@ -39,13 +40,14 @@ struct INSTRUCTION
     {
         using gate_id_type = uint8_t;
 
-        gate_id_type        type_id;
-        qubit_type          qubits[3];                             // all gates are at most 3-qubit gates
+        gate_id_type        type_id{static_cast<gate_id_type>(INSTRUCTION::TYPE::NIL)};
+        qubit_type          qubits[3]{-1,-1,-1};                   // all gates are at most 3-qubit gates
         uint16_t            fpa_word_count{fpa_type::NUM_WORDS};   // need this for compatibility in case `FPA_PRECISION` changes.
         fpa_type::word_type angle[fpa_type::NUM_WORDS];
-        uint32_t            urotseq_size;
-        gate_id_type*       urotseq;
+        uint32_t            urotseq_size{0};
+        gate_id_type*       urotseq{nullptr};
 
+        io_encoding() =default;
         io_encoding(const INSTRUCTION*);
         ~io_encoding();
 
@@ -53,7 +55,7 @@ struct INSTRUCTION
         //  (1) a pointer to a memory location to read from/write to, and (2) the size of the memory location.
         // We have a single function since the calling code is the same for both reading and writing.
         // We use templates to abstract away the IO functions. So, zlib, lzma, or stdio work equally well.
-        template <class RW_FUNC> void read_write(const RW_FUNC&) const;
+        template <class RW_FUNC> void read_write(const RW_FUNC&);
     };
 
     enum class TYPE
@@ -92,7 +94,7 @@ struct INSTRUCTION
     size_t   num_uops{0};
 
     INSTRUCTION(TYPE, std::vector<qubit_type>);
-    INSTRUCTION(io_encoding);
+    INSTRUCTION(io_encoding&&);
     INSTRUCTION(const INSTRUCTION&) =default;
 
     // we require that the rotations are provided via iterators instead of an `initializer_list` 
@@ -104,6 +106,8 @@ struct INSTRUCTION
                                             ITER_TYPE urotseq_end);
 
     io_encoding serialize() const;
+
+    std::string to_string() const;
 };
 
 ////////////////////////////////////////////////////////////
@@ -115,10 +119,10 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 ////////////////////////////////////////////////////////////
 
 template <class RW_FUNC> void
-INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
+INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
 {
     rwf((void*)&type_id, sizeof(type_id));
-    rwf((void*)qubits, sizeof(qubits));
+    rwf((void*)qubits, 3*sizeof(qubit_type));
 
     // fixed point angle:
     rwf((void*)&fpa_word_count, sizeof(fpa_word_count));
@@ -126,7 +130,12 @@ INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf) const
 
     // unrolled rotation sequence:
     rwf((void*)&urotseq_size, sizeof(urotseq_size));
-    rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
+    if (urotseq_size > 0)
+    {
+        if (urotseq == nullptr)
+            urotseq = new gate_id_type[urotseq_size];
+        rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
+    }
 }
 
 template <class ITER_TYPE>
