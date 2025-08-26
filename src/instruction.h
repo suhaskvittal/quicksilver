@@ -80,6 +80,9 @@ struct INSTRUCTION
     uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
     uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
 
+    // simulation variables:
+    uint64_t cycles_until_done{0};
+
     INSTRUCTION(TYPE, std::vector<qubit_type>);
     INSTRUCTION(io_encoding);
     INSTRUCTION(const INSTRUCTION&) =default;
