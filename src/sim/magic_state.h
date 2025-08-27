@@ -6,6 +6,8 @@
 #ifndef SIM_MAGIC_STATE_h
 #define SIM_MAGIC_STATE_h
 
+#include "sim/clock.h"
+
 #include <cstddef>
 #include <random>
 
@@ -19,12 +21,11 @@ namespace sim
 
 const double INJECTED_STATE_FAILURE_PROB{1e-3};
 
-struct T_FACTORY
+struct T_FACTORY : public CLOCKABLE
 {
     /*
         Factory parameters:
     */
-    const double freq_khz;
     const double output_error_prob;
     const size_t initial_input_count;
     const size_t output_count;
@@ -60,7 +61,7 @@ struct T_FACTORY
     static T_FACTORY f15to1(size_t level_preset, uint64_t t_round_ns, 
                                         size_t buffer_capacity, ssize_t output_patch_idx);
 
-    void tick();
+    void operate() override;
 };
 
 ////////////////////////////////////////////////////////////

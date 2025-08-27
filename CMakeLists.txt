@@ -54,8 +54,11 @@ set(BINARY_GEN_FILES
 
 set(SIM_FILES
     src/instruction.cpp
-    src/sim.cpp
     src/sim/client.cpp
+    src/sim/clock.cpp
+    src/sim/compute.cpp
+    src/sim/compute/execute.cpp
+    src/sim/compute/init.cpp
     src/sim/magic_state.cpp
     src/sim/routing.cpp)
 
@@ -81,12 +84,3 @@ target_compile_options(qs_sim PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(qs_sim PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
 
 target_link_libraries(qs_sim PRIVATE ZLIB::ZLIB)
-
-# RW test
-add_executable(qs_rw main/qs_rw_test.cpp src/instruction.cpp)
-
-target_include_directories(qs_rw PRIVATE "src")
-target_compile_options(qs_rw PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(qs_rw PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-
-target_link_libraries(qs_rw PRIVATE ZLIB::ZLIB)

@@ -28,8 +28,6 @@ struct MEMINFO
     size_t     memory_idx;
 
     uint64_t   t_free{0};
-    uint64_t   t_until_in_compute{0};
-    uint64_t   t_until_in_memory{0};
 };
 
 struct PATCH

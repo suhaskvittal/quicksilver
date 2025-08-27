@@ -21,22 +21,23 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 T_FACTORY::T_FACTORY(
-    double _freq_khz,
+    double freq_khz,
     double _output_error_prob, 
     size_t _initial_input_count, 
     size_t _output_count, 
     size_t _num_rotation_steps,
     size_t _buffer_capacity,
     ssize_t _output_patch_idx,
-    size_t _level)
-    : freq_khz(_freq_khz),
-      output_error_prob(_output_error_prob),
-      initial_input_count(_initial_input_count),
-      output_count(_output_count),
-      num_rotation_steps(_num_rotation_steps),
-      buffer_capacity(_buffer_capacity),
-      output_patch_idx(_output_patch_idx),
-      level(_level)
+    size_t _level
+)
+    :CLOCKABLE(freq_khz),
+     output_error_prob(_output_error_prob),
+     initial_input_count(_initial_input_count),
+     output_count(_output_count),
+     num_rotation_steps(_num_rotation_steps),
+     buffer_capacity(_buffer_capacity),
+     output_patch_idx(_output_patch_idx),
+     level(_level)
 {}
 
 /*
@@ -49,15 +50,14 @@ T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capaci
     double freq_khz;
     double error_prob;
 
-    double t_round_ms = static_cast<double>(t_round_ns) * 1e-6;
     if (level_preset <= 1)
     {
-        freq_khz = 1e6 / (5 * t_round_ms);  // cycle is 5 rounds
+        freq_khz = compute_freq_khz(t_round_ns, 5);  // cycle is 5 rounds
         error_prob = 1e-6;  // don't have exact numbers for this, but should be around here since d = 7 gives 4.5e-8
     }
     else
     {
-        freq_khz = 1e6 / (11 * t_round_ms);
+        freq_khz = compute_freq_khz(t_round_ns, 11);
         error_prob = 2.7e-12;
     }
 
@@ -68,7 +68,7 @@ T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capaci
 ////////////////////////////////////////////////////////////
 
 void
-T_FACTORY::tick()
+T_FACTORY::operate()
 {
     if (buffer_occu >= buffer_capacity)
         return;

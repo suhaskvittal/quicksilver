@@ -6,6 +6,7 @@
 #include "routing.h"
 
 #include <algorithm>
+#include <deque>
 #include <iostream>
 #include <unordered_map>
 
@@ -18,16 +19,16 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 std::vector<ROUTING_BASE::ptr_type>
-route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type dst)
+route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type dst, uint64_t current_cycle)
 {
-    // run dfs to compute the path:
-    std::vector<ROUTING_BASE::ptr_type> dfs{src};
+    // run bfs to compute the path:
+    std::deque<ROUTING_BASE::ptr_type> bfs{src};
     std::unordered_map<ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type> prev;
 
-    while (dfs.size() > 0)
+    while (bfs.size() > 0)
     {
-        auto curr = std::move(dfs.back());
-        dfs.pop_back();
+        auto curr = std::move(bfs.front());
+        bfs.pop_front();
 
         // and exit early if we reach `dst`
         if (curr == dst)
@@ -40,9 +41,11 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
             if (prev.find(conn) != prev.end())
                 continue;
 
-            if (conn->t_free > GL_CYCLE)
+            // this indicates that the connection is blocked:
+            if (conn->t_free > current_cycle)
                 continue;
-            dfs.push_back(conn);
+
+            bfs.push_back(conn);
             prev[conn] = curr;
         }
     }

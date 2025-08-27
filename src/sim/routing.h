@@ -38,7 +38,8 @@ struct ROUTING_BASE
     uint64_t              t_free{0};
 };
 
-std::vector<ROUTING_BASE::ptr_type> route_path_from_src_to_dst(ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type);
+std::vector<ROUTING_BASE::ptr_type> 
+    route_path_from_src_to_dst(ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type, uint64_t current_cycle);
 
 std::ostream& operator<<(std::ostream&, const ROUTING_BASE&);
 
