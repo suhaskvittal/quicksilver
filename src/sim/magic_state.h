@@ -43,6 +43,10 @@ struct T_FACTORY
     // of pointers to locations where we can look for resource states.
     std::vector<T_FACTORY*> resource_producers;
 
+    // stats:
+    uint64_t s_prod_tries{0};
+    uint64_t s_failures{0};
+
     T_FACTORY(
         double freq_khz,
         double output_error_prob, 

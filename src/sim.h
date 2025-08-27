@@ -131,7 +131,9 @@ public:
     void tick();
 
     bool is_done() const { return done_; }
+
     const std::vector<client_ptr>& clients() const { return clients_; }
+    const std::vector<sim::T_FACTORY*>& t_factories() const { return t_fact_; }
 private:
     using bus_array = std::vector<sim::ROUTING_BASE::ptr_type>;
     using bus_info = std::pair<bus_array, bus_array>;

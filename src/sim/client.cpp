@@ -53,6 +53,13 @@ CLIENT::read_instruction_from_trace()
     else
         enc.read_write([this] (void* buf, size_t size) { return fread(buf, 1, size, this->trace_bin_istrm); });
 
+    if (enc.type_id == static_cast<uint8_t>(INSTRUCTION::TYPE::RZ) ||
+        enc.type_id == static_cast<uint8_t>(INSTRUCTION::TYPE::RX))
+    {
+        if (enc.urotseq_size == 0)
+            throw std::runtime_error("RZ/RX instruction has empty unrolled rotation sequence");
+    }
+
     INSTRUCTION out(std::move(enc));
     return out;
 }

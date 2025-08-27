@@ -119,7 +119,7 @@ T_FACTORY::tick()
         // will fail slightly more often than in reality (but since undetectable errors are like p^3 or higher,
         // this is a good approximation).
 
-        step_ok_prob = pow(1.0 - input_error_prob, initial_input_count);
+        step_ok_prob = 1.0 - initial_input_count * input_error_prob;
     }
     else 
     {
@@ -147,6 +147,7 @@ T_FACTORY::tick()
         {
             // factory is done -- add to buffer
             buffer_occu++;
+            s_prod_tries++;
             step = 0;
         }
     }
@@ -154,6 +155,8 @@ T_FACTORY::tick()
     {
         // need to reset:
         step = 0;
+        s_failures++;
+        s_prod_tries++;
     }
 }
 

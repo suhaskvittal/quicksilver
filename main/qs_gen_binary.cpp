@@ -92,6 +92,11 @@ int main(int argc, char* argv[])
         auto write_func = [&gzstrm] (const void* data, size_t size) { gzwrite(gzstrm, data, size); };
         for (const auto& inst : prog.get_instructions())
         {
+            if (inst.type == INSTRUCTION::TYPE::RZ || inst.type == INSTRUCTION::TYPE::RX)
+            {
+                if (inst.urotseq.empty()) // this is an RZ(0) or RZ(2*pi) that did not get caught -- just skip it:
+                    continue;
+            }
             auto enc = inst.serialize();
             enc.read_write(write_func);
         }

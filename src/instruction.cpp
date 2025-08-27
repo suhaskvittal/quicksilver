@@ -16,8 +16,7 @@
 
 INSTRUCTION::io_encoding::io_encoding(const INSTRUCTION* inst)
     :type_id{static_cast<gate_id_type>(inst->type)},
-    urotseq_size{static_cast<uint32_t>(inst->urotseq.size())},
-    urotseq{new gate_id_type[urotseq_size]}
+    urotseq_size{static_cast<uint32_t>(inst->urotseq.size())}
 {
     // initialize `qubits`
     std::copy(inst->qubits.begin(), inst->qubits.end(), std::begin(qubits));
@@ -27,8 +26,12 @@ INSTRUCTION::io_encoding::io_encoding(const INSTRUCTION* inst)
     std::move(words.begin(), words.end(), std::begin(angle));
 
     // initialize `urotseq`
-    std::transform(inst->urotseq.begin(), inst->urotseq.end(), urotseq,
+    if (urotseq_size > 0)
+    {
+        urotseq = new gate_id_type[urotseq_size];
+        std::transform(inst->urotseq.begin(), inst->urotseq.end(), urotseq,
                        [] (TYPE t) { return static_cast<gate_id_type>(t); });
+    }
 }
 
 INSTRUCTION::io_encoding::~io_encoding()
