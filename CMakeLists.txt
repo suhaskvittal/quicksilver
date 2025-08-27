@@ -4,7 +4,7 @@ project(oq2 VERSION 1.0.0 LANGUAGES CXX)
 # initialize compile options
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(COMPILE_OPTIONS
-            -g
+            -ggdb3
             -Wall
             -Wextra
             -Wpedantic

@@ -23,16 +23,11 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
     // run dfs to compute the path:
     std::vector<ROUTING_BASE::ptr_type> dfs{src};
     std::unordered_map<ROUTING_BASE::ptr_type, ROUTING_BASE::ptr_type> prev;
-    prev[src] = src;
 
     while (dfs.size() > 0)
     {
-        auto& curr = dfs.back();
+        auto curr = std::move(dfs.back());
         dfs.pop_back();
-
-        // this indicates that we have already visited this node:
-        if (prev.find(curr) != prev.end())
-            continue;
 
         // and exit early if we reach `dst`
         if (curr == dst)
@@ -41,6 +36,10 @@ route_path_from_src_to_dst(ROUTING_BASE::ptr_type src, ROUTING_BASE::ptr_type ds
         // traverse to `connections`
         for (auto& conn : curr->connections)
         {
+            // this indicates that we have already visited this node:
+            if (prev.find(conn) != prev.end())
+                continue;
+
             if (conn->t_free > GL_CYCLE)
                 continue;
             dfs.push_back(conn);

@@ -14,9 +14,11 @@
 ////////////////////////////////////////////////////////////
 
 template <class T> void
-print_stat_line(std::string_view name, T value)
+print_stat_line(std::string name, T value, bool indent=true)
 {
-    std::cout << "\t" << std::setw(48) << std::left << name << " : " << std::setw(12) << std::right << value << "\n";
+    if (indent)
+        name = "\t" + name;
+    std::cout << std::setw(52) << std::left << name << " : " << std::setw(12) << std::right << value << "\n";
 }
 
 ////////////////////////////////////////////////////////////
@@ -38,22 +40,48 @@ main(int argc, char** argv)
     std::vector<uint64_t> last_printed_inst_count(sim.clients().size(), 0);
     while (!sim.is_done())
     {
+        if (GL_CYCLE % 100'000 == 0)
+        {
+            if (GL_CYCLE % 5'000'000 == 0)
+            {
+                std::cout << "\n[";
+                for (size_t i = 0; i < sim.clients().size(); i++)
+                {
+                    const auto& c = sim.clients()[i];
+                    uint64_t inst_done_k = c->s_inst_done / 1000;
+                    std::cout << " " << std::setw(4) << inst_done_k << "K";
+                }
+                std::cout << " ]\t";
+            }
+            std::cout << ".";
+            std::cout.flush();
+        }
+
         sim.tick();
 
         // check if any client has reached modulo 100K instructions
+        /*
         const auto& clients = sim.clients();
         for (size_t i = 0; i < clients.size(); i++)
         {
             const auto& c = clients[i];
-            if (c->s_inst_done % 100'000 == 0 && c->s_inst_done != last_printed_inst_count[i])
+            if (c->s_unrolled_inst_done % 100'000 == 0 && c->s_unrolled_inst_done != last_printed_inst_count[i])
             {
-                std::cout << "( cycle = " << GL_CYCLE << " ) client " << i << " : " << c->s_inst_done << " instructions\n";
-                last_printed_inst_count[i] = c->s_inst_done;
+                std::cout << "( cycle = " << GL_CYCLE << " ) client " << i << " : " << c->s_unrolled_inst_done << " instructions\n";
+                last_printed_inst_count[i] = c->s_unrolled_inst_done;
             }
         }
+        */
     }
 
     // print stats for each client:
+    std::cout << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
+    double execution_time = (GL_CYCLE / sim.freq_compute_khz()) * 1e-3 / 60.0;
+
+    print_stat_line("TOTAL_CYCLES", GL_CYCLE, false);
+    print_stat_line("COMPUTE_SPEED (KHz)", sim.freq_compute_khz() / 1000.0, false);
+    print_stat_line("EXECUTION_TIME (min)", execution_time, false);
+    
     const auto& clients = sim.clients();
     for (size_t i = 0; i < clients.size(); i++)
     {

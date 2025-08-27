@@ -17,7 +17,7 @@ static std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
 
 //#define QS_SIM_DEBUG
 
-constexpr uint64_t QS_SIM_DEBUG_CYCLE_INTERVAL = 1;
+constexpr uint64_t QS_SIM_DEBUG_CYCLE_INTERVAL = 100'000;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -60,7 +60,7 @@ SIM::SIM(CONFIG cfg)
     :compute_((cfg.num_rows+1) * cfg.patches_per_row),
     inst_warmup_(cfg.inst_warmup),
     inst_sim_(cfg.inst_sim),
-    compute_speed_khz_(1.0 / (cfg.compute_syndrome_extraction_time_ns * cfg.compute_rounds_per_cycle)),
+    compute_speed_khz_(1e6 / (cfg.compute_syndrome_extraction_time_ns * cfg.compute_rounds_per_cycle)),
     target_t_fact_level_(cfg.num_15to1_factories_by_level.size() - 1)
 {
     // initialize the magic state factories:
@@ -164,7 +164,11 @@ SIM::tick()
 
 #if defined(QS_SIM_DEBUG)
         if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
-            std::cout << "CLIENT " << i << " (trace = " << c->trace_file << ", #qubits = " << c->qubits.size() << ")\n";
+            std::cout << "CLIENT " << i 
+                    << " (trace = " << c->trace_file 
+                    << ", #qubits = " << c->qubits.size() 
+                    << ", inst done = " << c->s_inst_done  
+                    << ")\n";
 #endif
 
         // 1. retire any instructions at the head of a window,
@@ -281,10 +285,10 @@ SIM::init_t_state_factories(const CONFIG& cfg)
 SIM::bus_info
 SIM::init_routing_space(const CONFIG& cfg)
 {
-    // number of junctions is num_rows + 1
-    // number of buses is 2*num_rows + 1
-    std::vector<sim::ROUTING_BASE::ptr_type> junctions(cfg.num_rows + 1);
-    std::vector<sim::ROUTING_BASE::ptr_type> buses(2*cfg.num_rows + 1);
+    // number of junctions is 2*(num_rows + 1)
+    // number of buses is 3*num_rows + 1
+    std::vector<sim::ROUTING_BASE::ptr_type> junctions(2 * (cfg.num_rows + 1));
+    std::vector<sim::ROUTING_BASE::ptr_type> buses(3*cfg.num_rows + 1);
     
     for (size_t i = 0; i < junctions.size(); i++)
         junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i, sim::ROUTING_BASE::TYPE::JUNCTION});
@@ -301,12 +305,27 @@ SIM::init_routing_space(const CONFIG& cfg)
 
     for (size_t i = 0; i < cfg.num_rows; i++)
     {
-        connect_jb(junctions[i], buses[2*i]);
-        connect_jb(junctions[i], buses[2*i+1]);
-        connect_jb(junctions[i+1], buses[2*i+1]);  // `i+1` and `2*i+2` will connect next iteration
+        /*
+            2i ----- 3i ------ 2i+1
+            |                   |
+           3i+1 ---------------- 3i+2
+            |                   |
+           2i+2 ---3i+3--------- 2i+3
+        */        
+
+
+        connect_jb(junctions[2*i], buses[3*i]);
+        connect_jb(junctions[2*i], buses[3*i+1]);
+
+        connect_jb(junctions[2*i+1], buses[3*i]);
+        connect_jb(junctions[2*i+1], buses[3*i+2]);
+
+        connect_jb(junctions[2*i+2], buses[3*i+1]);
+        connect_jb(junctions[2*i+3], buses[3*i+2]);
     }
     // and the last remaining pair:
-    connect_jb(junctions[cfg.num_rows], buses[2*cfg.num_rows]);
+    connect_jb(junctions[2*cfg.num_rows], buses[3*cfg.num_rows]);
+    connect_jb(junctions[2*cfg.num_rows+1], buses[3*cfg.num_rows]);
 
     return bus_info{junctions, buses};
 }
@@ -328,14 +347,14 @@ SIM::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_array
             top_level_t_fact.push_back(t_fact_[i]);
     }
 
-    if (top_level_t_fact.size() > cfg.patches_per_row+1)
+    if (top_level_t_fact.size() > cfg.patches_per_row+2)
         throw std::runtime_error("Not enough space to allocate all magic state pins");
 
     for (size_t i = 0; i < top_level_t_fact.size(); i++)
     {
         auto* fact = top_level_t_fact[i];
         // `i == 0` will connect to a junction immediately
-        if (i == 0)
+        if (i == 0 || i == top_level_t_fact.size()-1)
             compute_[fact->output_patch_idx].buses.push_back(junctions[0]);
         else
             compute_[fact->output_patch_idx].buses.push_back(buses[0]);
@@ -495,7 +514,15 @@ SIM::client_try_execute(client_ptr& c)
 
                 std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
                 if (result == EXEC_RESULT::SUCCESS)
-                    std::cout << "\t\twill be done @ cycle " << inst->cycle_done << "\n";
+                {
+                    std::cout << "\t\twill be done @ cycle " << inst->cycle_done 
+                                << ", uops = " << inst->uop_completed << " of " << inst->num_uops << "\n";
+                    if (inst->curr_uop != nullptr)
+                    {
+                        std::cout << "\t\t\tcurr uop: " << (*inst->curr_uop)
+                            << "\n\t\t\tuop will be done @ cycle: " << inst->curr_uop->cycle_done << "\n";
+                    }
+                }
             }
 #endif
         }
@@ -513,7 +540,7 @@ SIM::client_try_fetch(client_ptr& c)
     {
         // print instruction window states:
         std::cout << "\tINSTRUCTION WINDOW:\n";
-        for (size_t i = 0; i < c->qubits.size(); i++)
+        for (size_t i = 0; i < std::min(c->qubits.size(), size_t{10}); i++)
         {
             if (!c->qubits[i].inst_window.empty())
             {
@@ -601,13 +628,16 @@ _allocate_bus_path_for_cx_like(sim::PATCH& src, sim::PATCH& dst, uint64_t endpoi
         return false;
 
     // now check if we can route:
-    if (src_it == dst_it)
+    if (*src_it == *dst_it)
     {
         (*src_it)->t_free = GL_CYCLE + endpoint_latency;
     }
     else
     {
         auto path = sim::route_path_from_src_to_dst(*src_it, *dst_it);
+        if (path.empty())
+            return false;
+
         for (auto& r : path)
             r->t_free = GL_CYCLE + path_latency;
 
@@ -679,7 +709,7 @@ SIM::execute_instruction(client_ptr& c, inst_ptr inst)
 #if defined(QS_SIM_DEBUG)
         if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
         {
-            std::cout << "\t\tfree buses near qubit " << inst->qubits[0] << " (patch = " << q.memloc_info.patch_idx << "):";
+            std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q.memloc_info.patch_idx << "):";
             for (auto& b : p.buses)
                 std::cout << " " << b->t_free;
             std::cout << "\n";
@@ -715,6 +745,9 @@ SIM::execute_instruction(client_ptr& c, inst_ptr inst)
         {
             inst->cycle_done = GL_CYCLE + 2;
             inst->is_running = true;
+
+            ctrl.memloc_info.t_free = GL_CYCLE + 2;
+            target.memloc_info.t_free = GL_CYCLE + 2;
         }
         else
         {
@@ -733,6 +766,9 @@ SIM::execute_instruction(client_ptr& c, inst_ptr inst)
         const uint64_t endpoint_latency = clifford_correction ? 4 : 2;
         const uint64_t path_latency = 2;
 
+        auto& q = c->qubits[inst->qubits[0]];
+        auto& p = compute_[q.memloc_info.patch_idx];
+
         // keep trying until we succeed or there is no factory that has a resource state:
         bool any_factory_has_resource{false};
         for (size_t i = 0; i < t_fact_.size() && !inst->is_running; i++)
@@ -745,13 +781,12 @@ SIM::execute_instruction(client_ptr& c, inst_ptr inst)
             // get the factory's output patch and consume the magic state:
             auto& f_patch = compute_[fact->output_patch_idx];
 
-            auto& q = c->qubits[inst->qubits[0]];
-            auto& p = compute_[q.memloc_info.patch_idx];
-
             if (_allocate_bus_path_for_cx_like(f_patch, p, endpoint_latency, path_latency))
             {
                 inst->cycle_done = GL_CYCLE + 2 + 2*static_cast<int>(clifford_correction);
                 inst->is_running = true;
+
+                q.memloc_info.t_free = GL_CYCLE + 2 + 2*static_cast<int>(clifford_correction);
 
                 fact->buffer_occu--;
             }
@@ -761,14 +796,30 @@ SIM::execute_instruction(client_ptr& c, inst_ptr inst)
             }
         }
 
+#if defined(QS_SIM_DEBUG)
+            if (result == EXEC_RESULT::ROUTING_STALL)
+            {
+                if (GL_CYCLE % QS_SIM_DEBUG_CYCLE_INTERVAL == 0)
+                {
+                    std::cout << "\t\trouting stall, free buses near qubit:";
+                    for (auto& b : p.buses)
+                        std::cout << " " << b->t_free;
+                    std::cout << "\n";
+                }
+            }
+#endif
+
         if (!any_factory_has_resource)
             result = EXEC_RESULT::RESOURCE_STALL;
     }
     else if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
     {
         // create uop and run it:
-        size_t uop_idx = inst->uop_completed;
-        inst->curr_uop = new INSTRUCTION(inst->urotseq[uop_idx], inst->qubits);
+        if (inst->curr_uop == nullptr)
+        {
+            size_t uop_idx = inst->uop_completed;
+            inst->curr_uop = new INSTRUCTION(inst->urotseq[uop_idx], inst->qubits);
+        }
         result = execute_instruction(c, inst->curr_uop);
         inst->is_running = (result == EXEC_RESULT::SUCCESS);
     }

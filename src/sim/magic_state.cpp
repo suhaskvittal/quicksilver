@@ -52,12 +52,12 @@ T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capaci
     double t_round_ms = static_cast<double>(t_round_ns) * 1e-6;
     if (level_preset <= 1)
     {
-        freq_khz = 1.0 / (5 * t_round_ms);  // cycle is 5 rounds
+        freq_khz = 1e6 / (5 * t_round_ms);  // cycle is 5 rounds
         error_prob = 1e-6;  // don't have exact numbers for this, but should be around here since d = 7 gives 4.5e-8
     }
     else
     {
-        freq_khz = 1.0 / (11 * t_round_ms);
+        freq_khz = 1e6 / (11 * t_round_ms);
         error_prob = 2.7e-12;
     }
 

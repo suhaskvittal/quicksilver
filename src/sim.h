@@ -34,8 +34,8 @@ public:
 
     struct CONFIG
     {
-        uint64_t inst_warmup{2'500'00};
-        uint64_t inst_sim{10'000'00};
+        uint64_t inst_warmup{25000};
+        uint64_t inst_sim{100'000};
 
         std::vector<std::string> client_trace_files;
         /*
@@ -50,29 +50,29 @@ public:
             Each row is a two-wide row of patches. So for example, if `num_rows = 8` and
             `patches_per_row = 16`, the organization will be:
              
-             | + . . . . . . . . |    "+" = junction, "." = bus, "P" = patch
-             | . P P P P P P P P |
-             | . P P P P P P P P |
-             | + . . . . . . . . |
+             | + . . . . . . . . + |    "+" = junction, "." = bus, "P" = patch
+             | . P P P P P P P P . |
+             | . P P P P P P P P . |
+             | + . . . . . . . . + |
 
             And on the edges of the row (left, right, top, and bottom), there will be a bus.
             Upper and lower buses are shared with the previous and next row, respectively.
 
             Finally, at the top, we reserve an extra row for magic state pins, as such:
-            _____________________
-            | M M M M M M M M M |
-            | + . . . . . . . . |
-            | . P P P P P P P P |
-            | . P P P P P P P P |
-            | + . . . . . . . . |
+            ______________________ 
+            | M M M M M M M M M M |
+            | + . . . . . . . . + |
+            | . P P P P P P P P . |
+            | . P P P P P P P P . |
+            | + . . . . . . . . + |
         */
-        size_t num_rows{8};
-        size_t patches_per_row{16};
+        size_t num_rows{24};
+        size_t patches_per_row{32};
         /*
             Magic state factory config: by default, we have set 15 level 1 factories,
             and 1 level 2 factory.        
         */
-        std::vector<size_t> num_15to1_factories_by_level{27,3};
+        std::vector<size_t> num_15to1_factories_by_level{18, 2};
     };
 
     struct clk_info
@@ -134,6 +134,8 @@ public:
 
     const std::vector<client_ptr>& clients() const { return clients_; }
     const std::vector<sim::T_FACTORY*>& t_factories() const { return t_fact_; }
+
+    double freq_compute_khz() const { return compute_speed_khz_; }
 private:
     using bus_array = std::vector<sim::ROUTING_BASE::ptr_type>;
     using bus_info = std::pair<bus_array, bus_array>;
