@@ -20,49 +20,6 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PATCH::bus_array::iterator
-_find_free_bus(PATCH& p, uint64_t t_free)
-{
-    return std::find_if(p.buses.begin(), p.buses.end(), 
-                        [t_free] (const auto& b) { return b->t_free <= t_free; });
-}
-
-// Returns true if the path was allocated, false otherwise.
-bool
-_allocate_bus_path_for_cx_like(PATCH& src, PATCH& dst, uint64_t cycle, uint64_t endpoint_latency=2, uint64_t path_latency=2)
-{
-    // check if the bus is free
-    if (src.buses.empty() || dst.buses.empty())
-        throw std::runtime_error("source/destination has no buses at all");
-
-    auto src_it = _find_free_bus(src, cycle);
-    auto dst_it = _find_free_bus(dst, cycle);
-
-    if (src_it == src.buses.end() || dst_it == dst.buses.end())
-        return false;
-
-    // now check if we can route:
-    if (*src_it == *dst_it)
-    {
-        (*src_it)->t_free = cycle + endpoint_latency;
-    }
-    else
-    {
-        auto path = route_path_from_src_to_dst(*src_it, *dst_it, cycle);
-        if (path.empty())
-            return false;
-
-        for (auto& r : path)
-            r->t_free = cycle + path_latency;
-
-        // hold the endpoints for `endpoint_latency` cycles:
-        (*src_it)->t_free = cycle + endpoint_latency;
-        (*dst_it)->t_free = cycle + endpoint_latency;
-    }
-
-    return true;
-}
-
 COMPUTE::EXEC_RESULT
 COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 {
@@ -116,17 +73,17 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
         // check if the bus is free
         auto& q = c->qubits[inst->qubits[0]];
-        auto& p = patches_[q.memloc_info.patch_idx];
+        const auto& q_patch = patch(q.memloc_info.patch_idx);
         
 #if defined(QS_SIM_DEBUG)
         std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q.memloc_info.patch_idx << "):";
-        for (auto& b : p.buses)
+        for (auto& b : q_patch.buses)
             std::cout << " " << b->t_free;
         std::cout << "\n";
 #endif
 
-        auto it = _find_free_bus(p, cycle_);
-        if (it == p.buses.end())
+        auto it = find_free_bus(q_patch);
+        if (it == q_patch.buses.end())
         {
             result = EXEC_RESULT::ROUTING_STALL;
         }
@@ -147,10 +104,10 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         auto& ctrl = c->qubits[inst->qubits[0]];
         auto& target = c->qubits[inst->qubits[1]];
 
-        auto& c_patch = patches_[ctrl.memloc_info.patch_idx];
-        auto& t_patch = patches_[target.memloc_info.patch_idx];
+        const auto& c_patch = patch(ctrl.memloc_info.patch_idx);
+        const auto& t_patch = patch(target.memloc_info.patch_idx);
 
-        if (_allocate_bus_path_for_cx_like(c_patch, t_patch, cycle_))
+        if (alloc_routing_space(c_patch, t_patch, 2, 2))
         {
             inst->cycle_done = cycle_ + 2;
             inst->is_running = true;
@@ -176,7 +133,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         const uint64_t path_latency = 2;
 
         auto& q = c->qubits[inst->qubits[0]];
-        auto& p = patches_[q.memloc_info.patch_idx];
+        const auto& q_patch = patch(q.memloc_info.patch_idx);
 
         // keep trying until we succeed or there is no factory that has a resource state:
         bool any_factory_has_resource{false};
@@ -188,9 +145,9 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
             any_factory_has_resource = true;
             // get the factory's output patch and consume the magic state:
-            auto& f_patch = patches_[fact->output_patch_idx];
+            const auto& f_patch = patch(fact->output_patch_idx);
 
-            if (_allocate_bus_path_for_cx_like(f_patch, p, cycle_, endpoint_latency, path_latency))
+            if (alloc_routing_space(f_patch, q_patch, endpoint_latency, path_latency))
             {
                 inst->cycle_done = cycle_ + 2 + 2*static_cast<int>(clifford_correction);
                 inst->is_running = true;

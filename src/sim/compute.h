@@ -50,6 +50,15 @@ namespace sim
     | . P P P P P P P P . |
     | . P P P P P P P P . |
     | + . . . . . . . . + |
+
+    And at the bottom, we reserve an extra row for memory pins, as such:
+
+    | + . . . . . . . . + |
+    | . P P P P P P P P . |
+    | . P P P P P P P P . |
+    | + . . . . . . . . + |
+    | M M M M M M M M M M |
+    ______________________ 
 */
 
 class COMPUTE : public CLOCKABLE
@@ -87,9 +96,13 @@ private:
     // compute storage:
     std::vector<PATCH>       patches_;
     size_t                   patches_reserved_for_resource_pins_{0};
+    size_t                   patches_reserved_for_memory_pins_{0};
 
-    // a vector pointers to magic state factories:
+    // a vector of pointers to magic state factories:
     std::vector<T_FACTORY*> t_fact_;
+
+    // a pointer to the memory subsystem
+    MEMORY*                 memory_;
 
     // a buffer for accumulating all execution results each cycle:
     std::vector<EXEC_RESULT> exec_results_;
@@ -97,12 +110,19 @@ private:
     // we will only use T magic states from factories of this level:
     const size_t target_t_fact_level_{1};
 public:
-    COMPUTE(uint64_t t_sext_round_ns, size_t code_distance, CONFIG, const std::vector<T_FACTORY*>&);
+    COMPUTE(double freq_ghz, CONFIG, const std::vector<T_FACTORY*>&, MEMORY*);
 
     void operate() override;
+    
+    // returns true if the routing space was allocated, false otherwise
+    bool alloc_routing_space(const PATCH& from, const PATCH& to, uint64_t block_endpoints_for, uint64_t block_path_for);
+
+    PATCH& select_victim_qubit();
 
     const std::vector<client_ptr>& clients() const { return clients_; }
     uint64_t current_cycle() const { return cycle_; }
+
+    const PATCH& patch(size_t idx) const { return patches_[idx]; }
 private:
     using bus_array = std::vector<ROUTING_BASE::ptr_type>;
     using bus_info = std::pair<bus_array, bus_array>;
@@ -116,6 +136,12 @@ private:
     void client_try_fetch(client_ptr&);
 
     EXEC_RESULT execute_instruction(client_ptr&, inst_ptr);
+
+    PATCH::bus_array::iterator find_free_bus(const PATCH& p) const;
+    
+    // this attempts to estimate how close an instruction is to being ready to execute
+    // it is computed by determining how deep the instruction is in one of its arguments' windows.
+    size_t compute_instruction_recency(const inst_ptr&) const;
 };
 
 ////////////////////////////////////////////////////////////

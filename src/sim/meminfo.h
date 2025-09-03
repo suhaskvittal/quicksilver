@@ -19,7 +19,7 @@ namespace sim
 
 struct MEMINFO
 {
-    enum class LOCATION { COMPUTE, MEMORY, PENDING_XFER_MEM_TO_CMP, PENDING_XFER_CMP_TO_MEM };
+    enum class LOCATION { COMPUTE, MEMORY };
 
     uint8_t    client_id;
     qubit_type qubit_id;

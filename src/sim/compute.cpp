@@ -1,6 +1,9 @@
 /*
     author: Suhas Vittal
     date:   27 August 2025
+
+    `init_clients`, `init_routing_space`, `init_compute` are contained in `compute/init.cpp`
+    `execute_instruction` is contained in `compute/execute.cpp`
 */
 
 #include "compute.h"
@@ -17,14 +20,16 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::COMPUTE(uint64_t t_sext_round_ns, size_t code_distance, CONFIG cfg, const std::vector<T_FACTORY*>& t_factories)
-    :CLOCKABLE(compute_freq_khz(t_sext_round_ns, code_distance)),
-    patches_((cfg.num_rows+1) * cfg.patches_per_row),
-    t_fact_(t_factories)
+COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_factories, MEMORY* memory)
+    :CLOCKABLE(freq_ghz),
+    patches_(cfg.num_rows * cfg.patches_per_row + 2*(cfg.num_patches_per_row+2)),
+    t_fact_(t_factories),
+    memory_(memory)
 {
     // number of patches reserved for resource pins are the number of factories at or higher than the target T factory level:
     patches_reserved_for_resource_pins_ = std::count_if(t_factories.begin(), t_factories.end(),
                                                         [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level >= lvl; });
+    patches_reserved_for_memory_pins_ = memory_->modules().size();
 
     // initialize the routing space:
     auto [junctions, buses] = init_routing_space(cfg);
@@ -37,7 +42,7 @@ COMPUTE::COMPUTE(uint64_t t_sext_round_ns, size_t code_distance, CONFIG cfg, con
                                             size_t{0}, 
                                             std::plus<size_t>{}, 
                                             [] (const client_ptr& c) { return c->qubits.size(); });
-    size_t avail_patches = patches_.size() - patches_reserved_for_resource_pins_;
+    size_t avail_patches = patches_.size() - patches_reserved_for_resource_pins_ - patches_reserved_for_memory_pins_;
     if (avail_patches < total_qubits_required)
         throw std::runtime_error("Not enough space to allocate all program qubits");
 
@@ -121,6 +126,82 @@ COMPUTE::operate()
     for (auto* f : t_fact_)
         std::cout << "FACTORY L" << f->level << " (buffer_occu = " << f->buffer_occu << ", step = " << f->step << ")\n";
 #endif
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_endpoints_for, uint64_t block_path_for)
+{
+    // check if the bus is free
+    if (src.buses.empty() || dst.buses.empty())
+        throw std::runtime_error("source/destination has no buses at all");
+
+    auto src_it = find_free_bus(src);
+    auto dst_it = find_free_bus(dst);
+
+    if (src_it == src.buses.end() || dst_it == dst.buses.end())
+        return false;
+
+    // now check if we can route:
+    if (*src_it == *dst_it)
+    {
+        (*src_it)->t_free = cycle + block_endpoints_for;
+    }
+    else
+    {
+        auto path = route_path_from_src_to_dst(*src_it, *dst_it, cycle);
+        if (path.empty())
+            return false;
+
+        for (auto& r : path)
+            r->t_free = cycle + block_path_for;
+
+        // hold the endpoints for `endpoint_latency` cycles:
+        (*src_it)->t_free = cycle + block_endpoints_for;
+        (*dst_it)->t_free = cycle + block_endpoints_for;
+    }
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+PATCH&
+COMPUTE::select_victim_qubit()
+{
+    std::vector<CLIENT::qubit_info_type>::iterator victim_it = clients_[0]->qubits.end();
+    for (auto& c : clients_)
+    {
+        // first search for a qubit with an empty window
+        auto q_it = std::find_if(c->qubits.begin(), c->qubits.end(),
+                                 [] (const auto& q) { return q.inst_window.empty(); });
+        if (q_it != c->qubits.end())
+            return patches_[q_it->patch_idx];
+
+        q_it = std::max_element(c->qubits.begin(), c->qubits.end(),
+                                [this] (const auto& q1, const auto& q2) 
+                                { 
+                                    auto* q1_head = q1.inst_window.front();
+                                    auto* q2_head = q2.inst_window.front();
+                                    return this->compute_instruction_recency(q1_head) < this->compute_instruction_recency(q2_head); 
+                                });
+        if (q_it != c->qubits.end())
+        {
+            size_t q_recency = this->compute_instruction_recency(q_it->inst_window.front());
+            size_t v_recency = this->compute_instruction_recency(victim_it->inst_window.front());
+            if (q_recency > v_recency)
+                victim_it = q_it;
+        }
+        else
+        {
+            victim_it = q_it;
+        }
+    }
+
+    return patches_[victim_it->patch_idx];
 }
 
 ////////////////////////////////////////////////////////////
@@ -330,6 +411,30 @@ COMPUTE::client_try_fetch(client_ptr& c)
         it = std::find_if(c->qubits.begin(), c->qubits.end(),
                            [] (const auto& q) { return q.inst_window.empty(); });
     }   
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+PATCH::bus_array::iterator
+COMPUTE::find_free_bus(const PATCH& p) const
+{
+    return std::find_if(p.buses.begin(), p.buses.end(), 
+                        [c=cycle_] (const auto& b) { return b->t_free <= c; });
+}
+
+size_t
+COMPUTE::compute_instruction_recency(const inst_ptr& inst) const
+{
+    std::vector<size_t> recency(inst->qubits.size());
+    std::transform(inst->qubits.begin(), inst->qubits.end(), recency.begin(),
+                    [this, &inst] (qubit_type qid) 
+                    { 
+                        auto& q = this->clients_[0]->qubits[qid];
+                        auto inst_it = std::find(q.inst_window.begin(), q.inst_window.end(), inst);
+                        return std::distance(q.inst_window.begin(), inst_it);
+                    });
+    return *std::min_element(recency.begin(), recency.end());
 }
 
 ////////////////////////////////////////////////////////////

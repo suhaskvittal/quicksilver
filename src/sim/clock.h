@@ -45,6 +45,7 @@ void setup_clk_scale_for_group(std::vector<CLOCKABLE*>);
 ////////////////////////////////////////////////////////////
 
 double compute_freq_khz(uint64_t t_sext_round_ns, size_t num_rounds_per_cycle);
+uint64_t convert_cycles_between_frequencies(uint64_t t_cycles, double freq_khz_from, double freq_khz_to);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
