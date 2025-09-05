@@ -9,7 +9,12 @@
 #include <string_view>
 #include <unordered_map>
 
-constexpr size_t COMPUTE_CODE_DISTANCE = 27;
+constexpr size_t COMPUTE_CODE_DISTANCE{19};
+constexpr uint64_t COMPUTE_SYNDROME_EXTRACTION_TIME_NS{1200};
+
+constexpr size_t BB_CODE_DISTANCE{18};
+constexpr size_t BB_QUBITS_PER_BANK{12};
+constexpr uint64_t BB_SYNDROME_EXTRACTION_TIME_NS{1500};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -49,16 +54,14 @@ factory_init(std::vector<size_t> fact_num_15to1_by_level, uint64_t t_round_ns, s
 }
 
 std::vector<sim::MEMORY_MODULE*>
-memory_init(std::vector<size_t> mem_module_capacities, std::vector<uint64_t> mem_sext_round_ns)
+memory_init(std::vector<size_t> bb_module_params)
 {
     std::vector<sim::MEMORY_MODULE*> mem_modules;
-    for (size_t i = 0; i < mem_module_capacities.size(); i++)
+    for (size_t i = 0; i < bb_module_params.size(); i++)
     {
-        size_t cap = mem_module_capacities[i];
-        uint64_t round_ns = mem_sext_round_ns[i];
-        double freq_ghz = sim::compute_freq_khz(round_ns, 1);
-
-        sim::MEMORY_MODULE* m = new sim::MEMORY_MODULE(freq_ghz, cap);
+        size_t num_banks = bb_module_params[i];
+        double freq_khz = sim::compute_freq_khz(BB_SYNDROME_EXTRACTION_TIME_NS, BB_CODE_DISTANCE);
+        sim::MEMORY_MODULE* m = new sim::MEMORY_MODULE(freq_khz, BB_QUBITS_PER_BANK, num_banks);
         mem_modules.push_back(std::move(m));
     }
     return mem_modules;
@@ -72,7 +75,7 @@ main(int argc, char** argv)
 {
     /*
         Default configuration gives:
-            1. A total memory capacity of 288+8 = 296 qubits. 288 qubits are in QLDPC memory, and 8 qubits are in the compute code.
+            1. A total memory capacity of 48*12 + 8 = 584 qubits. 576 qubits are in QLDPC memory, and 8 qubits are in the compute code.
             2. 4+1 15-to-1 magic state factories.
     */
 
@@ -80,26 +83,24 @@ main(int argc, char** argv)
     uint64_t            inst_sim{100'000};
 
     // compute config:
-    size_t              cmp_num_rows{2};
-    size_t              cmp_patches_per_row{4};
-    uint64_t            cmp_sext_round_ns{1200};  // syndrome extraction latency
+    size_t              cmp_num_rows{1};
+    size_t              cmp_patches_per_row{16};
 
     // magic state config:
     std::vector<size_t> fact_num_15to1_by_level{4,1};
     size_t              fact_buffer_capacity{4};
 
-    // memory config: these are based off the [[288, 12, 18]] BB code
-    std::vector<size_t> mem_module_capacities(24,12);  // 24 x 12 
-    std::vector<uint64_t> mem_sext_round_ns(24,1500);
+    // memory config:
+    std::vector<size_t> mem_bb_module_params(4, 12);  // 4 modules x 12 banks per module (48 total banks/code blocks)  -- 12 qubits per block
 
     // parse input arguments;
     std::string trace_file{argv[1]};
 
     // Setup factories:
-    std::vector<sim::T_FACTORY*> t_factories = factory_init(fact_num_15to1_by_level, cmp_sext_round_ns, fact_buffer_capacity);
+    std::vector<sim::T_FACTORY*> t_factories = factory_init(fact_num_15to1_by_level, COMPUTE_SYNDROME_EXTRACTION_TIME_NS, fact_buffer_capacity);
 
     // Setup memory:
-    std::vector<sim::MEMORY_MODULE*> mem_modules = memory_init(mem_module_capacities, mem_sext_round_ns);
+    std::vector<sim::MEMORY_MODULE*> mem_modules = memory_init(mem_bb_module_params);
 
     // Setup compute:
     sim::COMPUTE::CONFIG cfg;
@@ -107,7 +108,7 @@ main(int argc, char** argv)
     cfg.num_rows = cmp_num_rows;
     cfg.patches_per_row = cmp_patches_per_row;
 
-    double cmp_freq_ghz = sim::compute_freq_khz(cmp_sext_round_ns, COMPUTE_CODE_DISTANCE);
+    double cmp_freq_ghz = sim::compute_freq_khz(COMPUTE_SYNDROME_EXTRACTION_TIME_NS, COMPUTE_CODE_DISTANCE);
     sim::COMPUTE* cmp = new sim::COMPUTE(cmp_freq_ghz, cfg, t_factories, mem_modules);
 
     // setup clock for all components:

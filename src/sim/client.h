@@ -36,6 +36,8 @@ struct CLIENT
         MEMINFO          memloc_info;
     };
 
+    const int8_t id;
+
     uint64_t s_inst_read{0};
     uint64_t s_inst_done{0};
     uint64_t s_unrolled_inst_done{0};
@@ -51,7 +53,7 @@ struct CLIENT
     FILE*             trace_bin_istrm;
     gzFile            trace_gz_istrm;
     
-    CLIENT(std::string trace_file);
+    CLIENT(std::string trace_file, int8_t id);
     ~CLIENT();
 
     INSTRUCTION read_instruction_from_trace();

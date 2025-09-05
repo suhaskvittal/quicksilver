@@ -6,7 +6,8 @@
     `execute_instruction` is contained in `compute/execute.cpp`
 */
 
-#include "compute.h"
+#include "sim/compute.h"
+#include "sim/memory.h"
 
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
@@ -20,16 +21,16 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_factories, MEMORY* memory)
+COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_factories, const std::vector<MEMORY_MODULE*>& memory)
     :CLOCKABLE(freq_ghz),
-    patches_(cfg.num_rows * cfg.patches_per_row + 2*(cfg.num_patches_per_row+2)),
+    patches_(cfg.num_rows * cfg.patches_per_row + 2*(cfg.patches_per_row+2)),
     t_fact_(t_factories),
     memory_(memory)
 {
     // number of patches reserved for resource pins are the number of factories at or higher than the target T factory level:
     size_t patches_reserved_for_resource_pins = std::count_if(t_factories.begin(), t_factories.end(),
                                                         [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level >= lvl; });
-    size_t patches_reserved_for_memory_pins = memory_->modules().size();
+    size_t patches_reserved_for_memory_pins = memory_.size();
 
     patch_idx_compute_start_ = patches_reserved_for_resource_pins;
     patch_idx_memory_start_ = patches_reserved_for_resource_pins + cfg.num_rows*cfg.patches_per_row;
@@ -53,7 +54,8 @@ COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_f
     init_clients(cfg);
 
     // connect memory to this compute:
-    memory_->compute_ = this;
+    for (auto* m : memory_)
+        m->compute_ = this;
 }
 
 ////////////////////////////////////////////////////////////
@@ -131,13 +133,21 @@ COMPUTE::operate()
     // print factory information:
     for (auto* f : t_fact_)
         std::cout << "FACTORY L" << f->level << " (buffer_occu = " << f->buffer_occu << ", step = " << f->step << ")\n";
+
+    // print memory information:
+    for (size_t i = 0; i < memory_.size(); i++)
+    {
+        std::cout << "MEMORY MODULE " << i 
+                    << " (num_banks = " << memory_[i]->num_banks_ 
+                    << ", request buffer size = " << memory_[i]->request_buffer_.size() << ")\n";
+    }
 #endif
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
+bool
 COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_endpoints_for, uint64_t block_path_for)
 {
     // check if the bus is free
@@ -153,20 +163,20 @@ COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_
     // now check if we can route:
     if (*src_it == *dst_it)
     {
-        (*src_it)->t_free = cycle + block_endpoints_for;
+        (*src_it)->t_free = cycle_ + block_endpoints_for;
     }
     else
     {
-        auto path = route_path_from_src_to_dst(*src_it, *dst_it, cycle);
+        auto path = route_path_from_src_to_dst(*src_it, *dst_it, cycle_);
         if (path.empty())
             return false;
 
         for (auto& r : path)
-            r->t_free = cycle + block_path_for;
+            r->t_free = cycle_ + block_path_for;
 
         // hold the endpoints for `endpoint_latency` cycles:
-        (*src_it)->t_free = cycle + block_endpoints_for;
-        (*dst_it)->t_free = cycle + block_endpoints_for;
+        (*src_it)->t_free = cycle_ + block_endpoints_for;
+        (*dst_it)->t_free = cycle_ + block_endpoints_for;
     }
 
     return true;
@@ -175,50 +185,76 @@ COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PATCH&
+CLIENT::qubit_info_type*
 COMPUTE::select_victim_qubit()
 {
-    std::vector<CLIENT::qubit_info_type>::iterator victim_it = clients_[0]->qubits.end();
+    CLIENT::qubit_info_type* victim{nullptr};
+    size_t victim_timeliness{0};
+
     for (auto& c : clients_)
     {
         // first search for a qubit with an empty window and is in compute memory
         auto q_it = std::find_if(c->qubits.begin(), c->qubits.end(),
-                                 [] (const auto& q) { return q.inst_window.empty() && q.memloc_info.where == MEMINFO::LOCATION::COMPUTE; });
-        if (q_it != c->qubits.end())
-        {
-            victim_it = q_it;
-            break;
-        }
-
-        q_it = std::max_element(c->qubits.begin(), c->qubits.end(),
-                                [this] (const auto& q1, const auto& q2) 
-                                { 
-                                    auto* q1_head = q1.inst_window.front();
-                                    auto* q2_head = q2.inst_window.front();
-                                    return this->compute_instruction_recency(q1_head) < this->compute_instruction_recency(q2_head); 
+                                 [cyc=cycle_] (const auto& q) 
+                                 { 
+                                    return q.inst_window.empty() 
+                                            && q.memloc_info.where == MEMINFO::LOCATION::COMPUTE
+                                            && q.memloc_info.t_free <= cyc; 
                                 });
         if (q_it != c->qubits.end())
         {
-            size_t q_recency = this->compute_instruction_recency(q_it->inst_window.front());
-            size_t v_recency = this->compute_instruction_recency(victim_it->inst_window.front());
-            if (q_recency > v_recency)
-                victim_it = q_it;
+            victim = &(*q_it);
+            break;
         }
-        else
+
+        // otherwise, select the qubit with the least timely instruction:
+        for (auto q_it = c->qubits.begin(); q_it != c->qubits.end(); q_it++)
         {
-            victim_it = q_it;
+            if (q_it->inst_window.empty() 
+                || q_it->memloc_info.where == MEMINFO::LOCATION::MEMORY 
+                || q_it->memloc_info.t_free > cycle_)
+            {
+                continue;
+            }
+
+            auto* q_head = q_it->inst_window.front();
+            size_t q_timeliness = this->compute_instruction_timeliness(q_head);
+            if (q_timeliness > victim_timeliness)
+            {
+                victim = &(*q_it);
+                victim_timeliness = q_timeliness;
+            }
         }
     }
 
-    // return the patch for the victim qubit:
-    int8_t v_client_id = victim_it->memloc_info.client_id;
-    qubit_type v_qubit_id = victim_it->memloc_info.qubit_id;
+    return victim;
+}
 
-    auto p_it = find_patch_containing_qubit(v_client_id, v_qubit_id);
-    if (p_it == patches_.end())
-        throw std::runtime_error("patch not found for qubit " + std::to_string(v_qubit_id) + " of client " + std::to_string(v_client_id));
+CLIENT::qubit_info_type*
+COMPUTE::select_random_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id)
+{
+    // get the instruction at the head of the corresponding qubit's array
+    const auto& incoming_client = clients_[incoming_client_id];
+    const auto& incoming_qubit_info = incoming_client->qubits[incoming_qubit_id];
+    auto* inst = incoming_qubit_info.inst_window.front();
 
-    return *p_it;
+    auto does_not_match_inst_operands = [match_cid=incoming_client_id, inst] (int8_t cid, qubit_type qid)
+                                        {
+                                            bool client_match = cid == match_cid;
+                                            bool operand_match = std::find(inst->qubits.begin(), inst->qubits.end(), qid) != inst->qubits.end();
+                                            return !client_match && !operand_match;
+                                        };
+    size_t rand_patch_idx;
+    CLIENT::qubit_info_type* victim{nullptr};
+    do
+    {
+        rand_patch_idx = GL_RNG() % (patch_idx_memory_start_ - patch_idx_compute_start_);
+        const PATCH& p = patches_[patch_idx_compute_start_ + rand_patch_idx];
+        victim = &clients_[p.client_id]->qubits[p.qubit_id];
+    }
+    while (does_not_match_inst_operands(victim->memloc_info.client_id, victim->memloc_info.qubit_id));
+
+    return victim;
 }
 
 ////////////////////////////////////////////////////////////
@@ -433,7 +469,7 @@ COMPUTE::client_try_fetch(client_ptr& c)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PATCH::bus_array::iterator
+PATCH::bus_array::const_iterator
 COMPUTE::find_free_bus(const PATCH& p) const
 {
     return std::find_if(p.buses.begin(), p.buses.end(), 
@@ -441,17 +477,17 @@ COMPUTE::find_free_bus(const PATCH& p) const
 }
 
 size_t
-COMPUTE::compute_instruction_recency(const inst_ptr& inst) const
+COMPUTE::compute_instruction_timeliness(const inst_ptr& inst) const
 {
-    std::vector<size_t> recency(inst->qubits.size());
-    std::transform(inst->qubits.begin(), inst->qubits.end(), recency.begin(),
+    std::vector<size_t> timeliness(inst->qubits.size());
+    std::transform(inst->qubits.begin(), inst->qubits.end(), timeliness.begin(),
                     [this, &inst] (qubit_type qid) 
                     { 
                         auto& q = this->clients_[0]->qubits[qid];
                         auto inst_it = std::find(q.inst_window.begin(), q.inst_window.end(), inst);
                         return std::distance(q.inst_window.begin(), inst_it);
                     });
-    return *std::min_element(recency.begin(), recency.end());
+    return std::reduce(timeliness.begin(), timeliness.end(), size_t{0});
 }
 
 ////////////////////////////////////////////////////////////
@@ -468,11 +504,12 @@ std::vector<MEMORY_MODULE*>::iterator
 COMPUTE::find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id)
 {
     return std::find_if(memory_.begin(), memory_.end(),
-                        [client_id, qubit_id] (const auto& m) { return m->find_qubit(client_id, qubit_id) != m->contents_end(); });
+                        [client_id, qubit_id] (const auto& m) 
+                        { 
+                            auto [b_it, q_it] = m->find_qubit(client_id, qubit_id);
+                            return b_it != m->banks_.end();
+                        });
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

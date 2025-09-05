@@ -6,6 +6,7 @@
 */
 
 #include "sim/compute.h"
+#include "sim/memory.h"
 
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
@@ -58,10 +59,42 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             auto m_it = find_memory_module_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
             if (m_it == memory_.end())
             {
-                throw std::runtime_error("memory module not found for qubit " + std::to_string(q.memloc_info.qubit_id) 
-                                            + " of client " + std::to_string(q.memloc_info.client_id));
+                // we need a lot of info in this error message, so use a stringstream:
+                std::stringstream ss;
+                ss << "memory module not found for qubit " << q.memloc_info.qubit_id
+                    << " of client " << q.memloc_info.client_id+0 << "\n";
+
+                // dump the patch info:
+                ss << "cmp memory:\n";
+                for (size_t i = patch_idx_compute_start_; i < patch_idx_memory_start_; i++)
+                    ss << "\tpatch " << i << ": client = " << patches_[i].client_id+0 << ", qubit = " << patches_[i].qubit_id << "\n";
+
+                // dump each memory module:
+                ss << "memory modules:\n";
+                for (size_t i = 0; i < memory_.size(); i++)
+                {
+                    ss << "\tmodule " << i << "\n";
+                    for (size_t j = 0; j < memory_[i]->banks_.size(); j++)
+                    {
+                        ss << "\t\tbank " << j << "\n";
+                        for (size_t k = 0; k < memory_[i]->banks_[j].size(); k++)
+                        {
+                            auto [client_id, qubit_id] = memory_[i]->banks_[j][k];
+                            if (client_id >= 0)
+                                ss << "\t\t\tqubit " << k << ": client = " << client_id+0 << ", qubit = " << qubit_id << "\n";
+                        }
+                    }
+                }
+
+                throw std::runtime_error(ss.str());
             }
-            m_it->request_buffer_.push_back(req);
+            (*m_it)->request_buffer_.push_back(req);
+
+#if defined(QS_SIM_DEBUG)
+            std::cout << "\t\tmemory request for instruction " << *inst
+                        << "\tclient = " << q.memloc_info.client_id+0 
+                        << ", qubit = " << q.memloc_info.qubit_id << "\n";
+#endif
 
             // set `t_until_in_compute` and `t_free` 
             // to `std::numeric_limits<uint64_t>::max()` to indicate that
@@ -170,7 +203,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
             any_factory_has_resource = true;
             // get the factory's output patch and consume the magic state:
-            const auto& f_patch = patch(fact->output_patch_idx);
+            PATCH& f_patch = patches_[fact->output_patch_idx];
 
             if (alloc_routing_space(f_patch, q_patch, endpoint_latency, path_latency))
             {

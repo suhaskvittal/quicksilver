@@ -6,6 +6,7 @@
 */
 
 #include "sim/compute.h"
+#include "sim/memory.h"
 
 namespace sim
 {
@@ -23,7 +24,7 @@ COMPUTE::init_clients(const CONFIG& cfg)
 
     for (size_t i = 0; i < cfg.client_trace_files.size(); i++)
     {
-        client_ptr c{new sim::CLIENT(cfg.client_trace_files[i])};
+        client_ptr c{new sim::CLIENT(cfg.client_trace_files[i], i)};
         for (auto& q : c->qubits)
         {
             if (patch_idx >= patch_idx_memory_start_)
@@ -32,10 +33,10 @@ COMPUTE::init_clients(const CONFIG& cfg)
                 MEMORY_MODULE* m = memory_[mem_idx];
                 
                 // search for uninitialized qubit in the module:
-                auto m_it = m->find_uninitialized_qubit();
+                auto [b_it, q_it] = m->find_uninitialized_qubit();
                 
                 // if no uninitialized qubit is found, we need to go to the next module:
-                if (m_it == m->contents.end())
+                if (b_it == m->banks_.end())
                 {
                     // goto next module:
                     mem_idx++;
@@ -44,10 +45,10 @@ COMPUTE::init_clients(const CONFIG& cfg)
                         throw std::runtime_error("Not enough space in memory to allocate all qubits");
 
                     m = memory_[mem_idx];
-                    m_it = m->find_uninitialized_qubit();
+                    std::tie(b_it, q_it) = m->find_uninitialized_qubit();
                 }
                 
-                *m_it = std::make_pair(c.get(), q.memloc_info.qubit_id);
+                *q_it = std::make_pair(q.memloc_info.client_id, q.memloc_info.qubit_id);
 
                 // update qubit info:
                 q.memloc_info.where = MEMINFO::LOCATION::MEMORY;
@@ -55,11 +56,13 @@ COMPUTE::init_clients(const CONFIG& cfg)
             else
             {
                 // set patch information:
-                patches_[patch_idx++].client = c.get();
-                patches_[patch_idx++].qubit_id = q.memloc_info.qubit_id;
+                patches_[patch_idx].client_id = q.memloc_info.client_id;
+                patches_[patch_idx].qubit_id = q.memloc_info.qubit_id;
                 
                 // update qubit info:
                 q.memloc_info.where = MEMINFO::LOCATION::COMPUTE;
+
+                patch_idx++;
             }
         }
         clients_.push_back(std::move(c));
@@ -123,7 +126,7 @@ COMPUTE::init_routing_space(const CONFIG& cfg)
 void
 COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_array& buses)
 {
-    size_t patch_idx{patches_reserved_for_resource_pins_};
+    size_t patch_idx{0};
 
     // First setup the magic state pins:
     std::vector<sim::T_FACTORY*> top_level_t_fact;
@@ -132,8 +135,14 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
 
     std::cout << "top_level_t_fact.size() = " << top_level_t_fact.size() << "\n";
 
-    if (top_level_t_fact.size() > cfg.patches_per_row+2)
-        throw std::runtime_error("Not enough space to allocate all magic state pins");
+    const size_t full_row_width = (cfg.patches_per_row/2) + 2;  // note that a row is 2 wide (upper and lower part)
+
+    if (top_level_t_fact.size() > full_row_width)
+    {
+        throw std::runtime_error("Not enough space to allocate all magic state pins: " 
+                                    + std::to_string(top_level_t_fact.size()) 
+                                    + " > " + std::to_string(full_row_width));
+    }
 
     for (size_t i = 0; i < top_level_t_fact.size(); i++)
     {
@@ -147,7 +156,7 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
         fp.buses.push_back(buses[0]);
         if (i == 0)
             fp.buses.push_back(junctions[0]);
-        else if (i == cfg.patches_per_row+1)
+        else if (i == full_row_width-1)
             fp.buses.push_back(junctions[1]);
         else
             fp.buses.push_back(buses[0]);
@@ -163,14 +172,17 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
             // buses[i] is the upper bus, buses[i+1] is the left bus, buses[i+2] is the right bus
             bool is_upper = (j < cfg.patches_per_row/2);
             bool is_left = (j == 0 || j == cfg.patches_per_row/2);
+            bool is_right = (j == cfg.patches_per_row/2-1 || j == cfg.patches_per_row-1);
 
             if (is_upper)
-                patches_[patch_idx].buses.push_back(buses[2*i]);
+                patches_[patch_idx].buses.push_back(buses[3*i]);
             else
-                patches_[patch_idx].buses.push_back(buses[2*i+2]);
+                patches_[patch_idx].buses.push_back(buses[3*i+3]);
 
             if (is_left)
-                patches_[patch_idx].buses.push_back(buses[2*i+1]);
+                patches_[patch_idx].buses.push_back(buses[3*i+1]);
+            if (is_right)
+                patches_[patch_idx].buses.push_back(buses[3*i+2]);
 
             patch_idx++;
         }
@@ -181,19 +193,22 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
     const size_t penult_junc_idx = 2*cfg.num_rows;
     const size_t last_junc_idx = 2*cfg.num_rows+1;
 
-    const auto& mem = memory_->modules();
-    if (mem.size() > cfg.patches_per_row+2)
-        throw std::runtime_error("Not enough space to allocate all memory pins");
-
-    for (size_t i = 0; i < mem.size(); i++)
+    if (memory_.size() > full_row_width)
     {
-        auto* m = mem[i];
+        throw std::runtime_error("Not enough space to allocate all memory pins: " 
+                                    + std::to_string(memory_.size()) 
+                                    + " > " + std::to_string(full_row_width));
+    }
+
+    for (size_t i = 0; i < memory_.size(); i++)
+    {
+        auto* m = memory_[i];
         m->output_patch_idx = patch_idx;
         
         PATCH& mp = patches_[patch_idx];
         if (i == 0)
             mp.buses.push_back(junctions[penult_junc_idx]);
-        else if (i == cfg.patches_per_row+1)
+        else if (i == full_row_width-1)
             mp.buses.push_back(junctions[last_junc_idx]);
         else
             mp.buses.push_back(buses[last_bus_idx]);

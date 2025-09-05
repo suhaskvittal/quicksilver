@@ -6,6 +6,7 @@
 #include "clock.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace sim
 {
@@ -53,6 +54,15 @@ double
 compute_freq_khz(uint64_t t_sext_round_ns, size_t num_rounds_per_cycle)
 {
     return 1.0e6 / static_cast<double>(t_sext_round_ns * num_rounds_per_cycle);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint64_t
+convert_cycles_between_frequencies(uint64_t t_cycles, double freq_khz_from, double freq_khz_to)
+{
+    return static_cast<uint64_t>( ceil(t_cycles * freq_khz_from / freq_khz_to) );
 }
 
 ////////////////////////////////////////////////////////////

@@ -60,6 +60,7 @@ set(SIM_FILES
     src/sim/compute/execute.cpp
     src/sim/compute/init.cpp
     src/sim/magic_state.cpp
+    src/sim/memory.cpp
     src/sim/routing.cpp)
 
 # binary generation executable:

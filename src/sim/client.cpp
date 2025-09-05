@@ -14,11 +14,18 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CLIENT::CLIENT(std::string _trace_file)
-    :trace_file(_trace_file)
+CLIENT::CLIENT(std::string _trace_file, int8_t _id)
+    :trace_file(_trace_file),
+    id(_id)
 {
     size_t num_qubits = open_file(trace_file);
+
     qubits = std::vector<qubit_info_type>(num_qubits);
+    for (size_t i = 0; i < qubits.size(); i++)
+    {
+        qubits[i].memloc_info.client_id = id;
+        qubits[i].memloc_info.qubit_id = i;
+    }
 }
 
 CLIENT::~CLIENT()

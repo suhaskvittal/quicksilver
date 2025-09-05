@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -25,7 +26,7 @@ extern std::mt19937 GL_RNG;
 namespace sim
 {
 
-class MEMORY;
+class MEMORY_MODULE;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -115,19 +116,22 @@ private:
     // we will only use T magic states from factories of this level:
     const size_t target_t_fact_level_{1};
 public:
-    COMPUTE(double freq_ghz, CONFIG, const std::vector<T_FACTORY*>&, MEMORY*);
+    COMPUTE(double freq_ghz, CONFIG, const std::vector<T_FACTORY*>&, const std::vector<MEMORY_MODULE*>&);
 
     void operate() override;
     
     // returns true if the routing space was allocated, false otherwise
     bool alloc_routing_space(const PATCH& from, const PATCH& to, uint64_t block_endpoints_for, uint64_t block_path_for);
 
-    PATCH& select_victim_qubit();
+    // Returns a pointer to the victim qubit. We return a pointer 
+    // as this qubit resides in one of the clients' qubit arrays.
+    CLIENT::qubit_info_type* select_victim_qubit();
+    
+    // Use this if we fail to find a victim qubit:
+    CLIENT::qubit_info_type* select_random_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id);
 
     const std::vector<client_ptr>& clients() const { return clients_; }
     uint64_t current_cycle() const { return cycle_; }
-
-    const PATCH& patch(size_t idx) const { return patches_[idx]; }
 private:
     using bus_array = std::vector<ROUTING_BASE::ptr_type>;
     using bus_info = std::pair<bus_array, bus_array>;
@@ -144,14 +148,16 @@ private:
 
     EXEC_RESULT execute_instruction(client_ptr&, inst_ptr);
 
-    PATCH::bus_array::iterator find_free_bus(const PATCH& p) const;
+    PATCH::bus_array::const_iterator find_free_bus(const PATCH& p) const;
     
     // this attempts to estimate how close an instruction is to being ready to execute
     // it is computed by determining how deep the instruction is in one of its arguments' windows.
-    size_t compute_instruction_recency(const inst_ptr&) const;
+    size_t compute_instruction_timeliness(const inst_ptr&) const;
 
     std::vector<PATCH>::iterator          find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id);
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id);
+
+    friend class MEMORY_MODULE;
 };
 
 ////////////////////////////////////////////////////////////
