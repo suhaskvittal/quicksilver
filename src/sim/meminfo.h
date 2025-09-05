@@ -21,11 +21,9 @@ struct MEMINFO
 {
     enum class LOCATION { COMPUTE, MEMORY };
 
-    uint8_t    client_id;
+    int8_t     client_id;
     qubit_type qubit_id;
     LOCATION   where;
-    size_t     patch_idx;
-    size_t     memory_idx;
 
     uint64_t   t_free{0};
 };
@@ -34,7 +32,11 @@ struct PATCH
 {
     using bus_array = std::vector<ROUTING_BASE::ptr_type>;
 
-    bus_array buses;
+    int8_t     client_id{-1};
+    qubit_type qubit_id{-1};
+    bus_array  buses;
+
+    bool has_program_qubit() const { return client_id >= 0 && qubit_id >= 0; }
 };
 
 ////////////////////////////////////////////////////////////

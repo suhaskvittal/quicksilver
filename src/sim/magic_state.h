@@ -31,8 +31,10 @@ struct T_FACTORY : public CLOCKABLE
     const size_t output_count;
     const size_t num_rotation_steps;
     const size_t buffer_capacity;
-    const ssize_t output_patch_idx;
     const size_t level;
+    
+    // set by `COMPUTE::init_compute`
+    ssize_t output_patch_idx;
 
     // `step` tracks the progress of the factory. Since, there are `1 + num_rotation_steps` 
     // steps before the factory is done, `0 <= step < 1 + num_rotation_steps`.
@@ -55,11 +57,9 @@ struct T_FACTORY : public CLOCKABLE
         size_t output_count, 
         size_t num_rotation_steps,
         size_t buffer_capacity,
-        ssize_t output_patch_idx,
         size_t level);
 
-    static T_FACTORY f15to1(size_t level_preset, uint64_t t_round_ns, 
-                                        size_t buffer_capacity, ssize_t output_patch_idx);
+    static T_FACTORY f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capacity);
 
     void operate() override;
 };

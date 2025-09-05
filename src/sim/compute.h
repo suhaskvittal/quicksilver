@@ -25,6 +25,8 @@ extern std::mt19937 GL_RNG;
 namespace sim
 {
 
+class MEMORY;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -94,15 +96,18 @@ private:
     std::vector<client_ptr>  clients_;
     
     // compute storage:
+    //    factory pins are from `0` to `patch_idx_compute_start_` (not including `patch_idx_compute_start_`)
+    //    program qubits are from `patch_idx_compute_start_` to `patch_idx_memory_start_` (not including `patch_idx_memory_start_`)
+    //    memory pins are from `patch_idx_memory_start_` to `patches_.size()` (not including `patches_.size()`)
     std::vector<PATCH>       patches_;
-    size_t                   patches_reserved_for_resource_pins_{0};
-    size_t                   patches_reserved_for_memory_pins_{0};
+    size_t                   patch_idx_compute_start_{0};
+    size_t                   patch_idx_memory_start_{0};
 
     // a vector of pointers to magic state factories:
     std::vector<T_FACTORY*> t_fact_;
 
-    // a pointer to the memory subsystem
-    MEMORY*                 memory_;
+    // a vector of pointers to memory modules:
+    std::vector<MEMORY_MODULE*> memory_;
 
     // a buffer for accumulating all execution results each cycle:
     std::vector<EXEC_RESULT> exec_results_;
@@ -134,6 +139,8 @@ private:
     void client_try_retire(client_ptr&);
     void client_try_execute(client_ptr&);
     void client_try_fetch(client_ptr&);
+    
+    void issue_memory_swap_request(client_ptr&, qubit_type);
 
     EXEC_RESULT execute_instruction(client_ptr&, inst_ptr);
 
@@ -142,6 +149,9 @@ private:
     // this attempts to estimate how close an instruction is to being ready to execute
     // it is computed by determining how deep the instruction is in one of its arguments' windows.
     size_t compute_instruction_recency(const inst_ptr&) const;
+
+    std::vector<PATCH>::iterator          find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id);
+    std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id);
 };
 
 ////////////////////////////////////////////////////////////

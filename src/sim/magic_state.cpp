@@ -27,7 +27,6 @@ T_FACTORY::T_FACTORY(
     size_t _output_count, 
     size_t _num_rotation_steps,
     size_t _buffer_capacity,
-    ssize_t _output_patch_idx,
     size_t _level
 )
     :CLOCKABLE(freq_khz),
@@ -36,7 +35,6 @@ T_FACTORY::T_FACTORY(
      output_count(_output_count),
      num_rotation_steps(_num_rotation_steps),
      buffer_capacity(_buffer_capacity),
-     output_patch_idx(_output_patch_idx),
      level(_level)
 {}
 
@@ -45,7 +43,7 @@ T_FACTORY::T_FACTORY(
 */
 
 T_FACTORY
-T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capacity, ssize_t output_patch_idx)
+T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capacity)
 {
     double freq_khz;
     double error_prob;
@@ -61,7 +59,7 @@ T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capaci
         error_prob = 2.7e-12;
     }
 
-    return T_FACTORY(freq_khz, error_prob, 4, 1, 11, buffer_capacity, output_patch_idx, level_preset);
+    return T_FACTORY(freq_khz, error_prob, 4, 1, 11, buffer_capacity, level_preset);
 }
 
 ////////////////////////////////////////////////////////////

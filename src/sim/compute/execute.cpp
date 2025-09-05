@@ -31,6 +31,8 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         return EXEC_RESULT::SUCCESS;
     }
 
+    EXEC_RESULT result{EXEC_RESULT::SUCCESS};
+
     // check if all qubits are in compute memory:
     for (qubit_type qid : inst->qubits)
     {
@@ -38,25 +40,45 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
         // ensure all instructions are ready:
         if (q.memloc_info.t_free > cycle_)
-            return EXEC_RESULT::WAITING_FOR_QUBIT_TO_BE_READY;
+        {
+            // if we are waiting for a qubit to return from memory, then this is a memory stall
+            result = (q.memloc_info.where == MEMINFO::LOCATION::COMPUTE) 
+                            ? EXEC_RESULT::WAITING_FOR_QUBIT_TO_BE_READY 
+                            : EXEC_RESULT::MEMORY_STALL;
+            break;
+        }
 
         // if a qubit is not in memory, we need to make a memory request:
         if (q.memloc_info.where == MEMINFO::LOCATION::MEMORY)
         {
+            // make memory request:
+            MEMORY_MODULE::request_type req{c.get(), q.memloc_info.client_id, q.memloc_info.qubit_id};
+
+            // find memory module containing qubit:
+            auto m_it = find_memory_module_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
+            if (m_it == memory_.end())
+            {
+                throw std::runtime_error("memory module not found for qubit " + std::to_string(q.memloc_info.qubit_id) 
+                                            + " of client " + std::to_string(q.memloc_info.client_id));
+            }
+            m_it->request_buffer_.push_back(req);
+
             // set `t_until_in_compute` and `t_free` 
             // to `std::numeric_limits<uint64_t>::max()` to indicate that
             // this is blocked:
+            q.memloc_info.t_free = std::numeric_limits<uint64_t>::max();
 
-            // TODO: make memory request and exit
-            return EXEC_RESULT::MEMORY_STALL;
+            result = EXEC_RESULT::MEMORY_STALL;
         }
     }
+
+    // if any qubit is unavailable we need to exit:
+    if (result != EXEC_RESULT::SUCCESS)
+        return result;
 
 #if defined(QS_SIM_DEBUG)
     std::cout << "\t\tall qubits are available -- trying to execute instruction: " << (*inst) << "\n";
 #endif
-
-    EXEC_RESULT result{EXEC_RESULT::SUCCESS};
 
     // if this is a gate that requires a resource, make sure the resource is available:
     if (inst->type == INSTRUCTION::TYPE::H 
@@ -71,12 +93,15 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         //    A clifford correction is required afterward to ensure correctness, but this is always a software
         //    instruction. 
 
-        // check if the bus is free
+        // get qubit and its patch:
         auto& q = c->qubits[inst->qubits[0]];
-        const auto& q_patch = patch(q.memloc_info.patch_idx);
         
+        // get qubit patch:
+        const auto& q_patch = *find_patch_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
+
+        // check if there is a free bus next to the patch:
 #if defined(QS_SIM_DEBUG)
-        std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q.memloc_info.patch_idx << "):";
+        std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q_patch.client_id << ", " << q_patch.qubit_id << "):";
         for (auto& b : q_patch.buses)
             std::cout << " " << b->t_free;
         std::cout << "\n";
@@ -104,8 +129,8 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         auto& ctrl = c->qubits[inst->qubits[0]];
         auto& target = c->qubits[inst->qubits[1]];
 
-        const auto& c_patch = patch(ctrl.memloc_info.patch_idx);
-        const auto& t_patch = patch(target.memloc_info.patch_idx);
+        const auto& c_patch = *find_patch_containing_qubit(ctrl.memloc_info.client_id, ctrl.memloc_info.qubit_id);
+        const auto& t_patch = *find_patch_containing_qubit(target.memloc_info.client_id, target.memloc_info.qubit_id);
 
         if (alloc_routing_space(c_patch, t_patch, 2, 2))
         {
@@ -133,7 +158,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         const uint64_t path_latency = 2;
 
         auto& q = c->qubits[inst->qubits[0]];
-        const auto& q_patch = patch(q.memloc_info.patch_idx);
+        const auto& q_patch = *find_patch_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
 
         // keep trying until we succeed or there is no factory that has a resource state:
         bool any_factory_has_resource{false};

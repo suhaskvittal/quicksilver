@@ -24,60 +24,44 @@ namespace sim
 */
 struct MEMORY_MODULE : public CLOCKABLE
 {
-    using client_qubit_type = std::pair<int8_t, qubit_type>;  // client_id, qubit_id     
-    constexpr client_qubit_type UNITIALIZED{-1,-1};
+    using client_qubit_type = std::pair<CLIENT*, qubit_type>;  // client_id, qubit_id     
+    using qubit_block_type = std::vector<client_qubit_type>;
 
-    // the contents of the memory
-    std::vector<client_qubit_type> contents;
-
-    // module pin in the compute memory
-    size_t patch_idx{0};
-
-    MEMORY_MODULE(double freq_ghz, size_t capacity);
-};
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-class MEMORY
-{
-public:
     struct request_type
     {
-        bool completed{false};
-        CLIENT* client;
-        int8_t client_id;
+        CLIENT*    client;
+        int8_t     client_id;
         qubit_type requested_qubit;
     };
 
     using request_buffer_type = std::vector<request_type>;
-private:
-    std::vector<MEMORY_MODULE*> modules_;
-    
-    // request buffer
-    request_buffer_type request_buffer_;
+
+    // module pin in the compute memory
+    size_t output_patch_idx{0};
 
     // this is a pointer to `compute` (so we can perform a move)
     COMPUTE* compute_;
-public:
-    MEMORY(const std::vector<MEMORY_MODULE*>& modules, COMPUTE*);    
+
+    // the contents of the memory -- tracked in software
+    qubit_block_type contents;
+
+    // request buffer -- this is an infinitely deep buffer as it is managed by software
+    request_buffer_type request_buffer_;
+
+    MEMORY_MODULE(double freq_ghz, size_t capacity);
 
     void operate() override;
 
-    const std::vector<MEMORY_MODULE*>& modules() const { return modules_; }
-private:
-    using qubit_search_result_type = std::pair<std::vector<MEMORY_MODULE*>::iterator, 
-                                               std::vector<MEMORY_MODULE::client_qubit_type>::iterator>;
+    qubit_block_type::iterator find_qubit(int8_t client_id, qubit_type qubit_id);
+    qubit_block_type::iterator find_uninitialized_qubit();
 
     request_buffer_type::iterator find_ready_request();
-    request_buffer_type::iterator find_ready_request(request_buffer_type::iterator from);
     bool                          serve_request(request_buffer_type::iterator req_it);
-    qubit_search_result_type      search_for_qubit(int8_t client_id, qubit_type qubit_id);
 };
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-}
+}   // namespace sim
 
 #endif // SIM_MEMORY_h

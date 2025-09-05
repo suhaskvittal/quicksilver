@@ -11,5 +11,6 @@
 #include "sim/client.h"
 #include "sim/routing.h"
 #include "sim/magic_state.h"
+#include "sim/memory.h"
 
 #endif // SIM_h

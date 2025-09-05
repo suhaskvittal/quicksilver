@@ -27,9 +27,12 @@ COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_f
     memory_(memory)
 {
     // number of patches reserved for resource pins are the number of factories at or higher than the target T factory level:
-    patches_reserved_for_resource_pins_ = std::count_if(t_factories.begin(), t_factories.end(),
+    size_t patches_reserved_for_resource_pins = std::count_if(t_factories.begin(), t_factories.end(),
                                                         [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level >= lvl; });
-    patches_reserved_for_memory_pins_ = memory_->modules().size();
+    size_t patches_reserved_for_memory_pins = memory_->modules().size();
+
+    patch_idx_compute_start_ = patches_reserved_for_resource_pins;
+    patch_idx_memory_start_ = patches_reserved_for_resource_pins + cfg.num_rows*cfg.patches_per_row;
 
     // initialize the routing space:
     auto [junctions, buses] = init_routing_space(cfg);
@@ -42,12 +45,15 @@ COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_f
                                             size_t{0}, 
                                             std::plus<size_t>{}, 
                                             [] (const client_ptr& c) { return c->qubits.size(); });
-    size_t avail_patches = patches_.size() - patches_reserved_for_resource_pins_ - patches_reserved_for_memory_pins_;
+    size_t avail_patches = patches_.size() - patches_reserved_for_resource_pins - patches_reserved_for_memory_pins;
     if (avail_patches < total_qubits_required)
         throw std::runtime_error("Not enough space to allocate all program qubits");
 
     // initialize the clients
     init_clients(cfg);
+
+    // connect memory to this compute:
+    memory_->compute_ = this;
 }
 
 ////////////////////////////////////////////////////////////
@@ -175,11 +181,14 @@ COMPUTE::select_victim_qubit()
     std::vector<CLIENT::qubit_info_type>::iterator victim_it = clients_[0]->qubits.end();
     for (auto& c : clients_)
     {
-        // first search for a qubit with an empty window
+        // first search for a qubit with an empty window and is in compute memory
         auto q_it = std::find_if(c->qubits.begin(), c->qubits.end(),
-                                 [] (const auto& q) { return q.inst_window.empty(); });
+                                 [] (const auto& q) { return q.inst_window.empty() && q.memloc_info.where == MEMINFO::LOCATION::COMPUTE; });
         if (q_it != c->qubits.end())
-            return patches_[q_it->patch_idx];
+        {
+            victim_it = q_it;
+            break;
+        }
 
         q_it = std::max_element(c->qubits.begin(), c->qubits.end(),
                                 [this] (const auto& q1, const auto& q2) 
@@ -201,7 +210,15 @@ COMPUTE::select_victim_qubit()
         }
     }
 
-    return patches_[victim_it->patch_idx];
+    // return the patch for the victim qubit:
+    int8_t v_client_id = victim_it->memloc_info.client_id;
+    qubit_type v_qubit_id = victim_it->memloc_info.qubit_id;
+
+    auto p_it = find_patch_containing_qubit(v_client_id, v_qubit_id);
+    if (p_it == patches_.end())
+        throw std::runtime_error("patch not found for qubit " + std::to_string(v_qubit_id) + " of client " + std::to_string(v_client_id));
+
+    return *p_it;
 }
 
 ////////////////////////////////////////////////////////////
@@ -436,6 +453,26 @@ COMPUTE::compute_instruction_recency(const inst_ptr& inst) const
                     });
     return *std::min_element(recency.begin(), recency.end());
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<PATCH>::iterator
+COMPUTE::find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id)
+{
+    return std::find_if(patches_.begin(), patches_.end(),
+                        [client_id, qubit_id] (const auto& p) { return p.client_id == client_id && p.qubit_id == qubit_id; });
+}
+
+std::vector<MEMORY_MODULE*>::iterator
+COMPUTE::find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id)
+{
+    return std::find_if(memory_.begin(), memory_.end(),
+                        [client_id, qubit_id] (const auto& m) { return m->find_qubit(client_id, qubit_id) != m->contents_end(); });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

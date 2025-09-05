@@ -18,12 +18,50 @@ COMPUTE::init_clients(const CONFIG& cfg)
 {
     clients_.reserve(cfg.client_trace_files.size());
 
-    size_t patch_idx{patches_reserved_for_resource_pins_};
+    size_t patch_idx{patch_idx_compute_start_};
+    size_t mem_idx{0};  // use this once all compute patches are filled
+
     for (size_t i = 0; i < cfg.client_trace_files.size(); i++)
     {
         client_ptr c{new sim::CLIENT(cfg.client_trace_files[i])};
         for (auto& q : c->qubits)
-            q.memloc_info.patch_idx = patch_idx++;
+        {
+            if (patch_idx >= patch_idx_memory_start_)
+            {
+                // start putting qubits in memory:
+                MEMORY_MODULE* m = memory_[mem_idx];
+                
+                // search for uninitialized qubit in the module:
+                auto m_it = m->find_uninitialized_qubit();
+                
+                // if no uninitialized qubit is found, we need to go to the next module:
+                if (m_it == m->contents.end())
+                {
+                    // goto next module:
+                    mem_idx++;
+
+                    if (mem_idx >= memory_.size())
+                        throw std::runtime_error("Not enough space in memory to allocate all qubits");
+
+                    m = memory_[mem_idx];
+                    m_it = m->find_uninitialized_qubit();
+                }
+                
+                *m_it = std::make_pair(c.get(), q.memloc_info.qubit_id);
+
+                // update qubit info:
+                q.memloc_info.where = MEMINFO::LOCATION::MEMORY;
+            }
+            else
+            {
+                // set patch information:
+                patches_[patch_idx++].client = c.get();
+                patches_[patch_idx++].qubit_id = q.memloc_info.qubit_id;
+                
+                // update qubit info:
+                q.memloc_info.where = MEMINFO::LOCATION::COMPUTE;
+            }
+        }
         clients_.push_back(std::move(c));
     }
 }
@@ -100,12 +138,21 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
     for (size_t i = 0; i < top_level_t_fact.size(); i++)
     {
         auto* fact = top_level_t_fact[i];
+        
+        // set the output patch index:
+        fact->output_patch_idx = patch_idx;
+
+        // create bus and junction connections:
+        PATCH& fp = patches_[patch_idx];
+        fp.buses.push_back(buses[0]);
         if (i == 0)
-            patches_[fact->output_patch_idx].buses.push_back(junctions[0]);
+            fp.buses.push_back(junctions[0]);
         else if (i == cfg.patches_per_row+1)
-            patches_[fact->output_patch_idx].buses.push_back(junctions[1]);
+            fp.buses.push_back(junctions[1]);
         else
-            patches_[fact->output_patch_idx].buses.push_back(buses[0]);
+            fp.buses.push_back(buses[0]);
+
+        patch_idx++;
     }
 
     // now connect the program memory patches:
@@ -127,6 +174,31 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
 
             patch_idx++;
         }
+    }
+
+    // set the connections for the memory pins:
+    const size_t last_bus_idx = 3*cfg.num_rows;
+    const size_t penult_junc_idx = 2*cfg.num_rows;
+    const size_t last_junc_idx = 2*cfg.num_rows+1;
+
+    const auto& mem = memory_->modules();
+    if (mem.size() > cfg.patches_per_row+2)
+        throw std::runtime_error("Not enough space to allocate all memory pins");
+
+    for (size_t i = 0; i < mem.size(); i++)
+    {
+        auto* m = mem[i];
+        m->output_patch_idx = patch_idx;
+        
+        PATCH& mp = patches_[patch_idx];
+        if (i == 0)
+            mp.buses.push_back(junctions[penult_junc_idx]);
+        else if (i == cfg.patches_per_row+1)
+            mp.buses.push_back(junctions[last_junc_idx]);
+        else
+            mp.buses.push_back(buses[last_bus_idx]);
+
+        patch_idx++;
     }
 }
 
