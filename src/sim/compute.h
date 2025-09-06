@@ -22,6 +22,7 @@
 extern std::mt19937 GL_RNG;
 
 //#define QS_SIM_DEBUG
+constexpr uint64_t QS_SIM_DEBUG_FREQ{100'000};
 
 namespace sim
 {
@@ -74,6 +75,9 @@ public:
     {
         // `clients_` are initialized from the trace files:
         std::vector<std::string> client_trace_files;
+        
+        // needed for estimating error rate
+        size_t code_distance{19};
 
         // compute dimensions (see above for organization)
         // We want `num_rows * patches_per_row > program_memory_size`
@@ -125,7 +129,7 @@ public:
 
     // Returns a pointer to the victim qubit. We return a pointer 
     // as this qubit resides in one of the clients' qubit arrays.
-    CLIENT::qubit_info_type* select_victim_qubit();
+    CLIENT::qubit_info_type* select_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id);
     
     // Use this if we fail to find a victim qubit:
     CLIENT::qubit_info_type* select_random_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id);
@@ -152,7 +156,7 @@ private:
     
     // this attempts to estimate how close an instruction is to being ready to execute
     // it is computed by determining how deep the instruction is in one of its arguments' windows.
-    size_t compute_instruction_timeliness(const inst_ptr&) const;
+    ssize_t compute_instruction_timeliness(const CLIENT::qubit_info_type&) const;
 
     std::vector<PATCH>::iterator          find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id);
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id);
@@ -164,6 +168,7 @@ private:
 ////////////////////////////////////////////////////////////
 
 bool is_software_instruction(INSTRUCTION::TYPE);
+double compute_logical_error_rate_per_cycle(size_t);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

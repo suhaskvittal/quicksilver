@@ -39,6 +39,14 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
     {
         auto& q = c->qubits[qid];
 
+#if defined(QS_SIM_DEBUG)
+        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        {
+            if (q.memloc_info.where == MEMINFO::LOCATION::MEMORY)
+                std::cout << "\t\t\tqubit " << qid << " is in memory\n";
+        }
+#endif
+
         // ensure all instructions are ready:
         if (q.memloc_info.t_free > cycle_)
         {
@@ -53,7 +61,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         if (q.memloc_info.where == MEMINFO::LOCATION::MEMORY)
         {
             // make memory request:
-            MEMORY_MODULE::request_type req{c.get(), q.memloc_info.client_id, q.memloc_info.qubit_id};
+            MEMORY_MODULE::request_type req{inst->inst_number, c.get(), q.memloc_info.client_id, q.memloc_info.qubit_id};
 
             // find memory module containing qubit:
             auto m_it = find_memory_module_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
@@ -91,9 +99,12 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             (*m_it)->request_buffer_.push_back(req);
 
 #if defined(QS_SIM_DEBUG)
-            std::cout << "\t\tmemory request for instruction " << *inst
-                        << "\tclient = " << q.memloc_info.client_id+0 
-                        << ", qubit = " << q.memloc_info.qubit_id << "\n";
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            {
+                std::cout << "\t\tmemory request for instruction " << *inst
+                            << "\tclient = " << q.memloc_info.client_id+0 
+                            << ", qubit = " << q.memloc_info.qubit_id << "\n";
+            }
 #endif
 
             // set `t_until_in_compute` and `t_free` 
@@ -110,7 +121,8 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         return result;
 
 #if defined(QS_SIM_DEBUG)
-    std::cout << "\t\tall qubits are available -- trying to execute instruction: " << (*inst) << "\n";
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        std::cout << "\t\tall qubits are available -- trying to execute instruction: " << (*inst) << "\n";
 #endif
 
     // if this is a gate that requires a resource, make sure the resource is available:
@@ -134,10 +146,13 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
         // check if there is a free bus next to the patch:
 #if defined(QS_SIM_DEBUG)
-        std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q_patch.client_id << ", " << q_patch.qubit_id << "):";
-        for (auto& b : q_patch.buses)
-            std::cout << " " << b->t_free;
-        std::cout << "\n";
+        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        {
+            std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q_patch.client_id << ", " << q_patch.qubit_id << "):";
+            for (auto& b : q_patch.buses)
+                std::cout << " " << b->t_free;
+            std::cout << "\n";
+        }
 #endif
 
         auto it = find_free_bus(q_patch);

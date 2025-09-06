@@ -84,6 +84,7 @@ struct INSTRUCTION
     /*
         Simulation variables:
     */
+    uint64_t inst_number{};
     bool     is_running{false};
     uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
 

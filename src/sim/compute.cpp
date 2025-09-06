@@ -9,6 +9,8 @@
 #include "sim/compute.h"
 #include "sim/memory.h"
 
+#include <unordered_set>
+
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
 
@@ -86,21 +88,28 @@ void
 COMPUTE::operate()
 {
 #if defined(QS_SIM_DEBUG)
-    std::cout << "--------------------------------\n";
-    std::cout << "COMPUTE CYCLE " << cycle_ << "\n";
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    {
+        std::cout << "--------------------------------\n";
+        std::cout << "COMPUTE CYCLE " << cycle_ << "\n";
+    }
 #endif
 
+    size_t ii = cycle_ % clients_.size();
     for (size_t i = 0; i < clients_.size(); i++)
     {
-        client_ptr& c = clients_[i];
+        client_ptr& c = clients_[ii];
         exec_results_.clear();
 
 #if defined(QS_SIM_DEBUG)
-        std::cout << "CLIENT " << i 
-                << " (trace = " << c->trace_file 
-                << ", #qubits = " << c->qubits.size() 
-                << ", inst done = " << c->s_inst_done  
-                << ")\n";
+        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        {
+            std::cout << "CLIENT " << c->id
+                    << " (trace = " << c->trace_file 
+                    << ", #qubits = " << c->qubits.size() 
+                    << ", inst done = " << c->s_inst_done  
+                    << ")\n";
+        }
 #endif
 
         // 1. retire any instructions at the head of a window,
@@ -127,19 +136,24 @@ COMPUTE::operate()
             c->s_cycles_stalled_by_routing += (stall_counts[ROUTING_STALL_IDX] > 0);
             c->s_cycles_stalled_by_resource += (stall_counts[RESOURCE_STALL_IDX] > 0);
         }
+
+        ii = (ii+1) % clients_.size();
     }
 
 #if defined(QS_SIM_DEBUG)
     // print factory information:
-    for (auto* f : t_fact_)
-        std::cout << "FACTORY L" << f->level << " (buffer_occu = " << f->buffer_occu << ", step = " << f->step << ")\n";
-
-    // print memory information:
-    for (size_t i = 0; i < memory_.size(); i++)
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
     {
-        std::cout << "MEMORY MODULE " << i 
-                    << " (num_banks = " << memory_[i]->num_banks_ 
-                    << ", request buffer size = " << memory_[i]->request_buffer_.size() << ")\n";
+        for (auto* f : t_fact_)
+            std::cout << "FACTORY L" << f->level << " (buffer_occu = " << f->buffer_occu << ", step = " << f->step << ")\n";
+
+        // print memory information:
+        for (size_t i = 0; i < memory_.size(); i++)
+        {
+            std::cout << "MEMORY MODULE " << i 
+                        << " (num_banks = " << memory_[i]->num_banks_ 
+                        << ", request buffer size = " << memory_[i]->request_buffer_.size() << ")\n";
+        }
     }
 #endif
 }
@@ -186,10 +200,38 @@ COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_
 ////////////////////////////////////////////////////////////
 
 CLIENT::qubit_info_type*
-COMPUTE::select_victim_qubit()
+COMPUTE::select_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id)
 {
+#if defined(QS_SIM_DEBUG)
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    {
+        std::cout << "searching for victim for client = " << incoming_client_id+0
+                    << ", qubit = " << incoming_qubit_id
+                    << "\n";
+    }
+#endif
+
+    // avoid selecting victims that belong to the same instruction at the input qubit
+    const auto& incoming_client = clients_[incoming_client_id];
+    const auto& incoming_qubit_info = incoming_client->qubits[incoming_qubit_id];
+    
+    // do not evict any qubits belonging to instructions earlier than `reference_inst`
+    // also do not evict any qubits belonging to `reference_inst`
+    inst_ptr reference_inst = incoming_qubit_info.inst_window.front();
+
+    auto does_match_ref_inst_operands = [match_cid=incoming_client_id, reference_inst] (int8_t cid, qubit_type qid)
+                                        {
+                                            auto begin = reference_inst->qubits.begin();
+                                            auto end = reference_inst->qubits.end();
+
+                                            bool client_match = cid == match_cid;
+                                            bool operand_match = std::find(begin, end, qid) != end;
+                                            return client_match && operand_match;
+                                        };
+
     CLIENT::qubit_info_type* victim{nullptr};
-    size_t victim_timeliness{0};
+    inst_ptr victim_inst_head{nullptr};
+    ssize_t victim_timeliness{-1};
 
     for (auto& c : clients_)
     {
@@ -204,28 +246,88 @@ COMPUTE::select_victim_qubit()
         if (q_it != c->qubits.end())
         {
             victim = &(*q_it);
+
+#if defined(QS_SIM_DEBUG)
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            {
+                std::cout << "\tselected client = " << q_it->memloc_info.client_id
+                            << ", qubit = " << q_it->memloc_info.qubit_id
+                            << " because of empty window\n";
+            }
+#endif
             break;
         }
 
         // otherwise, select the qubit with the least timely instruction:
         for (auto q_it = c->qubits.begin(); q_it != c->qubits.end(); q_it++)
         {
+#if defined(QS_SIM_DEBUG)
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            {
+                if (q_it->memloc_info.where == MEMINFO::LOCATION::COMPUTE)
+                {
+                    std::cout << "\tfound compute qubit: client = " << q_it->memloc_info.client_id
+                            << ", qubit = " << q_it->memloc_info.qubit_id
+                            << ", window size = " << q_it->inst_window.size()
+                            << ", t_free = " << q_it->memloc_info.t_free << " (current cycle = " << cycle_ << ")"
+                            << ", protected = " << does_match_ref_inst_operands(q_it->memloc_info.client_id, q_it->memloc_info.qubit_id)
+                            << "\n";
+                }
+            }
+#endif
+
             if (q_it->inst_window.empty() 
                 || q_it->memloc_info.where == MEMINFO::LOCATION::MEMORY 
-                || q_it->memloc_info.t_free > cycle_)
+                || q_it->memloc_info.t_free > cycle_
+                || does_match_ref_inst_operands(q_it->memloc_info.client_id, q_it->memloc_info.qubit_id))
             {
                 continue;
             }
 
             auto* q_head = q_it->inst_window.front();
-            size_t q_timeliness = this->compute_instruction_timeliness(q_head);
-            if (q_timeliness > victim_timeliness)
+            ssize_t q_timeliness = this->compute_instruction_timeliness(*q_it);
+
+#if defined(QS_SIM_DEBUG)
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            {
+                std::cout << "\t\tpotential candidate: client = " << q_it->memloc_info.client_id
+                            << ", qubit = " << q_it->memloc_info.qubit_id
+                            << ", timeliness = " << q_timeliness
+                            << ", inst number = " << q_head->inst_number
+                            << "\n";
+            }
+#endif
+
+            if (q_head->inst_number < reference_inst->inst_number)
+                continue;
+            
+            // evict based on timeliness and break ties using instruction recency
+            bool evict = (q_timeliness > victim_timeliness)
+                            || (q_timeliness == victim_timeliness && q_head->inst_number > victim_inst_head->inst_number);
+            if (evict)
             {
                 victim = &(*q_it);
+                victim_inst_head = q_head;
                 victim_timeliness = q_timeliness;
             }
         }
     }
+
+#if defined(QS_SIM_DEBUG)
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    {
+        if (victim == nullptr)
+        {
+            std::cout << "\tno victim found\n";
+        }
+        else
+        {
+            std::cout << "\tfinal victim: client = " << victim->memloc_info.client_id
+                        << ", qubit = " << victim->memloc_info.qubit_id
+                        << "\n";
+        }
+    }
+#endif
 
     return victim;
 }
@@ -242,7 +344,7 @@ COMPUTE::select_random_victim_qubit(int8_t incoming_client_id, qubit_type incomi
                                         {
                                             bool client_match = cid == match_cid;
                                             bool operand_match = std::find(inst->qubits.begin(), inst->qubits.end(), qid) != inst->qubits.end();
-                                            return !client_match && !operand_match;
+                                            return !client_match || !operand_match;
                                         };
     size_t rand_patch_idx;
     CLIENT::qubit_info_type* victim{nullptr};
@@ -340,30 +442,16 @@ COMPUTE::client_try_execute(client_ptr& c)
 {
     // check if any instruction is ready to be executed. 
     //    An instruction is ready to be executed if it is at the head of all its arguments' windows.
+    std::unordered_set<inst_ptr> visited;
     for (auto& q : c->qubits)
     {
         if (q.inst_window.empty())
             continue;
 
-        inst_ptr& inst = q.inst_window.front();
-
-#if defined(QS_SIM_DEBUG)
-        // verify that all arguments have a nonempty instruction window:
-        for (qubit_type qid : inst->qubits)
-        {
-            if (c->qubits[qid].inst_window.empty())
-                throw std::runtime_error("instruction `" + inst->to_string() 
-                                        + "`: qubit " + std::to_string(qid) + " has an empty instruction window");
-        }
-
-        std::cout << "\tfound ready instruction: " << (*inst) << ", args ready =";
-
-        for (qubit_type qid : inst->qubits)
-            std::cout << " " << static_cast<int>(c->qubits[qid].inst_window.front() == inst);
-
-        std::cout << ", is running = " << static_cast<int>(inst->is_running) 
-                << "\n";
-#endif
+        inst_ptr inst = q.inst_window.front();
+        if (visited.count(inst))
+            continue;
+        visited.insert(inst);
 
         bool all_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(), 
                                     [&c, &inst] (qubit_type id) 
@@ -371,26 +459,47 @@ COMPUTE::client_try_execute(client_ptr& c)
                                         return c->qubits[id].inst_window.front() == inst;
                                     });
 
+#if defined(QS_SIM_DEBUG)
+        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        {
+            if (all_ready)
+            {
+                std::cout << "\tfound ready instruction: " << (*inst) << ", args ready =";
+
+                for (qubit_type qid : inst->qubits)
+                    std::cout << " " << static_cast<int>(c->qubits[qid].inst_window.front() == inst);
+
+                std::cout << ", inst number = " << inst->inst_number 
+                        << ", is running = " << static_cast<int>(inst->is_running) 
+                        << ", cycle done = " << inst->cycle_done
+                        << "\n";
+            }
+        }
+#endif
+
         if (all_ready && !inst->is_running)
         {
             auto result = execute_instruction(c, inst);
             exec_results_.push_back(result);
             
 #if defined(QS_SIM_DEBUG)
-            constexpr std::string_view RESULT_STRINGS[]
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
             {
-                "SUCCESS", "MEMORY_STALL", "ROUTING_STALL", "RESOURCE_STALL", "WAITING_FOR_QUBIT_TO_BE_READY"
-            };
-
-            std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
-            if (result == EXEC_RESULT::SUCCESS)
-            {
-                std::cout << "\t\twill be done @ cycle " << inst->cycle_done 
-                            << ", uops = " << inst->uop_completed << " of " << inst->num_uops << "\n";
-                if (inst->curr_uop != nullptr)
+                constexpr std::string_view RESULT_STRINGS[]
                 {
-                    std::cout << "\t\t\tcurr uop: " << (*inst->curr_uop)
-                        << "\n\t\t\tuop will be done @ cycle: " << inst->curr_uop->cycle_done << "\n";
+                    "SUCCESS", "MEMORY_STALL", "ROUTING_STALL", "RESOURCE_STALL", "WAITING_FOR_QUBIT_TO_BE_READY"
+                };
+
+                std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
+                if (result == EXEC_RESULT::SUCCESS)
+                {
+                    std::cout << "\t\twill be done @ cycle " << inst->cycle_done 
+                                << ", uops = " << inst->uop_completed << " of " << inst->num_uops << "\n";
+                    if (inst->curr_uop != nullptr)
+                    {
+                        std::cout << "\t\t\tcurr uop: " << (*inst->curr_uop)
+                            << "\n\t\t\tuop will be done @ cycle: " << inst->curr_uop->cycle_done << "\n";
+                    }
                 }
             }
 #endif
@@ -405,15 +514,18 @@ void
 COMPUTE::client_try_fetch(client_ptr& c)
 {
 #if defined(QS_SIM_DEBUG)
-    // print instruction window states:
-    std::cout << "\tINSTRUCTION WINDOW:\n";
-    for (size_t i = 0; i < std::min(c->qubits.size(), size_t{10}); i++)
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
     {
-        if (!c->qubits[i].inst_window.empty())
+        // print instruction window states:
+        std::cout << "\tINSTRUCTION WINDOW:\n";
+        for (size_t i = 0; i < std::min(c->qubits.size(), size_t{10}); i++)
         {
-            std::cout << "\t\tQUBIT " << i << ": " 
-                    << *(c->qubits[i].inst_window.front()) 
-                    << " (count = " << c->qubits[i].inst_window.size() << ")\n";
+            if (!c->qubits[i].inst_window.empty())
+            {
+                std::cout << "\t\tQUBIT " << i << ": " 
+                        << *(c->qubits[i].inst_window.front()) 
+                        << " (count = " << c->qubits[i].inst_window.size() << ")\n";
+            }
         }
     }
 #endif
@@ -425,7 +537,8 @@ COMPUTE::client_try_fetch(client_ptr& c)
     qubit_type target_qubit = std::distance(c->qubits.begin(), it);
 
 #if defined(QS_SIM_DEBUG)
-    std::cout << "\tsearching for instructions that operate on qubit " << target_qubit << "\n";
+    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        std::cout << "\tsearching for instructions that operate on qubit " << target_qubit << "\n";
 #endif
 
     size_t limit{8};
@@ -434,10 +547,12 @@ COMPUTE::client_try_fetch(client_ptr& c)
         while (limit > 0) // keep going until we get an instruction that operates on `target_qubit`
         {
             inst_ptr inst{new INSTRUCTION(c->read_instruction_from_trace())};
+            inst->inst_number = c->s_inst_read;
             c->s_inst_read++;
             
 #if defined(QS_SIM_DEBUG)
-            std::cout << "\t\tREAD instruction: " << (*inst) << "\n";
+            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+                std::cout << "\t\tREAD instruction: " << (*inst) << "\n";
 #endif
 
             // set the number of uops (may depend on simulator config)
@@ -476,18 +591,22 @@ COMPUTE::find_free_bus(const PATCH& p) const
                         [c=cycle_] (const auto& b) { return b->t_free <= c; });
 }
 
-size_t
-COMPUTE::compute_instruction_timeliness(const inst_ptr& inst) const
+ssize_t
+COMPUTE::compute_instruction_timeliness(const CLIENT::qubit_info_type& q) const
 {
+    inst_ptr inst = q.inst_window.front();
+
     std::vector<size_t> timeliness(inst->qubits.size());
     std::transform(inst->qubits.begin(), inst->qubits.end(), timeliness.begin(),
-                    [this, &inst] (qubit_type qid) 
+                    [this, &inst, &q] (qubit_type qid) 
                     { 
-                        auto& q = this->clients_[0]->qubits[qid];
-                        auto inst_it = std::find(q.inst_window.begin(), q.inst_window.end(), inst);
-                        return std::distance(q.inst_window.begin(), inst_it);
+                        const auto& client = this->clients_[q.memloc_info.client_id];
+
+                        const auto& _q = client->qubits[qid];
+                        auto inst_it = std::find(_q.inst_window.begin(), _q.inst_window.end(), inst);
+                        return std::distance(_q.inst_window.begin(), inst_it);
                     });
-    return std::reduce(timeliness.begin(), timeliness.end(), size_t{0});
+    return std::reduce(timeliness.begin(), timeliness.end(), ssize_t{0});
 }
 
 ////////////////////////////////////////////////////////////

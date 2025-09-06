@@ -46,6 +46,9 @@ struct CLIENT
     uint64_t s_cycles_stalled_by_routing{0};
     uint64_t s_cycles_stalled_by_resource{0};
 
+    uint64_t s_cycle_done;
+    double   s_log_error;
+
     std::vector<qubit_info_type> qubits;
 
     std::string       trace_file;

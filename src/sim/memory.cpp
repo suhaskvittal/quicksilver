@@ -75,14 +75,21 @@ MEMORY_MODULE::try_and_serve_request(request_buffer_type::iterator req_it)
 {
     // 1. get qubit info (will be used later)
     auto& rq_qubit_info = req_it->client->qubits[req_it->requested_qubit];
+    auto [b_it, q_it] = find_qubit(req_it->client_id, req_it->requested_qubit);
+    [[ maybe_unused ]] size_t bank_id = std::distance(banks_.begin(), b_it);
 
 #if defined(QS_SIM_DEBUG)
-    std::cout << "request: client = " << req_it->client_id+0 << ", qubit = " << req_it->requested_qubit << "\n";
+    if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    {
+        std::cout << "request @ bank " << bank_id
+                << ": client = " << req_it->client_id+0 
+                << ", qubit = " << req_it->requested_qubit << "\n";
+
+    }
 #endif
 
     // 2. figure out how long it will take to "rotate" to
     //       the desired qubit and fetch the data
-    auto [b_it, q_it] = find_qubit(req_it->client_id, req_it->requested_qubit);
 
     // we can rotate the data left or right -- choose minimum latency
     size_t right_access_latency = std::distance(b_it->begin(), q_it);
@@ -95,28 +102,36 @@ MEMORY_MODULE::try_and_serve_request(request_buffer_type::iterator req_it)
                                                 access_latency + LD_CYCLES + ST_CYCLES, freq_khz_, compute_->freq_khz_);
 
     // 3. check if routing space is available to serve the request
-    auto victim = compute_->select_victim_qubit();
+    auto victim = compute_->select_victim_qubit(req_it->client_id, req_it->requested_qubit);
 
     if (victim == nullptr)
-        victim = compute_->select_random_victim_qubit(req_it->client_id, req_it->requested_qubit);
-
+        return false;
 
 #if defined(QS_SIM_DEBUG)
-    std::cout << "\tvictim: client = " << victim->memloc_info.client_id+0 
-            << ", qubit = " << victim->memloc_info.qubit_id 
-            << ", t_free = " << victim->memloc_info.t_free << "\n";
+    if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    {
+        std::cout << "\tvictim: client = " << victim->memloc_info.client_id+0 
+                << ", qubit = " << victim->memloc_info.qubit_id 
+                << ", t_free = " << victim->memloc_info.t_free << "\n";
 
-    if (victim->memloc_info.where == MEMINFO::LOCATION::MEMORY)
-        std::cout << "\tvictim is in memory\n";
-    else
-        std::cout << "\tvictim is in compute\n";
+        if (victim->memloc_info.where == MEMINFO::LOCATION::MEMORY)
+            std::cout << "\tvictim is in memory\n";
+        else
+            std::cout << "\tvictim is in compute\n";
+    }
 #endif
 
     PATCH& m_patch = compute_->patches_[output_patch_idx];
     PATCH& q_patch = *compute_->find_patch_containing_qubit(victim->memloc_info.client_id, victim->memloc_info.qubit_id);
 
     if (!compute_->alloc_routing_space(m_patch, q_patch, compute_cycles_for_ld, compute_cycles_for_ld))
+    {
+#if defined(QS_SIM_DEBUG)
+        if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            std::cout << "\tcould not get routing space\n";
+#endif
         return false;
+    }
 
     // 4. we can do the request:
     // 4.1. update the bank contents:

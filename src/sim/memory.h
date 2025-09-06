@@ -39,6 +39,7 @@ struct MEMORY_MODULE : public CLOCKABLE
 
     struct request_type
     {
+        uint64_t   inst_number;
         CLIENT*    client;
         int8_t     client_id;
         qubit_type requested_qubit;
