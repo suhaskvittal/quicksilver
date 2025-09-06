@@ -17,6 +17,8 @@
 
 struct ARGPARSE
 {
+    std::string usage;
+
     std::vector<std::string> cli_inputs;
     size_t cli_idx{0};
 
@@ -52,9 +54,12 @@ template <class T> void
 ARGPARSE::read_required(std::string_view name, T& out)
 {
     if (cli_idx >= cli_inputs.size())
-        throw std::runtime_error("missing required param: " + std::string{name});
+        throw std::runtime_error("missing required param: " + std::string{name} + "\n\n" + usage);
 
     std::string v = cli_inputs[cli_idx];
+    if (v == "-h" || v == "--help")
+        throw std::runtime_error(usage);
+
     out = convert_string_to_type<T>(v);
     cli_idx++;
 }

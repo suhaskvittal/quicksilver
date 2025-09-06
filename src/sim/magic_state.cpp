@@ -48,7 +48,7 @@ T_FACTORY::f15to1(size_t level_preset, uint64_t t_round_ns, size_t buffer_capaci
     double freq_khz;
     double error_prob;
 
-    if (level_preset <= 1)
+    if (level_preset == 0)
     {
         freq_khz = compute_freq_khz(t_round_ns, 5);  // cycle is 5 rounds
         error_prob = 1e-6;  // don't have exact numbers for this, but should be around here since d = 7 gives 4.5e-8

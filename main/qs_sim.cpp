@@ -51,9 +51,9 @@ std::vector<sim::MEMORY_MODULE*>
 memory_init(size_t num_modules, size_t banks_per_module, size_t qubits_per_bank, uint64_t t_round_ns, size_t code_distance)
 {
     std::vector<sim::MEMORY_MODULE*> mem_modules;
+    double freq_khz = sim::compute_freq_khz(t_round_ns, code_distance);
     for (size_t i = 0; i < num_modules; i++)
     {
-        double freq_khz = sim::compute_freq_khz(t_round_ns, code_distance);
         sim::MEMORY_MODULE* m = new sim::MEMORY_MODULE(freq_khz, qubits_per_bank, banks_per_module);
         mem_modules.push_back(std::move(m));
     }
@@ -81,6 +81,7 @@ main(int argc, char** argv)
     size_t cmp_patches_per_row{8};
     size_t cmp_code_distance{19};
     uint64_t cmp_ext_round_ns{1200};
+    int cmp_repl_id{0};
 
     // magic state config:
     size_t fact_num_15to1_L1{4};
@@ -96,6 +97,21 @@ main(int argc, char** argv)
 
     // parse input arguments;
     ARGPARSE pp(argc, argv);
+    pp.usage = "qs_sim [options] <traces>";
+    pp.usage += "\noptions:";
+    pp.usage += "\n  --cmp_num_rows <num>: number of rows in the compute";
+    pp.usage += "\n  --cmp_patches_per_row <num>: number of patches per row in the compute";
+    pp.usage += "\n  --cmp_code_distance <num>: code distance of the compute";
+    pp.usage += "\n  --cmp_ext_round_ns <ns>: external round time of the compute";
+    pp.usage += "\n  --cmp_repl_id <id>: replacement policy ID (0: LRU, 1: LTI)";
+    pp.usage += "\n  --fact_15to1_L1 <num>: number of 15-to-1 factories in level 1";
+    pp.usage += "\n  --fact_15to1_L2 <num>: number of 15-to-1 factories in level 2";
+    pp.usage += "\n  --fact_buffer_cap <num>: buffer capacity of the factories";
+    pp.usage += "\n  --mem_bb_modules <num>: number of memory modules";
+    pp.usage += "\n  --mem_bb_banks_per_module <num>: number of banks per module in the memory";
+    pp.usage += "\n  --mem_bb_qubits_per_bank <num>: number of qubits per bank in the memory";
+    pp.usage += "\n  --mem_bb_code_distance <num>: code distance of the memory";
+    pp.usage += "\n  --mem_bb_ext_round_ns <ns>: external round time of the memory";
 
     pp.read_required("traces", traces);
     pp.find_optional("sim", inst_sim);
@@ -103,6 +119,7 @@ main(int argc, char** argv)
     pp.find_optional("cmp_patches_per_row", cmp_patches_per_row);
     pp.find_optional("cmp_code_distance", cmp_code_distance);
     pp.find_optional("cmp_ext_round_ns", cmp_ext_round_ns);
+    pp.find_optional("cmp_repl_id", cmp_repl_id);
     pp.find_optional("fact_15to1_L1", fact_num_15to1_L1);
     pp.find_optional("fact_15to1_L2", fact_num_15to1_L2);
     pp.find_optional("fact_buffer_cap", fact_buffer_capacity);
@@ -126,38 +143,46 @@ main(int argc, char** argv)
                                                         mem_bb_ext_round_ns, 
                                                         mem_bb_code_distance);
 
-    // Setup compute:
-    sim::COMPUTE::CONFIG cfg;
-
     // split `traces` by `;` delimiter
+    std::vector<std::string> client_trace_files;
     std::string::iterator sc_it = std::find(traces.begin(), traces.end(), ';');
     std::string first_trace(traces.begin(), sc_it);
-    cfg.client_trace_files.push_back(first_trace);
+    client_trace_files.push_back(first_trace);
 
     while (sc_it != traces.end())
     {
         auto start_it = sc_it+1;
         sc_it = std::find(start_it, traces.end(), ';');
         std::string trace_part(start_it, sc_it);
-        cfg.client_trace_files.push_back(trace_part);
+        client_trace_files.push_back(trace_part);
     }
 
     std::cout << "clients:\n";
-    for (size_t i = 0; i < cfg.client_trace_files.size(); i++)
-        std::cout << "\tclient " << i << ": " << cfg.client_trace_files[i] << "\n";
-    
-    cfg.code_distance = cmp_code_distance;
-    cfg.num_rows = cmp_num_rows;
-    cfg.patches_per_row = cmp_patches_per_row;
+    for (size_t i = 0; i < client_trace_files.size(); i++)
+        std::cout << "\tclient " << i << ": " << client_trace_files[i] << "\n";
 
     double cmp_freq_ghz = sim::compute_freq_khz(cmp_ext_round_ns, cmp_code_distance);
-    sim::COMPUTE* cmp = new sim::COMPUTE(cmp_freq_ghz, cfg, t_factories, mem_modules);
+    sim::COMPUTE* cmp = new sim::COMPUTE(
+                            cmp_freq_ghz, 
+                            client_trace_files, 
+                            cmp_num_rows, 
+                            cmp_patches_per_row, 
+                            t_factories, 
+                            mem_modules,
+                            static_cast<sim::COMPUTE::REPLACEMENT>(cmp_repl_id));
 
     // setup clock for all components:
     std::vector<sim::CLOCKABLE*> clockables{cmp};
     clockables.insert(clockables.end(), t_factories.begin(), t_factories.end());
     clockables.insert(clockables.end(), mem_modules.begin(), mem_modules.end());
     sim::setup_clk_scale_for_group(clockables);
+
+    std::cout << "cmp frequency: " << cmp->freq_khz_ << " kHz\n";
+    for (size_t i = 0; i < t_factories.size(); i++)
+        std::cout << "factory " << i << " frequency: " << t_factories[i]->freq_khz_ << " kHz\n";
+    for (size_t i = 0; i < mem_modules.size(); i++)
+        std::cout << "memory module " << i << " frequency: " << mem_modules[i]->freq_khz_ << " kHz\n";
+
 
     // start simulation:
     uint64_t tick{0};
@@ -197,7 +222,7 @@ main(int argc, char** argv)
     double execution_time = (cmp->current_cycle() / cmp->freq_khz_) * 1e-3 / 60.0;
 
     print_stat_line("TOTAL_CYCLES", cmp->current_cycle(), false);
-    print_stat_line("COMPUTE_SPEED (KHz)", cmp->freq_khz_, false);
+    print_stat_line("COMPUTE_SPEED (kHz)", cmp->freq_khz_, false);
     print_stat_line("EXECUTION_TIME (min)", execution_time, false);
     
     const auto& clients = cmp->clients();

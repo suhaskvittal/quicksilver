@@ -59,6 +59,9 @@ set(SIM_FILES
     src/sim/compute.cpp
     src/sim/compute/execute.cpp
     src/sim/compute/init.cpp
+    src/sim/compute/replacement.cpp
+    src/sim/compute/replacement/lru.cpp
+    src/sim/compute/replacement/lti.cpp
     src/sim/magic_state.cpp
     src/sim/memory.cpp
     src/sim/routing.cpp)

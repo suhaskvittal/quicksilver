@@ -7,6 +7,8 @@
 */
 
 #include "sim/compute.h"
+#include "sim/compute/replacement/lru.h"
+#include "sim/compute/replacement/lti.h"
 #include "sim/memory.h"
 
 #include <unordered_set>
@@ -23,25 +25,34 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_factories, const std::vector<MEMORY_MODULE*>& memory)
+COMPUTE::COMPUTE(double freq_ghz, 
+                    const std::vector<std::string>& client_trace_files,
+                    size_t num_rows, 
+                    size_t num_patches_per_row, 
+                    const std::vector<T_FACTORY*>& t_factories, 
+                    const std::vector<MEMORY_MODULE*>& memory,
+                    REPLACEMENT repl_id)
     :CLOCKABLE(freq_ghz),
-    patches_(cfg.num_rows * cfg.patches_per_row + 2*(cfg.patches_per_row+2)),
+    patches_(num_rows * num_patches_per_row + 2*(num_patches_per_row+2)),
     t_fact_(t_factories),
     memory_(memory)
 {
+    // configure `target_t_fact_level_`:
+    auto max_fact_it = std::max_element(t_factories.begin(), t_factories.end(),
+                                        [] (T_FACTORY* f1, T_FACTORY* f2) { return f1->level < f2->level; });
+    target_t_fact_level_ = (*max_fact_it)->level;
+
     // number of patches reserved for resource pins are the number of factories at or higher than the target T factory level:
     size_t patches_reserved_for_resource_pins = std::count_if(t_factories.begin(), t_factories.end(),
                                                         [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level >= lvl; });
     size_t patches_reserved_for_memory_pins = memory_.size();
 
     patch_idx_compute_start_ = patches_reserved_for_resource_pins;
-    patch_idx_memory_start_ = patches_reserved_for_resource_pins + cfg.num_rows*cfg.patches_per_row;
+    patch_idx_memory_start_ = patches_reserved_for_resource_pins + num_rows*num_patches_per_row;
 
-    // initialize the routing space:
-    auto [junctions, buses] = init_routing_space(cfg);
-
-    // initialize the compute memory:
-    init_compute(cfg, junctions, buses);
+    // initialize the routing space + compute memory
+    auto [junctions, buses] = init_routing_space(num_rows, num_patches_per_row);
+    init_compute(num_rows, num_patches_per_row, junctions, buses);
 
     // determine amount of program memory required:
     size_t total_qubits_required = std::transform_reduce(clients_.begin(), clients_.end(), 
@@ -53,11 +64,19 @@ COMPUTE::COMPUTE(double freq_ghz, CONFIG cfg, const std::vector<T_FACTORY*>& t_f
         throw std::runtime_error("Not enough space to allocate all program qubits");
 
     // initialize the clients
-    init_clients(cfg);
+    init_clients(client_trace_files);
 
     // connect memory to this compute:
     for (auto* m : memory_)
         m->compute_ = this;
+
+    // initialize the replacement policy:
+    if (repl_id == REPLACEMENT::LRU)
+        repl_ = std::make_unique<compute::repl::LRU>(this);
+    else if (repl_id == REPLACEMENT::LTI)
+        repl_ = std::make_unique<compute::repl::LTI>(this);
+    else
+        throw std::runtime_error("Invalid replacement policy ID: " + std::to_string(static_cast<size_t>(repl_id)));
 }
 
 ////////////////////////////////////////////////////////////
@@ -202,159 +221,9 @@ COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_
 CLIENT::qubit_info_type*
 COMPUTE::select_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id)
 {
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-    {
-        std::cout << "searching for victim for client = " << incoming_client_id+0
-                    << ", qubit = " << incoming_qubit_id
-                    << "\n";
-    }
-#endif
-
-    // avoid selecting victims that belong to the same instruction at the input qubit
     const auto& incoming_client = clients_[incoming_client_id];
     const auto& incoming_qubit_info = incoming_client->qubits[incoming_qubit_id];
-    
-    // do not evict any qubits belonging to instructions earlier than `reference_inst`
-    // also do not evict any qubits belonging to `reference_inst`
-    inst_ptr reference_inst = incoming_qubit_info.inst_window.front();
-
-    auto does_match_ref_inst_operands = [match_cid=incoming_client_id, reference_inst] (int8_t cid, qubit_type qid)
-                                        {
-                                            auto begin = reference_inst->qubits.begin();
-                                            auto end = reference_inst->qubits.end();
-
-                                            bool client_match = cid == match_cid;
-                                            bool operand_match = std::find(begin, end, qid) != end;
-                                            return client_match && operand_match;
-                                        };
-
-    CLIENT::qubit_info_type* victim{nullptr};
-    inst_ptr victim_inst_head{nullptr};
-    ssize_t victim_timeliness{-1};
-
-    for (auto& c : clients_)
-    {
-        // first search for a qubit with an empty window and is in compute memory
-        auto q_it = std::find_if(c->qubits.begin(), c->qubits.end(),
-                                 [cyc=cycle_] (const auto& q) 
-                                 { 
-                                    return q.inst_window.empty() 
-                                            && q.memloc_info.where == MEMINFO::LOCATION::COMPUTE
-                                            && q.memloc_info.t_free <= cyc; 
-                                });
-        if (q_it != c->qubits.end())
-        {
-            victim = &(*q_it);
-
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-            {
-                std::cout << "\tselected client = " << q_it->memloc_info.client_id
-                            << ", qubit = " << q_it->memloc_info.qubit_id
-                            << " because of empty window\n";
-            }
-#endif
-            break;
-        }
-
-        // otherwise, select the qubit with the least timely instruction:
-        for (auto q_it = c->qubits.begin(); q_it != c->qubits.end(); q_it++)
-        {
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-            {
-                if (q_it->memloc_info.where == MEMINFO::LOCATION::COMPUTE)
-                {
-                    std::cout << "\tfound compute qubit: client = " << q_it->memloc_info.client_id
-                            << ", qubit = " << q_it->memloc_info.qubit_id
-                            << ", window size = " << q_it->inst_window.size()
-                            << ", t_free = " << q_it->memloc_info.t_free << " (current cycle = " << cycle_ << ")"
-                            << ", protected = " << does_match_ref_inst_operands(q_it->memloc_info.client_id, q_it->memloc_info.qubit_id)
-                            << "\n";
-                }
-            }
-#endif
-
-            if (q_it->inst_window.empty() 
-                || q_it->memloc_info.where == MEMINFO::LOCATION::MEMORY 
-                || q_it->memloc_info.t_free > cycle_
-                || does_match_ref_inst_operands(q_it->memloc_info.client_id, q_it->memloc_info.qubit_id))
-            {
-                continue;
-            }
-
-            auto* q_head = q_it->inst_window.front();
-            ssize_t q_timeliness = this->compute_instruction_timeliness(*q_it);
-
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-            {
-                std::cout << "\t\tpotential candidate: client = " << q_it->memloc_info.client_id
-                            << ", qubit = " << q_it->memloc_info.qubit_id
-                            << ", timeliness = " << q_timeliness
-                            << ", inst number = " << q_head->inst_number
-                            << "\n";
-            }
-#endif
-
-            if (q_head->inst_number < reference_inst->inst_number)
-                continue;
-            
-            // evict based on timeliness and break ties using instruction recency
-            bool evict = (q_timeliness > victim_timeliness)
-                            || (q_timeliness == victim_timeliness && q_head->inst_number > victim_inst_head->inst_number);
-            if (evict)
-            {
-                victim = &(*q_it);
-                victim_inst_head = q_head;
-                victim_timeliness = q_timeliness;
-            }
-        }
-    }
-
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-    {
-        if (victim == nullptr)
-        {
-            std::cout << "\tno victim found\n";
-        }
-        else
-        {
-            std::cout << "\tfinal victim: client = " << victim->memloc_info.client_id
-                        << ", qubit = " << victim->memloc_info.qubit_id
-                        << "\n";
-        }
-    }
-#endif
-
-    return victim;
-}
-
-CLIENT::qubit_info_type*
-COMPUTE::select_random_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id)
-{
-    // get the instruction at the head of the corresponding qubit's array
-    const auto& incoming_client = clients_[incoming_client_id];
-    const auto& incoming_qubit_info = incoming_client->qubits[incoming_qubit_id];
-    auto* inst = incoming_qubit_info.inst_window.front();
-
-    auto does_not_match_inst_operands = [match_cid=incoming_client_id, inst] (int8_t cid, qubit_type qid)
-                                        {
-                                            bool client_match = cid == match_cid;
-                                            bool operand_match = std::find(inst->qubits.begin(), inst->qubits.end(), qid) != inst->qubits.end();
-                                            return !client_match || !operand_match;
-                                        };
-    size_t rand_patch_idx;
-    CLIENT::qubit_info_type* victim{nullptr};
-    do
-    {
-        rand_patch_idx = GL_RNG() % (patch_idx_memory_start_ - patch_idx_compute_start_);
-        const PATCH& p = patches_[patch_idx_compute_start_ + rand_patch_idx];
-        victim = &clients_[p.client_id]->qubits[p.qubit_id];
-    }
-    while (does_not_match_inst_operands(victim->memloc_info.client_id, victim->memloc_info.qubit_id));
+    auto victim =  repl_->select_victim(incoming_qubit_info);
 
     return victim;
 }
@@ -481,6 +350,16 @@ COMPUTE::client_try_execute(client_ptr& c)
         {
             auto result = execute_instruction(c, inst);
             exec_results_.push_back(result);
+
+            // update replacement policy on success
+            if (result == EXEC_RESULT::SUCCESS)
+            {
+                for (qubit_type qid : inst->qubits)
+                {
+                    const auto& q = c->qubits[qid];
+                    repl_->update_on_use(q);
+                }
+            }
             
 #if defined(QS_SIM_DEBUG)
             if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
@@ -589,24 +468,6 @@ COMPUTE::find_free_bus(const PATCH& p) const
 {
     return std::find_if(p.buses.begin(), p.buses.end(), 
                         [c=cycle_] (const auto& b) { return b->t_free <= c; });
-}
-
-ssize_t
-COMPUTE::compute_instruction_timeliness(const CLIENT::qubit_info_type& q) const
-{
-    inst_ptr inst = q.inst_window.front();
-
-    std::vector<size_t> timeliness(inst->qubits.size());
-    std::transform(inst->qubits.begin(), inst->qubits.end(), timeliness.begin(),
-                    [this, &inst, &q] (qubit_type qid) 
-                    { 
-                        const auto& client = this->clients_[q.memloc_info.client_id];
-
-                        const auto& _q = client->qubits[qid];
-                        auto inst_it = std::find(_q.inst_window.begin(), _q.inst_window.end(), inst);
-                        return std::distance(_q.inst_window.begin(), inst_it);
-                    });
-    return std::reduce(timeliness.begin(), timeliness.end(), ssize_t{0});
 }
 
 ////////////////////////////////////////////////////////////

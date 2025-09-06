@@ -15,16 +15,16 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::init_clients(const CONFIG& cfg)
+COMPUTE::init_clients(const std::vector<std::string>& client_trace_files)
 {
-    clients_.reserve(cfg.client_trace_files.size());
+    clients_.reserve(client_trace_files.size());
 
     size_t patch_idx{patch_idx_compute_start_};
     size_t mem_idx{0};  // use this once all compute patches are filled
 
-    for (size_t i = 0; i < cfg.client_trace_files.size(); i++)
+    for (size_t i = 0; i < client_trace_files.size(); i++)
     {
-        client_ptr c{new sim::CLIENT(cfg.client_trace_files[i], i)};
+        client_ptr c{new sim::CLIENT(client_trace_files[i], i)};
         for (auto& q : c->qubits)
         {
             if (patch_idx >= patch_idx_memory_start_)
@@ -73,12 +73,12 @@ COMPUTE::init_clients(const CONFIG& cfg)
 ////////////////////////////////////////////////////////////
 
 COMPUTE::bus_info
-COMPUTE::init_routing_space(const CONFIG& cfg)
+COMPUTE::init_routing_space(size_t num_rows, size_t num_patches_per_row)
 {
     // number of junctions is 2*(num_rows + 1)
     // number of buses is 3*num_rows + 1
-    std::vector<sim::ROUTING_BASE::ptr_type> junctions(2 * (cfg.num_rows + 1));
-    std::vector<sim::ROUTING_BASE::ptr_type> buses(3*cfg.num_rows + 1);
+    std::vector<sim::ROUTING_BASE::ptr_type> junctions(2 * (num_rows + 1));
+    std::vector<sim::ROUTING_BASE::ptr_type> buses(3*num_rows + 1);
     
     for (size_t i = 0; i < junctions.size(); i++)
         junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i, sim::ROUTING_BASE::TYPE::JUNCTION});
@@ -93,7 +93,7 @@ COMPUTE::init_routing_space(const CONFIG& cfg)
         b->connections.push_back(j);
     };
 
-    for (size_t i = 0; i < cfg.num_rows; i++)
+    for (size_t i = 0; i < num_rows; i++)
     {
         /*
             2i ----- 3i ------ 2i+1
@@ -114,8 +114,8 @@ COMPUTE::init_routing_space(const CONFIG& cfg)
         connect_jb(junctions[2*i+3], buses[3*i+2]);
     }
     // and the last remaining pair:
-    connect_jb(junctions[2*cfg.num_rows], buses[3*cfg.num_rows]);
-    connect_jb(junctions[2*cfg.num_rows+1], buses[3*cfg.num_rows]);
+    connect_jb(junctions[2*num_rows], buses[3*num_rows]);
+    connect_jb(junctions[2*num_rows+1], buses[3*num_rows]);
 
     return bus_info{junctions, buses};
 }
@@ -124,19 +124,16 @@ COMPUTE::init_routing_space(const CONFIG& cfg)
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_array& buses)
+COMPUTE::init_compute(size_t num_rows, size_t num_patches_per_row, const bus_array& junctions, const bus_array& buses)
 {
     size_t patch_idx{0};
 
     // First setup the magic state pins:
     std::vector<sim::T_FACTORY*> top_level_t_fact;
     std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(top_level_t_fact),
-                [cfg] (T_FACTORY* f) { return f->level == cfg.target_t_fact_level; });
+                [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level == lvl; });
 
-    std::cout << "top_level_t_fact.size() = " << top_level_t_fact.size() << "\n";
-
-    const size_t full_row_width = (cfg.patches_per_row/2) + 2;  // note that a row is 2 wide (upper and lower part)
-
+    const size_t full_row_width = (num_patches_per_row/2) + 2;  // note that a row is 2 wide (upper and lower part)
     if (top_level_t_fact.size() > full_row_width)
     {
         throw std::runtime_error("Not enough space to allocate all magic state pins: " 
@@ -165,14 +162,14 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
     }
 
     // now connect the program memory patches:
-    for (size_t i = 0; i < cfg.num_rows; i++)
+    for (size_t i = 0; i < num_rows; i++)
     {
-        for (size_t j = 0; j < cfg.patches_per_row; j++)
+        for (size_t j = 0; j < num_patches_per_row; j++)
         {
             // buses[i] is the upper bus, buses[i+1] is the left bus, buses[i+2] is the right bus
-            bool is_upper = (j < cfg.patches_per_row/2);
-            bool is_left = (j == 0 || j == cfg.patches_per_row/2);
-            bool is_right = (j == cfg.patches_per_row/2-1 || j == cfg.patches_per_row-1);
+            bool is_upper = (j < num_patches_per_row/2);
+            bool is_left = (j == 0 || j == num_patches_per_row/2);
+            bool is_right = (j == num_patches_per_row/2-1 || j == num_patches_per_row-1);
 
             if (is_upper)
                 patches_[patch_idx].buses.push_back(buses[3*i]);
@@ -189,9 +186,9 @@ COMPUTE::init_compute(const CONFIG& cfg, const bus_array& junctions, const bus_a
     }
 
     // set the connections for the memory pins:
-    const size_t last_bus_idx = 3*cfg.num_rows;
-    const size_t penult_junc_idx = 2*cfg.num_rows;
-    const size_t last_junc_idx = 2*cfg.num_rows+1;
+    const size_t last_bus_idx = 3*num_rows;
+    const size_t penult_junc_idx = 2*num_rows;
+    const size_t last_junc_idx = 2*num_rows+1;
 
     if (memory_.size() > full_row_width)
     {

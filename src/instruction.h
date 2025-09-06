@@ -19,6 +19,7 @@ using qubit_type = int64_t;
 
 constexpr std::string_view BASIS_GATES[] = 
 {
+    // compute instruction:
     "h", "x", "y", "z", 
     "s", "sx", "sdg", "sxdg",
     "t", "tx", "tdg", "txdg",
@@ -26,6 +27,10 @@ constexpr std::string_view BASIS_GATES[] =
     "rx", "rz",
     "ccx", "ccz",
     "mz", "mx",
+
+    // memory instruction:
+    "mswap",
+
     "nil"
 };
 
@@ -68,6 +73,10 @@ struct INSTRUCTION
         RX, RZ, 
         CCX, CCZ, 
         MZ, MX,
+
+        // memory instruction:
+        MSWAP,  // executes a swap if arguments are both in memory/compute, otherwise switches them
+
         NIL
     };
 
