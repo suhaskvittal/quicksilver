@@ -52,6 +52,8 @@ struct CLIENT
     TRACE_FILE_TYPE   trace_file_type;
     FILE*             trace_bin_istrm;
     gzFile            trace_gz_istrm;
+
+    bool stop_at_eof{false};
     
     CLIENT(std::string trace_file, int8_t id);
     ~CLIENT();

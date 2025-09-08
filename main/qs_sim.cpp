@@ -75,6 +75,7 @@ main(int argc, char** argv)
     // simulation config:
     std::string traces;
     uint64_t    inst_sim{100'000};
+    bool        stop_at_eof{false};
 
     // compute config:
     size_t cmp_num_rows{1};
@@ -98,20 +99,6 @@ main(int argc, char** argv)
     // parse input arguments;
     ARGPARSE pp(argc, argv);
     pp.usage = "qs_sim [options] <traces>";
-    pp.usage += "\noptions:";
-    pp.usage += "\n  --cmp_num_rows <num>: number of rows in the compute";
-    pp.usage += "\n  --cmp_patches_per_row <num>: number of patches per row in the compute";
-    pp.usage += "\n  --cmp_code_distance <num>: code distance of the compute";
-    pp.usage += "\n  --cmp_ext_round_ns <ns>: external round time of the compute";
-    pp.usage += "\n  --cmp_repl_id <id>: replacement policy ID (0: LRU, 1: LTI)";
-    pp.usage += "\n  --fact_15to1_L1 <num>: number of 15-to-1 factories in level 1";
-    pp.usage += "\n  --fact_15to1_L2 <num>: number of 15-to-1 factories in level 2";
-    pp.usage += "\n  --fact_buffer_cap <num>: buffer capacity of the factories";
-    pp.usage += "\n  --mem_bb_modules <num>: number of memory modules";
-    pp.usage += "\n  --mem_bb_banks_per_module <num>: number of banks per module in the memory";
-    pp.usage += "\n  --mem_bb_qubits_per_bank <num>: number of qubits per bank in the memory";
-    pp.usage += "\n  --mem_bb_code_distance <num>: code distance of the memory";
-    pp.usage += "\n  --mem_bb_ext_round_ns <ns>: external round time of the memory";
 
     pp.read_required("traces", traces);
     pp.find_optional("sim", inst_sim);
@@ -128,6 +115,8 @@ main(int argc, char** argv)
     pp.find_optional("mem_bb_qubits_per_bank", mem_bb_qubits_per_bank);
     pp.find_optional("mem_bb_code_distance", mem_bb_code_distance);
     pp.find_optional("mem_bb_ext_round_ns", mem_bb_ext_round_ns);
+
+    pp.find_flag("stop_at_eof", stop_at_eof);
 
     // Setup factories:
     std::vector<sim::T_FACTORY*> t_factories = factory_init(
@@ -170,6 +159,10 @@ main(int argc, char** argv)
                             t_factories, 
                             mem_modules,
                             static_cast<sim::COMPUTE::REPLACEMENT>(cmp_repl_id));
+    
+    // set `stop_at_eof` for all clients:
+    for (auto* c : cmp->clients())
+        c->stop_at_eof = stop_at_eof;
 
     // setup clock for all components:
     std::vector<sim::CLOCKABLE*> clockables{cmp};
