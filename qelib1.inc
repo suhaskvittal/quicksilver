@@ -49,6 +49,24 @@ gate cp(X) a, b
     rz(X/2) b;
 }
 
+gate ccp(X) a, b, c
+{
+    cx          a, c;
+    rz(-X/4)    c;
+    cx          b, c;
+    rz(X/4)     c;
+    cx          a, c;
+    rz(-X/4)    c;
+    cx          b, c;
+
+    rz(X/4)     b;
+    rz(X/4)     c;
+    cx          a, b;
+    rz(-X/4)    b;
+    cx          a, b;
+    rz(X/4)     a;
+}
+
 //////////////////////////////////////
 //  CONTROLLED UNITARY GATES        //
 //////////////////////////////////////

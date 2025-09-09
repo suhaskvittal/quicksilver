@@ -140,6 +140,8 @@ public:
     stats_type final_stats_{};
 
     std::string version_;
+
+    ssize_t urot_precision_{USE_MSB_TO_DETERMINE_UROT_PRECISION};
 private:
     register_table  registers_;
     gate_decl_table user_defined_gates_;
@@ -151,16 +153,14 @@ private:
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
 
-    ssize_t urot_precision_{USE_MSB_TO_DETERMINE_UROT_PRECISION};
-
     FILE* ostrm_{nullptr};
 public:
     PROGRAM_INFO(FILE* ostrm=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
-    static PROGRAM_INFO from_file(std::string);
+    static PROGRAM_INFO from_file(std::string, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
     // returns the final program statistics:
-    static stats_type read_from_file_and_write_to_binary(std::string, std::string);
+    static stats_type read_from_file_and_write_to_binary(std::string, std::string, size_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
     /*
         These are the public member functions that are used to build the program from the Bison parser.
     */

@@ -66,6 +66,46 @@ VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
         {
             floating_point = M_E;
         }
+        else if (ident.find("fpa") != std::string::npos)
+        {
+            // create hex string:
+            size_t width_start_idx = ident.find("fpa") + 3;
+            size_t hex_ident_start_idx = ident.find("0x");
+            size_t num_bits = std::stoi(ident.substr(width_start_idx, hex_ident_start_idx - width_start_idx));
+
+            size_t hex_start_idx = hex_ident_start_idx + 2;
+
+            std::array<fpa_type::word_type, fpa_type::NUM_WORDS> words{};
+            size_t nibble_count{0};
+            size_t word_idx{0};
+            for (ssize_t i = ident.size()-1; i >= hex_start_idx; i--)
+            {
+                char c = ident[i];
+                fpa_type::word_type value{0};
+                if (c >= '0' && c <= '9')
+                    value = c - '0';
+                else if (c >= 'a' && c <= 'f')
+                    value = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'F')
+                    value = c - 'A' + 10;
+                else
+                    throw std::runtime_error("Unknown character `" + std::string{c} + "` found in expression: " + ident);
+
+                words[word_idx] |= value << (nibble_count*4);
+                nibble_count++;
+
+                if (nibble_count == fpa_type::BITS_PER_WORD/4)
+                {
+                    nibble_count = 0;
+                    word_idx++;
+                }
+            }
+
+            fixed_point = fpa_type(words);
+            fixed_point.lshft(fpa_type::NUM_BITS - num_bits);
+
+            state = STATE::CAN_USE_FIXED_POINT;
+        }
         else
         {
             throw std::runtime_error("Unknown identifier found in expression: " + ident);

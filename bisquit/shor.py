@@ -12,15 +12,27 @@ import multiprocessing as mp
 #################################################################
 
 # 128-bit prime numbers used to generate the RSA public key
-p = 249338061461969271388931484822172864483
-q = 318086665464420588304853690890664293979
+#jp = 249338061461969271388931484822172864483
+#q = 318086665464420588304853690890664293979
 
 # 256-bit RSA public key
-N = 79311112543800559059544670893166856913365574321673273203857240979443239847857
-A = 329916967358087561489242136217384669929
-A_INV = 40081242936043274348142380556789957492624533695234575448927119922306278098771
+#N = 79311112543800559059544670893166856913365574321673273203857240979443239847857
+#A = 329916967358087561489242136217384669929
+#A_INV = 40081242936043274348142380556789957492624533695234575448927119922306278098771
 
-NUM_BITS = 256
+#NUM_BITS = 256
+
+# 128-bit RSA public key
+N = 168425339336371607834480189065517156539
+A = 15286634156585511877
+A_INV = 156007382077471147457263837412622610738 
+NUM_BITS = 128
+
+# 16-bit RSA public key
+#N = 22499
+#A = 230
+#A_INV = 9880
+#NUM_BITS = 16
 
 #################################################################
 #################################################################
@@ -32,6 +44,7 @@ def _qft_impl(qr: str, inv: bool) -> str:
 #       rot_angle = [ f'pi/{j+1}' for j in range(i+1, NUM_BITS) ]
 #       angle_string = ' + '.join(rot_angle)
         angle_string = hex(reverse_bits(rot))
+        angle_string = f'fpa{2*NUM_BITS}{angle_string}' 
         steps.append(f'h {qr}[{i}];\n')
         if rot > 0:
             steps.append(f'cp({angle_string}) {qr}[{i+1}], {qr}[{i}];\n')
@@ -76,14 +89,14 @@ def fourier_adder(ctrl: list[str], qr: str, a: int) -> str:
         if rot == 0:
             continue
         angle_string = hex(reverse_bits(rot))
-        angle_string = f'fpa{angle_string}'   # note that we need to reverse the string because the LSB of `a` corresponds to `pi` (we want MSB to correspond to `pi`)
+        angle_string = f'fpa{2*NUM_BITS}{angle_string}'   # note that we need to reverse the string because the LSB of `a` corresponds to `pi` (we want MSB to correspond to `pi`)
 
         if len(ctrl) == 0:
             out += f'p({angle_string}) {qr}[{i}];\n'
         elif len(ctrl) == 1:
             out += f'cp({angle_string}) {ctrl[0]}, {qr}[{i}];\n'
         else:
-            out += f'ccp({angle_string}) {ctrl[0]}, {qr}[{i}];\n'
+            out += f'ccp({angle_string}) {ctrl[0]}, {ctrl[1]}, {qr}[{i}];\n'
     return out
 
 def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
@@ -104,7 +117,7 @@ def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
     out += fourier_adder([anc], qr, N)
     out += ccfadd_a
     out += iqft_qr
-    out += f'x {qr}[{NUM_BITS-1}]; cx {qr}[{NUM_BITS-1}], {anc}; x {qr}[{NUM_BITS-1}];\n'
+    out += f'x {qr}[{NUM_BITS-1}];\ncx {qr}[{NUM_BITS-1}], {anc};\nx {qr}[{NUM_BITS-1}];\n'
     out += qft_qr
     out += ccfadd_a
 
@@ -168,7 +181,7 @@ def _aggregate_iterations(q: mp.Queue):
 
 def _generate_loop_iter(a: int, a_inv: int, rot: int, iter_idx: int, q: mp.Queue):
     out = cua('c', 'q', 'anc_blk', 'anc_mod_adder', a, a_inv)
-    out += f'rz({hex(reverse_bits(rot))}) c;\n'
+    out += f'rz(fpa{2*NUM_BITS}{hex(reverse_bits(rot))}) c;\n'
     q.put((out, iter_idx))
 
 if __name__ == '__main__':

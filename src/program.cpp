@@ -155,9 +155,9 @@ PROGRAM_INFO::PROGRAM_INFO(FILE* ostrm, ssize_t urot_precision)
 ////////////////////////////////////////////////////////////
 
 PROGRAM_INFO
-PROGRAM_INFO::from_file(std::string input_file)
+PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
 {
-    PROGRAM_INFO prog{};
+    PROGRAM_INFO prog{nullptr, urot_precision};
 
     std::ifstream istrm(input_file);
     OQ2_LEXER lexer(istrm);
@@ -183,11 +183,11 @@ _copy_data_from_file_to_file(FILE* istrm, const WRITE_FUNC& write_func)
 }
 
 PROGRAM_INFO::stats_type
-PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file)
+PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, size_t urot_precision)
 {
     FILE* tmpstrm = tmpfile();
 
-    PROGRAM_INFO prog(tmpstrm);
+    PROGRAM_INFO prog(tmpstrm, urot_precision);
 
     // get the dirname of `input_file`
     std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
@@ -888,6 +888,8 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`"
             << "\n\t\tgridsynth output: ";
+#else
+//  std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`" << "\n";
 #endif
     
     // run gridsynth and read its output:
@@ -946,6 +948,8 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
 
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
+#else
+//  std::cout << "\tgs gate count (post opt) = " << urotseq_reduced_size << "\n";
 #endif
 
     return out;

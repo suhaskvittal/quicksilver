@@ -25,7 +25,7 @@ Z = Parameter("Z")
 W = Parameter("W")
 U = Parameter("U")
 
-def show_gate_xla(gate, num_params: int, num_args: int, name: str):
+def show_gate_xla(gate, num_params: int, num_args: int, name: str, add_ctrl=False):
     print(f'------------------------ {name} ------------------------')
     if num_params == 0:
         gate_impl = gate()
@@ -43,7 +43,10 @@ def show_gate_xla(gate, num_params: int, num_args: int, name: str):
         raise ValueError(f"Invalid number of parameters for {name}: {num_params}")
 
     circ = QuantumCircuit(num_args)
-    circ.append(gate_impl, range(num_args))
+    if add_ctrl:
+        circ.append(gate_impl.control(1), range(num_args))
+    else:
+        circ.append(gate_impl, range(num_args))
     circ = translate(circ)
     print(circ)
 
@@ -64,6 +67,7 @@ show_gate_xla(CRZGate, 1, 2, "CRZ")
 
 show_gate_xla(PhaseGate, 1, 1, "Phase")
 show_gate_xla(CPhaseGate, 1, 2, "CPhase")
+show_gate_xla(CPhaseGate, 1, 3, "CCPhase", add_ctrl=True)
 
 show_gate_xla(RZZGate, 1, 2, "RZZ")
 show_gate_xla(RZXGate, 1, 2, "RZX")

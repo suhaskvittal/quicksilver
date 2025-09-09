@@ -9,3 +9,5 @@ benchmarks/stats/*
 
 venv/
 venv/*
+
+bisquit/qasm/*

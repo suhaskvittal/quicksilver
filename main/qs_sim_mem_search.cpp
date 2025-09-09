@@ -304,6 +304,9 @@ main(int argc, char* argv[])
 
         size_t cmp_count = cmp_create_budget_using_fraction ? ceil(cmp_surface_code_fraction*num_program_qubits) 
                                                             : cmp_num_surface_codes;
+        // require a 4 qubit minimum
+        cmp_count = std::max(size_t{4}, cmp_count);
+
         size_t cmp_phys_qubits = cmp_count * sc_phys_qubit_count(cmp_sc_code_distance);
         size_t cmp_patches_per_row = 4;
         size_t cmp_num_rows = ceil(_fpdiv(cmp_count, cmp_patches_per_row));

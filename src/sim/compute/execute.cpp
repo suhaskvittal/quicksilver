@@ -251,7 +251,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         }
 
         if (!any_factory_has_resource)
-            result = EXEC_RESULT_RESOURCE_STALL;
+            result |= EXEC_RESULT_RESOURCE_STALL;
     }
     else if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
     {

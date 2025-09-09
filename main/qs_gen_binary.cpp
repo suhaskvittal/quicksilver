@@ -55,11 +55,14 @@ int main(int argc, char* argv[])
     std::string input_file{argv[1]};
     std::string output_file{argv[2]};
     std::string stats_output_file{};
+    ssize_t urot_precision{PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION};
 
     if (argc > 3)
         stats_output_file = std::string{argv[3]};
+    if (argc > 4)
+        urot_precision = std::stoi(std::string{argv[4]});
 
-    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
+    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file, urot_precision);
     if (stats_output_file.empty())
     {
         print_stats(std::cout, stats);

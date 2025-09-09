@@ -81,6 +81,10 @@ TEMPL_CLASS::lshft(int n)
     if (n < 0)
         return rshft(-n);
 
+    int num_word_shifts = n / BITS_PER_WORD;
+    n %= BITS_PER_WORD;
+    lshft_w(num_word_shifts);
+
     for (ssize_t i = NUM_WORDS-1; i > 0; i--)
     {
         backing_array_[i] <<= n;
@@ -95,6 +99,10 @@ TEMPL_CLASS::rshft(int n)
 {
     if (n < 0)
         return lshft(-n);
+
+    int num_word_shifts = n / BITS_PER_WORD;
+    n %= BITS_PER_WORD;
+    rshft_w(num_word_shifts);
 
     for (ssize_t i = 0; i < NUM_WORDS-1; i++)
     {
@@ -111,8 +119,8 @@ TEMPL_CLASS::lshft_w(int n)
     if (n < 0)
         return rshft_w(-n);
 
-    // drop most significant word:
-    std::shift_left(backing_array_.begin(), backing_array_.end(), n);
+    // note that the lower entries of the array are the most significant words (so our "left" is STL's "right")
+    std::shift_right(backing_array_.begin(), backing_array_.end(), n);
     std::fill(backing_array_.begin(), backing_array_.begin()+n, 0);
 }
 
@@ -122,8 +130,7 @@ TEMPL_CLASS::rshft_w(int n)
     if (n < 0)
         return lshft_w(-n);
 
-    // drop least significant word:
-    std::shift_right(backing_array_.begin(), backing_array_.end(), n);
+    std::shift_left(backing_array_.begin(), backing_array_.end(), n);
     std::fill(backing_array_.end()-n, backing_array_.end(), 0);
 }
 
