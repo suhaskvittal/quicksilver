@@ -71,15 +71,14 @@ class COMPUTE : public CLOCKABLE
 public:
     using inst_ptr = INSTRUCTION*;
     using client_ptr = std::unique_ptr<CLIENT>;
-
-    enum class EXEC_RESULT
-    {
-        SUCCESS,
-        MEMORY_STALL,
-        ROUTING_STALL,
-        RESOURCE_STALL,
-        WAITING_FOR_QUBIT_TO_BE_READY
-    };
+    using exec_result_type = uint8_t;
+    
+    // we will return a flag after an execute indicating what stalls occurred -- or could have occurred if a resource was available
+    constexpr static exec_result_type EXEC_RESULT_SUCCESS = 0;
+    constexpr static exec_result_type EXEC_RESULT_MEMORY_STALL = 1;
+    constexpr static exec_result_type EXEC_RESULT_ROUTING_STALL = 2;
+    constexpr static exec_result_type EXEC_RESULT_RESOURCE_STALL = 4;
+    constexpr static exec_result_type EXEC_RESULT_WAITING_FOR_QUBIT_TO_BE_READY = 8;
 
     enum class REPLACEMENT
     {
@@ -105,7 +104,7 @@ private:
     std::unique_ptr<compute::REPLACEMENT_POLICY_BASE> repl_;
 
     // a buffer for accumulating all execution results each cycle:
-    std::vector<EXEC_RESULT> exec_results_;
+    std::vector<exec_result_type> exec_results_;
 
     // we will only use T magic states from factories of this level:
     size_t target_t_fact_level_{1};
@@ -143,7 +142,7 @@ private:
     
     void issue_memory_swap_request(client_ptr&, qubit_type);
 
-    EXEC_RESULT execute_instruction(client_ptr&, inst_ptr);
+    exec_result_type execute_instruction(client_ptr&, inst_ptr);
 
     PATCH::bus_array::const_iterator      find_free_bus(const PATCH& p) const;
     std::vector<PATCH>::iterator          find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id);

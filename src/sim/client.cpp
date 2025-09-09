@@ -47,8 +47,7 @@ CLIENT::read_instruction_from_trace()
     // reopen the file if we hit EOF
     if (eof())
     {
-        if (stop_at_eof)
-            return INSTRUCTION{};
+        has_hit_eof_once = true;
 
         if (trace_file_type == TRACE_FILE_TYPE::GZ)
             gzclose(trace_gz_istrm);

@@ -13,17 +13,6 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class T> void
-print_stat_line(std::string name, T value, bool indent=true)
-{
-    if (indent)
-        name = "\t" + name;
-    std::cout << std::setw(52) << std::left << name << " : " << std::setw(12) << std::right << value << "\n";
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 std::vector<sim::T_FACTORY*>
 factory_init(std::vector<size_t> fact_num_15to1_by_level, uint64_t t_round_ns, size_t buffer_capacity)
 {
@@ -75,7 +64,6 @@ main(int argc, char** argv)
     // simulation config:
     std::string traces;
     uint64_t    inst_sim{100'000};
-    bool        stop_at_eof{false};
 
     // compute config:
     size_t cmp_num_rows{1};
@@ -115,8 +103,6 @@ main(int argc, char** argv)
     pp.find_optional("mem_bb_qubits_per_bank", mem_bb_qubits_per_bank);
     pp.find_optional("mem_bb_code_distance", mem_bb_code_distance);
     pp.find_optional("mem_bb_ext_round_ns", mem_bb_ext_round_ns);
-
-    pp.find_flag("stop_at_eof", stop_at_eof);
 
     // Setup factories:
     std::vector<sim::T_FACTORY*> t_factories = factory_init(
@@ -159,10 +145,6 @@ main(int argc, char** argv)
                             t_factories, 
                             mem_modules,
                             static_cast<sim::COMPUTE::REPLACEMENT>(cmp_repl_id));
-    
-    // set `stop_at_eof` for all clients:
-    for (auto* c : cmp->clients())
-        c->stop_at_eof = stop_at_eof;
 
     // setup clock for all components:
     std::vector<sim::CLOCKABLE*> clockables{cmp};
@@ -182,22 +164,8 @@ main(int argc, char** argv)
     bool done;
     do
     {
-        if (tick % 100'000 == 0)
-        {
-            if (tick % 5'000'000 == 0)
-            {
-                std::cout << "\nCMP CYCLE @ " << cmp->current_cycle() << " [";
-                for (const auto& c : cmp->clients())
-                {
-                    uint64_t inst_done_k = c->s_inst_done / 1000;
-                    std::cout << std::setw(4) << std::right << inst_done_k << "K";
-                }
-                std::cout << " ]\t";
-            }
-            std::cout << ".";
-            std::cout.flush();
-        }
-        // tick all components in the system:
+        sim::print_progress(std::cout, cmp, tick, 100'000, 5'000'000);
+        // tick all components in the systm:
         for (auto* c : clockables)
             c->tick();
 
@@ -210,48 +178,7 @@ main(int argc, char** argv)
     }
     while (!done);
 
-    // print stats for each client:
-    std::cout << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
-    double execution_time = (cmp->current_cycle() / cmp->freq_khz_) * 1e-3 / 60.0;
-
-    print_stat_line("TOTAL_CYCLES", cmp->current_cycle(), false);
-    print_stat_line("COMPUTE_SPEED (kHz)", cmp->freq_khz_, false);
-    print_stat_line("EXECUTION_TIME (min)", execution_time, false);
-    
-    const auto& clients = cmp->clients();
-    for (size_t i = 0; i < clients.size(); i++)
-    {
-        const auto& c = clients[i];
-        std::cout << "CLIENT_" << i << "\n";
-
-        print_stat_line("VIRTUAL_INST_DONE", c->s_inst_done);
-        print_stat_line("UNROLLED_INST_DONE", c->s_unrolled_inst_done);
-        print_stat_line("CYCLES_STALLED", c->s_cycles_stalled);
-        print_stat_line("CYCLES_STALLED_BY_MEM", c->s_cycles_stalled_by_mem);
-        print_stat_line("CYCLES_STALLED_BY_ROUTING", c->s_cycles_stalled_by_routing);
-        print_stat_line("CYCLES_STALLED_BY_RESOURCE", c->s_cycles_stalled_by_resource);
-    }
-
-    // print factory stats:
-    std::unordered_map<size_t, std::vector<sim::T_FACTORY*>> factory_level_map;
-    for (auto* f : t_factories)
-        factory_level_map[f->level].push_back(f);
-
-    for (size_t i = 0; i < factory_level_map.size(); i++)
-    {
-        std::cout << "FACTORY_L" << i << "\n";
-
-        uint64_t tot_prod_tries{0},
-                 tot_failures{0};
-        for (auto* f : factory_level_map[i])
-        {
-            tot_prod_tries += f->s_prod_tries;
-            tot_failures += f->s_failures;
-        }
-
-        print_stat_line("PROD_TRIES", tot_prod_tries);
-        print_stat_line("FAILURES", tot_failures);
-    }
+    print_stats(std::cout, cmp, t_factories, mem_modules);
 
     // deallocate memory:
     delete cmp;

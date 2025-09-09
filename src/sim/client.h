@@ -42,9 +42,11 @@ struct CLIENT
     uint64_t s_inst_done{0};
     uint64_t s_unrolled_inst_done{0};
     uint64_t s_cycles_stalled{0};
-    uint64_t s_cycles_stalled_by_mem{0};
-    uint64_t s_cycles_stalled_by_routing{0};
-    uint64_t s_cycles_stalled_by_resource{0};
+    uint64_t s_inst_stalled{0};
+
+    // there are 16 possible combinations of stalls, so we use an array:
+    std::array<uint64_t, 16> s_cycles_stalled_by_type{};
+    std::array<uint64_t, 16> s_inst_stalled_by_type{};
 
     std::vector<qubit_info_type> qubits;
 
@@ -53,7 +55,7 @@ struct CLIENT
     FILE*             trace_bin_istrm;
     gzFile            trace_gz_istrm;
 
-    bool stop_at_eof{false};
+    bool has_hit_eof_once{false};
     
     CLIENT(std::string trace_file, int8_t id);
     ~CLIENT();

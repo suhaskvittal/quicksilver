@@ -54,6 +54,7 @@ set(BINARY_GEN_FILES
 
 set(SIM_FILES
     src/instruction.cpp
+    src/sim.cpp
     src/sim/client.cpp
     src/sim/clock.cpp
     src/sim/compute.cpp
@@ -88,3 +89,12 @@ target_compile_options(qs_sim PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(qs_sim PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
 
 target_link_libraries(qs_sim PRIVATE ZLIB::ZLIB)
+
+# iterative simulator for memory evaluations:
+add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${SIM_FILES})
+
+target_include_directories(qs_sim_mem PRIVATE "src")
+target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_sim_mem PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+
+target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB)

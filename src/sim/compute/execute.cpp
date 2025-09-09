@@ -21,7 +21,7 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::EXEC_RESULT
+COMPUTE::exec_result_type
 COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 {
     // complete immediately -- do not have to wait for qubits to be ready
@@ -29,10 +29,10 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
     {
         inst->cycle_done = cycle_ + 1;
         inst->is_running = true;
-        return EXEC_RESULT::SUCCESS;
+        return EXEC_RESULT_SUCCESS;
     }
 
-    EXEC_RESULT result{EXEC_RESULT::SUCCESS};
+    exec_result_type result{0};
 
     // check if all qubits are in compute memory:
     for (qubit_type qid : inst->qubits)
@@ -52,8 +52,8 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         {
             // if we are waiting for a qubit to return from memory, then this is a memory stall
             result = (q.memloc_info.where == MEMINFO::LOCATION::COMPUTE) 
-                            ? EXEC_RESULT::WAITING_FOR_QUBIT_TO_BE_READY 
-                            : EXEC_RESULT::MEMORY_STALL;
+                            ? EXEC_RESULT_WAITING_FOR_QUBIT_TO_BE_READY 
+                            : EXEC_RESULT_MEMORY_STALL;
             break;
         }
 
@@ -112,13 +112,26 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             // this is blocked:
             q.memloc_info.t_free = std::numeric_limits<uint64_t>::max();
 
-            result = EXEC_RESULT::MEMORY_STALL;
+            result = EXEC_RESULT_MEMORY_STALL;
         }
     }
 
     // if any qubit is unavailable we need to exit:
-    if (result != EXEC_RESULT::SUCCESS)
+    if (result != EXEC_RESULT_SUCCESS)
+    {
+        // if the gate requires a resource state, then we are also interested if we would have stalled regardless
+        if (inst->type == INSTRUCTION::TYPE::T 
+                || inst->type == INSTRUCTION::TYPE::TDG
+                || inst->type == INSTRUCTION::TYPE::TX
+                || inst->type == INSTRUCTION::TYPE::TXDG)
+        {
+            bool resource_avail = std::any_of(t_fact_.begin(), t_fact_.end(), 
+                                    [lvl=target_t_fact_level_] (auto* f) { return f->level >= lvl && f->buffer_occu > 0; });
+            if (!resource_avail)
+                result |= EXEC_RESULT_RESOURCE_STALL;
+        }
         return result;
+    }
 
 #if defined(QS_SIM_DEBUG)
     if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
@@ -158,7 +171,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         auto it = find_free_bus(q_patch);
         if (it == q_patch.buses.end())
         {
-            result = EXEC_RESULT::ROUTING_STALL;
+            result = EXEC_RESULT_ROUTING_STALL;
         }
         else
         {
@@ -190,7 +203,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         }
         else
         {
-            result = EXEC_RESULT::ROUTING_STALL;
+            result = EXEC_RESULT_ROUTING_STALL;
         }
     }
     else if (inst->type == INSTRUCTION::TYPE::T 
@@ -229,16 +242,16 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
                 fact->buffer_occu--;
 
-                result = EXEC_RESULT::SUCCESS;
+                result = EXEC_RESULT_SUCCESS;
             }
             else
             {
-                result = EXEC_RESULT::ROUTING_STALL;
+                result = EXEC_RESULT_ROUTING_STALL;
             }
         }
 
         if (!any_factory_has_resource)
-            result = EXEC_RESULT::RESOURCE_STALL;
+            result = EXEC_RESULT_RESOURCE_STALL;
     }
     else if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
     {
@@ -249,7 +262,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             inst->curr_uop = new INSTRUCTION(inst->urotseq[uop_idx], inst->qubits);
         }
         result = execute_instruction(c, inst->curr_uop);
-        inst->is_running = (result == EXEC_RESULT::SUCCESS);
+        inst->is_running = (result == EXEC_RESULT_SUCCESS);
     }
     else if (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ)
     {
@@ -314,7 +327,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         }
 
         result = execute_instruction(c, inst->curr_uop);
-        inst->is_running = (result == EXEC_RESULT::SUCCESS);
+        inst->is_running = (result == EXEC_RESULT_SUCCESS);
     }
     else if (inst->type == INSTRUCTION::TYPE::MZ || inst->type == INSTRUCTION::TYPE::MX)
     {

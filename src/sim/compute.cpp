@@ -82,27 +82,6 @@ COMPUTE::COMPUTE(double freq_ghz,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-constexpr size_t NUM_STALL_TYPES{3};
-// these are stall array indices:
-constexpr size_t MEMORY_STALL_IDX{0};
-constexpr size_t ROUTING_STALL_IDX{1};
-constexpr size_t RESOURCE_STALL_IDX{2};
-
-std::array<size_t, NUM_STALL_TYPES>
-_count_stall_types(const std::vector<COMPUTE::EXEC_RESULT>& exec_results)
-{
-    auto _count = [&exec_results] (COMPUTE::EXEC_RESULT r) 
-                    { 
-                        return std::count_if(exec_results.begin(), exec_results.end(),
-                                 [r] (COMPUTE::EXEC_RESULT rr) { return rr == r; });
-                    };
-    std::array<size_t, NUM_STALL_TYPES> stall_counts{};
-    stall_counts[MEMORY_STALL_IDX] = _count(COMPUTE::EXEC_RESULT::MEMORY_STALL);
-    stall_counts[ROUTING_STALL_IDX] = _count(COMPUTE::EXEC_RESULT::ROUTING_STALL);
-    stall_counts[RESOURCE_STALL_IDX] = _count(COMPUTE::EXEC_RESULT::RESOURCE_STALL);
-    return stall_counts;
-}
-
 void
 COMPUTE::operate()
 {
@@ -144,17 +123,18 @@ COMPUTE::operate()
         client_try_fetch(c);
 
         // update stats using `exec_results_`:
-        // if there is any success, then there is no stall:
-        bool any_success = std::any_of(exec_results_.begin(), exec_results_.end(),
-                                       [] (EXEC_RESULT r) { return r == EXEC_RESULT::SUCCESS; });
-        if (!any_success)
+        exec_result_type cycle_stall{0};
+        bool any_stalled = false;
+        for (exec_result_type r : exec_results_)
         {
-            auto stall_counts = _count_stall_types(exec_results_);
-            c->s_cycles_stalled++;
-            c->s_cycles_stalled_by_mem += (stall_counts[MEMORY_STALL_IDX] > 0);
-            c->s_cycles_stalled_by_routing += (stall_counts[ROUTING_STALL_IDX] > 0);
-            c->s_cycles_stalled_by_resource += (stall_counts[RESOURCE_STALL_IDX] > 0);
+            c->s_inst_stalled += (r > 0);
+            c->s_inst_stalled_by_type[r]++;
+            any_stalled |= (r > 0);
+            
+            cycle_stall |= r;
         }
+        c->s_cycles_stalled += (cycle_stall > 0);
+        c->s_cycles_stalled_by_type[cycle_stall]++;
 
         ii = (ii+1) % clients_.size();
     }
@@ -352,7 +332,7 @@ COMPUTE::client_try_execute(client_ptr& c)
             exec_results_.push_back(result);
 
             // update replacement policy on success
-            if (result == EXEC_RESULT::SUCCESS)
+            if (result == EXEC_RESULT_SUCCESS)
             {
                 for (qubit_type qid : inst->qubits)
                 {
@@ -370,7 +350,7 @@ COMPUTE::client_try_execute(client_ptr& c)
                 };
 
                 std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
-                if (result == EXEC_RESULT::SUCCESS)
+                if (result == EXEC_RESULT_SUCCESS)
                 {
                     std::cout << "\t\twill be done @ cycle " << inst->cycle_done 
                                 << ", uops = " << inst->uop_completed << " of " << inst->num_uops << "\n";
