@@ -8,6 +8,7 @@
 
 #include "instruction.h"
 
+#include <cstdio>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -104,6 +105,8 @@ struct GATE_DEFINITION
 class PROGRAM_INFO
 {
 public:
+    constexpr static size_t MAX_INST_BEFORE_FLUSH{32*1024};
+
     using fpa_type = INSTRUCTION::fpa_type;
 
     using register_table = std::unordered_map<std::string, prog::REGISTER>;
@@ -113,6 +116,7 @@ public:
 
     struct stats_type
     {
+        uint64_t total_gate_count{0};
         uint64_t software_gate_count{0};
         uint64_t t_gate_count{0};
         uint64_t cxz_gate_count{0};  // number of cx/cz gates
@@ -123,21 +127,17 @@ public:
         uint64_t virtual_inst_count{0};
         uint64_t unrolled_inst_count{0};
 
-        /*
-            These have to be calculated later:
-        */
-        double   mean_instruction_level_parallelism{};
-        double   mean_concurrent_rotation_count{};
-        double   mean_concurrent_cxz_count{};
-        double   mean_rotation_unrolled_count{};
+        // TODO: add more statistics
 
-        uint64_t max_instruction_level_parallelism{0};
-        uint64_t max_concurrent_rotation_count{0};
-        uint64_t max_concurrent_cxz_count{0};
-        uint64_t max_rotation_unrolled_count{0};
+        void merge(const stats_type& other);
+        void generate_calculated_stats();  // use this to compute means, etc.
     };
 
     constexpr static ssize_t USE_MSB_TO_DETERMINE_UROT_PRECISION{-1};
+
+    // `final_stats_` is the aggregate statistics for the entire program.
+    // this is only set 
+    stats_type final_stats_{};
 
     std::string version_;
 private:
@@ -152,10 +152,15 @@ private:
     size_t num_bits_declared_{0};
 
     ssize_t urot_precision_{USE_MSB_TO_DETERMINE_UROT_PRECISION};
+
+    FILE* ostrm_{nullptr};
 public:
-    PROGRAM_INFO(ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
+    PROGRAM_INFO(FILE* ostrm=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
     static PROGRAM_INFO from_file(std::string);
+
+    // returns the final program statistics:
+    static stats_type read_from_file_and_write_to_binary(std::string, std::string);
     /*
         These are the public member functions that are used to build the program from the Bison parser.
     */
@@ -170,6 +175,7 @@ public:
 
     stats_type analyze_program() const;
 
+    void flush_and_clear_instructions();
     const std::vector<INSTRUCTION>& get_instructions() const { return instructions_; }
     size_t get_num_qubits() const { return num_qubits_declared_; }
 private:

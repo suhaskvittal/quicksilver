@@ -14,7 +14,8 @@
 #include <initializer_list>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
+
+#include <zlib.h>
 
 // `DROP_MEASUREMENT_GATES` is necessary for many QASMBench workloads, since they
 // have invalid measurement syntax
@@ -122,28 +123,113 @@ using namespace prog;
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::PROGRAM_INFO(ssize_t urot_precision)
-    :urot_precision_(urot_precision)
+void
+PROGRAM_INFO::stats_type::merge(const stats_type& other)
+{
+    total_gate_count += other.total_gate_count;
+    software_gate_count += other.software_gate_count;
+    t_gate_count += other.t_gate_count;
+    cxz_gate_count += other.cxz_gate_count;
+    rotation_count += other.rotation_count;
+    ccxz_count += other.ccxz_count;
+    virtual_inst_count += other.virtual_inst_count;
+    unrolled_inst_count += other.unrolled_inst_count;
+
+    generate_calculated_stats();
+}
+
+void
+PROGRAM_INFO::stats_type::generate_calculated_stats()
+{
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+PROGRAM_INFO::PROGRAM_INFO(FILE* ostrm, ssize_t urot_precision)
+    :ostrm_(ostrm),
+    urot_precision_(urot_precision)
 {}
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 PROGRAM_INFO
-PROGRAM_INFO::from_file(std::string filename)
+PROGRAM_INFO::from_file(std::string input_file)
 {
     PROGRAM_INFO prog{};
 
-    // get the dirname of `filename`
-    std::string dirname = filename.substr(0, filename.find_last_of('/'));
+    std::ifstream istrm(input_file);
+    OQ2_LEXER lexer(istrm);
+    yy::parser parser(lexer, prog, "");
+    int retcode = parser();
+
+    prog.final_stats_ = prog.analyze_program();
+
+    return prog;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class WRITE_FUNC> void
+_copy_data_from_file_to_file(FILE* istrm, const WRITE_FUNC& write_func)
+{
+    char buf[1024];
+
+    int bytes_read;
+    while ((bytes_read=fread(buf, sizeof(char), sizeof(buf), istrm)) > 0)
+        write_func(buf, bytes_read);
+}
+
+PROGRAM_INFO::stats_type
+PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file)
+{
+    FILE* tmpstrm = tmpfile();
+
+    PROGRAM_INFO prog(tmpstrm);
+
+    // get the dirname of `input_file`
+    std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
 
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] reading file: " << filename << ", new relative path: " << dirname << "\n";
+    std::cout << "[ PROGRAM_INFO ] reading file: " << input_file << ", new relative path: " << dirname << "\n";
 #endif
 
-    std::ifstream istrm(filename);
+    std::ifstream istrm(input_file);
     OQ2_LEXER lexer(istrm);
     yy::parser parser(lexer, prog, dirname);
     int retcode = parser();
 
-    return prog;
+    uint32_t num_qubits = prog.get_num_qubits();
+
+    // need to get last set of stats and merge:
+    prog.flush_and_clear_instructions();
+
+    // rewind `tmpstrm` to start of file (now will use it for reading)
+    rewind(tmpstrm);
+
+    // create final output file:
+    bool is_gz = output_file.find(".gz") != std::string::npos;
+    if (is_gz)
+    {
+        gzFile ostrm = gzopen(output_file.c_str(), "w9");
+        gzwrite(ostrm, &num_qubits, sizeof(num_qubits));
+        _copy_data_from_file_to_file(tmpstrm, [ostrm] (void* buf, size_t size) { return gzwrite(ostrm, buf, size); });
+        gzclose(ostrm);
+    }
+    else
+    {
+        FILE* ostrm = fopen(output_file.c_str(), "wb");
+        fwrite(&num_qubits, sizeof(num_qubits), 1, ostrm);
+        _copy_data_from_file_to_file(tmpstrm, [ostrm] (void* buf, size_t size) { return fwrite(buf, 1, size, ostrm); });
+        fclose(ostrm);
+    }
+
+    // delete tmp file:
+    fclose(tmpstrm);
+
+    return prog.final_stats_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -306,6 +392,10 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
 
             instructions_.push_back(inst);
         }
+
+        // check if `instructions_` is too large: if so, flush to output file:
+        if (instructions_.size() >= MAX_INST_BEFORE_FLUSH && ostrm_ != nullptr)
+            flush_and_clear_instructions();
     }
     else
     {
@@ -392,6 +482,10 @@ _scan_and_die_on_conflict(const MAP_TYPE& x, const MAP_TYPE& y, std::string_view
 void
 PROGRAM_INFO::merge(PROGRAM_INFO&& other)
 {
+    // merge stats:
+    other.final_stats_.merge(other.analyze_program());
+    final_stats_.merge(other.final_stats_);
+
     // merge data structures (`registers_` and `user_defined_gates_`):
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] merging registers and user-defined gates from external file\n";
@@ -416,6 +510,43 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
     instructions_.reserve(instructions_.size() + other.instructions_.size());
     std::move(std::make_move_iterator(other.instructions_.begin()),
               std::make_move_iterator(other.instructions_.end()), std::back_inserter(instructions_));
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+PROGRAM_INFO::flush_and_clear_instructions()
+{
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "[ PROGRAM_INFO ] flushing instructions to file\n";
+#endif
+    // first, do optimizations:
+    [[ maybe_unused ]] size_t num_gates_removed = dead_gate_elimination();
+
+#if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "[ PROGRAM_INFO ] done with optimizations, removed " << num_gates_removed << " gates\n";
+#endif
+
+    // update stats first while we have `instructions_`
+    auto curr_stats = analyze_program();
+    final_stats_.merge(curr_stats);
+
+    // write to file:
+    for (const auto& inst : instructions_)
+    {
+        if (inst.type == INSTRUCTION::TYPE::RZ || inst.type == INSTRUCTION::TYPE::RX)
+        {
+            if (inst.urotseq.empty()) // this is an RZ(0) or RZ(2*pi) that did not get caught -- just skip it:
+                continue;
+        }
+
+        auto enc = inst.serialize();
+        enc.read_write([this] (void* buf, size_t size) { return fwrite(buf, 1, size, this->ostrm_); });
+    }
+
+    // clear instructions:
+    instructions_.clear();
 }
 
 ////////////////////////////////////////////////////////////
@@ -577,20 +708,10 @@ PROGRAM_INFO::analyze_program() const
 {
     stats_type out{};
 
-    uint64_t tot_inst_per_layer{0};
-    uint64_t tot_conc_rotations{0};
-    uint64_t tot_conc_cxz{0};
-    uint64_t tot_rotation_unrolled_count{0};
-    uint64_t num_layers{0};
-
     // first, we need to reorganize the instructions into layers:
     iterate_through_instructions_by_layer(
-        [&out, &tot_inst_per_layer, &tot_conc_rotations, &tot_conc_cxz, &num_layers, &tot_rotation_unrolled_count] 
-        (size_t layer_id, std::vector<const INSTRUCTION*> layer)
+        [&out] (size_t layer_id, std::vector<const INSTRUCTION*> layer)
         {
-            uint64_t conc_rotations{0};
-            uint64_t conc_cxz{0};
-
             for (const auto* inst : layer)
             {
                 bool is_sw_gate = (inst->type == INSTRUCTION::TYPE::X 
@@ -601,6 +722,7 @@ PROGRAM_INFO::analyze_program() const
                 bool is_rot = (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ);
                 bool is_ccxz = (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
 
+                out.total_gate_count++;
                 out.software_gate_count += is_sw_gate;
                 out.t_gate_count += is_t_like;
                 out.cxz_gate_count += is_cxz;
@@ -609,37 +731,12 @@ PROGRAM_INFO::analyze_program() const
 
                 out.virtual_inst_count++;
                 if (is_rot)
-                {
                     out.unrolled_inst_count += inst->urotseq.size();
-                    out.max_rotation_unrolled_count = std::max(out.max_rotation_unrolled_count, 
-                                                                uint64_t{inst->urotseq.size()});
-                    tot_rotation_unrolled_count += inst->urotseq.size();
-                }
                 else
-                {
                     out.unrolled_inst_count++;
-                }
-
-                conc_rotations += is_rot;
-                conc_cxz += is_cxz;
             }
-
-            tot_inst_per_layer += layer.size();
-            tot_conc_rotations += conc_rotations;
-            tot_conc_cxz += conc_cxz;
-
-            out.max_instruction_level_parallelism = std::max(out.max_instruction_level_parallelism, uint64_t{layer.size()});
-            out.max_concurrent_rotation_count = std::max(out.max_concurrent_rotation_count, conc_rotations);
-            out.max_concurrent_cxz_count = std::max(out.max_concurrent_cxz_count, conc_cxz);
-
-            num_layers++;
         }
     );
-
-    out.mean_instruction_level_parallelism = _mean(tot_inst_per_layer, num_layers);
-    out.mean_concurrent_rotation_count = _mean(tot_conc_rotations, num_layers);
-    out.mean_concurrent_cxz_count = _mean(tot_conc_cxz, num_layers);
-    out.mean_rotation_unrolled_count = _mean(tot_rotation_unrolled_count, out.rotation_count);
 
     return out;
 }

@@ -63,7 +63,7 @@ class OQ2_LEXER;
 
 // nonterminals (see `oq2/types.h`)
 %nterm                                              program
-%nterm <PROGRAM_INFO>                               line
+%nterm                                              line
 %nterm <PROGRAM_INFO>                               include_stmt
 %nterm <prog::REGISTER>                             register_decl
 
@@ -88,17 +88,17 @@ class OQ2_LEXER;
 
 %%
 
-program: OPENQASM VERSION_STRING ';' line   { prog = std::move($4); prog.version_ = $2; }
-        | line                               { prog = std::move($1); prog.version_ = "2.0"; }    
+program: OPENQASM VERSION_STRING ';' line   { prog.version_ = $2; }
+        | line                               { prog.version_ = "2.0"; }    
         ;
 
-line: line include_stmt                     { $$ = std::move($1); $$.merge(std::move($2)); }
-    | line register_decl                    { $$ = std::move($1); $$.declare_register(std::move($2)); }
-    | line gate_decl                        { $$ = std::move($1); $$.declare_gate(std::move($2)); }
-    | line conditional_instruction          { $$ = std::move($1); $$.add_instruction(std::move($2)); }
-    | line instruction                      { $$ = std::move($1); $$.add_instruction(std::move($2)); }
-    | line measurement                      { $$ = std::move($1); $$.add_instruction(std::move($2)); }
-    | /* empty */                           { $$ = PROGRAM_INFO{}; }
+line: line include_stmt                     { prog.merge(std::move($2)); }
+    | line register_decl                    { prog.declare_register(std::move($2)); }
+    | line gate_decl                        { prog.declare_gate(std::move($2)); }
+    | line conditional_instruction          { prog.add_instruction(std::move($2)); }
+    | line instruction                      { prog.add_instruction(std::move($2)); }
+    | line measurement                      { prog.add_instruction(std::move($2)); }
+    | /* empty */                           
     ;
 
 include_stmt: INCLUDE STRING_LITERAL ';'    {

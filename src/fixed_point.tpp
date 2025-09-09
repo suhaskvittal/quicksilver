@@ -16,6 +16,12 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TEMPL_PARAMS template <size_t _W>
+TEMPL_CLASS::FIXED_POINT(FIXED_POINT<_W> x)
+{
+    std::copy(x.get_words_ref().begin(), x.get_words_ref().end(), backing_array_.begin());
+}
+
 TEMPL_PARAMS template <class ITER_TYPE>
 TEMPL_CLASS::FIXED_POINT(ITER_TYPE begin, ITER_TYPE end)
 {
@@ -57,6 +63,18 @@ TEMPL_CLASS::test_word(size_t idx) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TEMPL_PARAMS template <class XFORM_TYPE> void
+TEMPL_CLASS::transform(const XFORM_TYPE& xform, size_t from, size_t to)
+{
+    auto begin = backing_array_.begin() + from,
+         end = backing_array_.begin() + to;
+    
+    std::transform(begin, end, begin, xform);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 TEMPL_PARAMS void
 TEMPL_CLASS::lshft(int n)
 {
@@ -85,6 +103,28 @@ TEMPL_CLASS::rshft(int n)
         backing_array_[i] |= next_word_bits << (BITS_PER_WORD-n);
     }
     backing_array_[NUM_WORDS-1] >>= n;
+}
+
+TEMPL_PARAMS void
+TEMPL_CLASS::lshft_w(int n)
+{
+    if (n < 0)
+        return rshft_w(-n);
+
+    // drop most significant word:
+    std::shift_left(backing_array_.begin(), backing_array_.end(), n);
+    std::fill(backing_array_.begin(), backing_array_.begin()+n, 0);
+}
+
+TEMPL_PARAMS void
+TEMPL_CLASS::rshft_w(int n)
+{
+    if (n < 0)
+        return lshft_w(-n);
+
+    // drop least significant word:
+    std::shift_right(backing_array_.begin(), backing_array_.end(), n);
+    std::fill(backing_array_.end()-n, backing_array_.end(), 0);
 }
 
 ////////////////////////////////////////////////////////////

@@ -32,6 +32,9 @@ public:
     constexpr FIXED_POINT(const FIXED_POINT&) =default;
     constexpr FIXED_POINT(WORD_TYPE w) :backing_array_{w} {}
     constexpr FIXED_POINT(std::array<WORD_TYPE, NUM_WORDS> x) :backing_array_(x) {}
+    
+    // this is useful for converting between fixed point widths quickly
+    template <size_t _W> FIXED_POINT(FIXED_POINT<_W>);
 
     // This cannot be constexpr because it requires std::copy
     template <class ITER_TYPE> FIXED_POINT(ITER_TYPE begin, ITER_TYPE end);
@@ -44,9 +47,16 @@ public:
     void set_word(size_t idx, WORD_TYPE);
     word_type test_word(size_t idx) const;
 
+    // bulk word-level operations:
+    template <class XFORM_TYPE> void transform(const XFORM_TYPE&, size_t from=0, size_t to=NUM_WORDS);
+
     // bit shift operations:
     void lshft(int);
     void rshft(int);
+    
+    // word shift operations:
+    void lshft_w(int);
+    void rshft_w(int);
 
     // other useful operations:
     size_t popcount() const;
@@ -61,6 +71,7 @@ public:
     bool operator!=(const FIXED_POINT&) const;
 
     std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
+    const std::array<word_type, NUM_WORDS>& get_words_ref() { return backing_array_; }
 };
 
 ////////////////////////////////////////////////////////////

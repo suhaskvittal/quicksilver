@@ -11,6 +11,9 @@ B_STATS_FOLDER = 'benchmarks/stats'
 os.system(f'rm -rf {B_BIN_FOLDER}/QB_L_*')
 os.system(f'rm -rf {B_STATS_FOLDER}/QB_L_*')
 
+os.system(f'mkdir -p {B_BIN_FOLDER}')
+os.system(f'mkdir -p {B_STATS_FOLDER}')
+
 SKIP = [
     'adder',
     'bv',
