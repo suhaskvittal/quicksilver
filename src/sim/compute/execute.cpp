@@ -65,37 +65,6 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
             // find memory module containing qubit:
             auto m_it = find_memory_module_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
-            if (m_it == memory_.end())
-            {
-                // we need a lot of info in this error message, so use a stringstream:
-                std::stringstream ss;
-                ss << "memory module not found for qubit " << q.memloc_info.qubit_id
-                    << " of client " << q.memloc_info.client_id+0 << "\n";
-
-                // dump the patch info:
-                ss << "cmp memory:\n";
-                for (size_t i = patch_idx_compute_start_; i < patch_idx_memory_start_; i++)
-                    ss << "\tpatch " << i << ": client = " << patches_[i].client_id+0 << ", qubit = " << patches_[i].qubit_id << "\n";
-
-                // dump each memory module:
-                ss << "memory modules:\n";
-                for (size_t i = 0; i < memory_.size(); i++)
-                {
-                    ss << "\tmodule " << i << "\n";
-                    for (size_t j = 0; j < memory_[i]->banks_.size(); j++)
-                    {
-                        ss << "\t\tbank " << j << "\n";
-                        for (size_t k = 0; k < memory_[i]->banks_[j].size(); k++)
-                        {
-                            auto [client_id, qubit_id] = memory_[i]->banks_[j][k];
-                            if (client_id >= 0)
-                                ss << "\t\t\tqubit " << k << ": client = " << client_id+0 << ", qubit = " << qubit_id << "\n";
-                        }
-                    }
-                }
-
-                throw std::runtime_error(ss.str());
-            }
             (*m_it)->request_buffer_.push_back(req);
 
 #if defined(QS_SIM_DEBUG)

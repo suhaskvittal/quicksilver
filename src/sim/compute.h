@@ -37,13 +37,13 @@ class MEMORY_MODULE;
     organization of the compute memory:
 
     There will be `num_rows` rows, and each row will have `patches_per_row` patches.
-    Each row is a two-wide row of patches. So for example, if `num_rows = 8` and
-    `patches_per_row = 16`, the organization will be:
+    Each row is a two-wide row of patches. So for example, if `num_rows = 2` and
+    `patches_per_row = 9`, the organization will be:
         
-        | + . . . . . . . . + |    "+" = junction, "." = bus, "P" = patch
-        | . P P P P P P P P . |
-        | . P P P P P P P P . |
-        | + . . . . . . . . + |
+        | + . . . . . . . . . |    "+" = junction, "." = bus, "P" = patch
+        | . P P P P P P P P P |
+        | . P P P P P P P P P |
+        | + . . . . . . . . . |
 
     And on the edges of the row (left, right, top, and bottom), there will be a bus.
     Upper and lower buses are shared with the previous and next row, respectively.
@@ -51,17 +51,17 @@ class MEMORY_MODULE;
     Finally, at the top, we reserve an extra row for magic state pins, as such:
     ______________________ 
     | M M M M M M M M M M |
-    | + . . . . . . . . + |
-    | . P P P P P P P P . |
-    | . P P P P P P P P . |
-    | + . . . . . . . . + |
+    | + . . . . . . . . . |
+    | . P P P P P P P P P |
+    | . P P P P P P P P P |
+    | + . . . . . . . . . |
 
     And at the bottom, we reserve an extra row for memory pins, as such:
 
-    | + . . . . . . . . + |
-    | . P P P P P P P P . |
-    | . P P P P P P P P . |
-    | + . . . . . . . . + |
+    | + . . . . . . . . . |
+    | . P P P P P P P P P |
+    | . P P P P P P P P P |
+    | + . . . . . . . . . |
     | M M M M M M M M M M |
     ______________________ 
 */
@@ -139,8 +139,6 @@ private:
     void client_try_retire(client_ptr&);
     void client_try_execute(client_ptr&);
     void client_try_fetch(client_ptr&);
-    
-    void issue_memory_swap_request(client_ptr&, qubit_type);
 
     exec_result_type execute_instruction(client_ptr&, inst_ptr);
 

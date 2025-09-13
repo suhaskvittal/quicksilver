@@ -7,6 +7,7 @@
 */
 
 #include "sim/compute.h"
+#include "compute.h"
 #include "sim/compute/replacement/lru.h"
 #include "sim/compute/replacement/lti.h"
 #include "sim/memory.h"
@@ -211,18 +212,208 @@ COMPUTE::select_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubi
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+std::tuple<size_t, MEMORY_MODULE::qubit_lookup_result_type>
+_find_module_with_uninitialized_qubit(const std::vector<MEMORY_MODULE*>& memory, size_t start_from_idx)
+{
+    for (size_t i = 0; i < memory.size(); i++)
+    {
+        size_t ii = (start_from_idx+i) % memory.size();
+        auto lookup_result = memory[ii]->find_uninitialized_qubit();
+        if (lookup_result.first != memory[ii]->banks_.end())
+            return std::make_tuple(ii, lookup_result);
+    }
+
+    return std::make_tuple(memory.size(), MEMORY_MODULE::qubit_lookup_result_type{});
+}
+
+void
+COMPUTE::init_clients(const std::vector<std::string>& client_trace_files)
+{
+    size_t patch_idx{patch_idx_compute_start_};
+
+    // initialize all clients;
+    for (size_t i = 0; i < client_trace_files.size(); i++)
+    {
+        client_ptr c{new sim::CLIENT(client_trace_files[i], i)};
+        clients_.push_back(std::move(c));
+    }
+
+    // place qubits into compute memory (round robin fashion to be fair)
+    int8_t client_id{0};
+    std::vector<size_t> client_qubit_idx(clients_.size(), 0);
+
+    // place qubits into memory once `patch_idx` reaches `patch_idx_memory_start_`:
+    // do this in a round robin fashion to maximize module level and bank level parallelism
+    size_t mem_idx{0};
+    std::vector<size_t> mem_bank_idx(memory_.size(), 0);
+
+    bool all_done{false};
+    while (!all_done)
+    {
+        size_t idx = client_qubit_idx[client_id];
+        client_ptr& c = clients_[client_id];
+
+        if (idx >= c->qubits.size()) // update all done since this client is done
+        {
+            all_done = std::all_of(clients_.begin(), clients_.end(),
+                                    [&client_qubit_idx] (const client_ptr& c) 
+                                    { 
+                                        return c->qubits.size() == client_qubit_idx[c->id]; 
+                                    });
+        }
+        else
+        {
+            auto& q = c->qubits[idx];
+
+            if (patch_idx >= patch_idx_memory_start_)
+            {
+                // place qubits into memory -- find a module with uninitialized qubit:
+                MEMORY_MODULE::qubit_lookup_result_type lookup_result;
+                std::tie(mem_idx, lookup_result) = _find_module_with_uninitialized_qubit(memory_, mem_idx);
+                if (mem_idx == memory_.size())
+                    throw std::runtime_error("Not enough space in memory to allocate all qubits");
+
+                auto [b_it, q_it] = lookup_result;
+                *q_it = std::make_pair(c->id, idx);
+                q.memloc_info.where = MEMINFO::LOCATION::MEMORY;
+                mem_idx = (mem_idx+1) % memory_.size();
+            }
+            else
+            {
+                // place in memory -- just need to set patch information:
+                patches_[patch_idx].client_id = c->id;
+                patches_[patch_idx].qubit_id = idx;
+                patch_idx++;
+            }
+            client_qubit_idx[client_id]++;
+        }
+
+        client_id = (client_id+1) % clients_.size();
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+_connect(ROUTING_BASE::ptr_type j, ROUTING_BASE::ptr_type b)
+{
+    j->connections.push_back(b);
+    b->connections.push_back(j);
+}
+
+COMPUTE::bus_info
+COMPUTE::init_routing_space(size_t num_rows, size_t num_patches_per_row)
+{
+    // buses and junctions are arranged by pairs of rows:
+    const size_t num_row_pairs = (num_rows+1)/2;  // need to +1 to handle singleton row
+
+    // number of junctions is num_row_pairs + 1
+    // number of buses is 2 * num_row_pairs + 1
+    const size_t num_junctions = num_row_pairs + 1;
+    const size_t num_buses = 2 * num_row_pairs + 1;
+    std::vector<sim::ROUTING_BASE::ptr_type> junctions(num_junctions);
+    std::vector<sim::ROUTING_BASE::ptr_type> buses(num_buses);
+    
+    for (size_t i = 0; i < junctions.size(); i++)
+        junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i, sim::ROUTING_BASE::TYPE::JUNCTION});
+
+    for (size_t i = 0; i < buses.size(); i++)
+        buses[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i,sim::ROUTING_BASE::TYPE::BUS});
+
+    for (size_t i = 0; i < num_row_pairs; i++)
+    {
+        //  i ----- 2i ------
+        //  |                   
+        // 2i+1
+        //  |                   
+        // i+1 --- 2i+2 -----
+        _connect(junctions[i], buses[2*i]);
+        _connect(junctions[i], buses[2*i+1]);
+        _connect(junctions[i+1], buses[2*i+1]);
+    }
+
+    // and the last remaining bus + junction
+    _connect(junctions[num_junctions-1], buses[num_buses-1]);
+
+    return bus_info{junctions, buses};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::init_compute(size_t num_rows, size_t num_patches_per_row, const bus_array& junctions, const bus_array& buses)
+{
+    // First setup the magic state pins:
+    std::vector<sim::T_FACTORY*> top_level_t_fact;
+    std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(top_level_t_fact),
+                [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level == lvl; });
+
+    // connect the magic state factories (interleave if there are more top level factories than
+    // space at the top)
+    for (size_t i = 0; i < top_level_t_fact.size(); i++)
+    {
+        auto* fact = top_level_t_fact[i];
+
+        // set the output patch index:
+        fact->output_patch_idx = i % num_patches_per_row;  // this allows us to interleave the factories
+
+        // create bus and junction connections:
+        PATCH& fp = patches_[fact->output_patch_idx];
+        if (fact->output_patch_idx == 0)
+            fp.buses.push_back(junctions[0]);
+        else
+            fp.buses.push_back(buses[0]);
+    }
+
+    // now connect the program memory patches:
+    for (size_t p = patch_idx_compute_start_; p < patch_idx_memory_start_; p++)
+    {
+        // get row idx and column idx:
+        size_t r = p / num_patches_per_row;
+        size_t c = p % num_patches_per_row;
+
+        // compute row pair idx:
+        size_t rp = (r+1)/2;
+
+        // determine where the patch is so we can connect buses:
+        bool is_upper = (r & 1) == 0;  // even rows are always upper
+        bool is_lower = ((r & 1) == 1) || (r == num_rows-1);  // odd rows are always lower, and the last row is always lower
+        bool is_left = (c == 0);
+    
+        if (is_upper)
+            patches_[p].buses.push_back(buses[2*rp]);
+        if (is_left)
+            patches_[p].buses.push_back(buses[2*rp+1]);
+        if (is_lower)
+            patches_[p].buses.push_back(buses[2*rp+2]);
+    }
+
+    // set the connections for the memory pins -- do same interleaving as for factories
+    const auto& last_bus = buses.back();
+    const auto& last_junction = junctions.back();
+    for (size_t i = 0; i < memory_.size(); i++)
+    {
+        auto* m = memory_[i];
+        m->output_patch_idx = (i % num_patches_per_row) + patch_idx_memory_start_;
+
+        PATCH& mp = patches_[m->output_patch_idx];
+        if (m->output_patch_idx == 0)
+            mp.buses.push_back(last_junction);
+        else
+            mp.buses.push_back(last_bus);
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 bool
 _update_instruction_and_check_if_done(COMPUTE::inst_ptr inst, uint64_t cycle)
 {
-    if (inst->cycle_done <= cycle)
-    {
-        return true;
-    }
-    else
-    {
-        inst->cycle_done--;
-        return false;
-    }
+    if (inst->cycle_done <= cycle)  { return true; }
+    else                            { inst->cycle_done--; return false; }
 }
 
 void
@@ -249,7 +440,6 @@ _retire_instruction(COMPUTE::client_ptr& c, COMPUTE::inst_ptr inst)
     }
     delete inst;
 }
-
 
 void
 COMPUTE::client_try_retire(client_ptr& c)
