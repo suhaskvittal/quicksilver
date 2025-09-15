@@ -65,7 +65,22 @@ set(SIM_FILES
     src/sim/memory.cpp
     src/sim/routing.cpp)
 
-# binary generation executable:
+###################################################
+###################################################
+
+# Quicksilver simulator library:
+
+add_library(qssl STATIC ${SIM_FILES})
+target_include_directories(qssl PUBLIC "src")
+target_compile_options(qssl PUBLIC ${COMPILE_OPTIONS})
+target_compile_definitions(qssl PUBLIC -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+target_link_libraries(qssl PUBLIC ZLIB::ZLIB)
+
+###################################################
+###################################################
+
+# Binary generation executable:
+
 add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
 
 # need to add flex headers manually on macos
@@ -79,20 +94,20 @@ target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURR
 
 target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
 
+###################################################
+###################################################
+
 # simulator:
 add_executable(qs_sim main/qs_sim.cpp ${SIM_FILES})
-
-target_include_directories(qs_sim PRIVATE "src")
+target_link_libraries(qs_sim PRIVATE qssl)
 target_compile_options(qs_sim PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(qs_sim PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-
-target_link_libraries(qs_sim PRIVATE ZLIB::ZLIB)
 
 # iterative simulator for memory evaluations:
 add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${SIM_FILES})
-
-target_include_directories(qs_sim_mem PRIVATE "src")
+target_link_libraries(qs_sim_mem PRIVATE qssl)
 target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(qs_sim_mem PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
 
 target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB)
+
+###################################################
+###################################################

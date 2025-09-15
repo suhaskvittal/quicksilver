@@ -72,6 +72,7 @@ public:
     using inst_ptr = INSTRUCTION*;
     using client_ptr = std::unique_ptr<CLIENT>;
     using exec_result_type = uint8_t;
+    using qubit_rename_table = std::unordered_map<qubit_type, qubit_type>;
     
     // we will return a flag after an execute indicating what stalls occurred -- or could have occurred if a resource was available
     constexpr static exec_result_type EXEC_RESULT_SUCCESS = 0;
@@ -84,10 +85,17 @@ public:
     {
         LRU, LTI
     };
+
+    const size_t num_rows_;
+    const size_t num_patches_per_row_;
+    const size_t full_row_width_inc_ancilla_;  // this is always `num_patches_per_row_+1`
 private:
     // a pointer to each workload running on the system
     std::vector<client_ptr>  clients_;
-    
+
+    // a map of renamed qubits -- one per client
+    std::vector<qubit_rename_table> renamed_qubits_;
+
     // compute storage:
     //    factory pins are from `0` to `patch_idx_compute_start_` (not including `patch_idx_compute_start_`)
     //    program qubits are from `patch_idx_compute_start_` to `patch_idx_memory_start_` (not including `patch_idx_memory_start_`)
@@ -133,8 +141,8 @@ private:
     using bus_info = std::pair<bus_array, bus_array>;
 
     void     init_clients(const std::vector<std::string>& client_trace_files);
-    bus_info init_routing_space(size_t num_rows, size_t num_patches_per_row);
-    void     init_compute(size_t num_rows, size_t num_patches_per_row, const bus_array& junctions, const bus_array& buses);
+    bus_info init_routing_space();
+    void     init_compute(const bus_array& junctions, const bus_array& buses);
 
     void client_try_retire(client_ptr&);
     void client_try_execute(client_ptr&);
@@ -145,6 +153,14 @@ private:
     PATCH::bus_array::const_iterator      find_free_bus(const PATCH& p) const;
     std::vector<PATCH>::iterator          find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id);
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id);
+
+    // functions called by `execute_instruction`:
+    exec_result_type handle_sw_instruction(client_ptr&, inst_ptr);
+    exec_result_type handle_h_s_gate(client_ptr&, inst_ptr);
+    exec_result_type handle_t_gate(client_ptr&, inst_ptr);
+    exec_result_type handle_rxz_gate(client_ptr&, inst_ptr);
+    exec_result_type handle_cxz_gate(client_ptr&, inst_ptr);
+    exec_result_type handle_ccxz_gate(client_ptr&, inst_ptr);
 
     friend class MEMORY_MODULE;
 };
