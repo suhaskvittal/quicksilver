@@ -1,0 +1,32 @@
+/*
+    author: Suhas Vittal
+    date:   15 September 2025
+*/
+
+#ifndef SIM_FACTORY_h
+#define SIM_FACTORY_h
+
+#include "sim/operable.h"
+
+namespace sim
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+enum class FACTORY_EVENT_TYPE
+{
+    PRODUCED_MAGIC_STATE
+};
+
+struct T_FACTORY : public OPERABLE<FACTORY_EVENT_TYPE, NO_EVENT_INFO>
+{
+
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}   // namespace sim
+
+#endif
