@@ -21,6 +21,7 @@
 // have invalid measurement syntax
 #define DROP_MEASUREMENT_GATES
 #define ALLOW_GATE_DECL_OVERRIDES
+//#define PROGRAM_INFO_SHOW_GS_OUTPUT
 
 //#define PROGRAM_INFO_VERBOSE
 
@@ -305,6 +306,10 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
     auto basis_gate_it = std::find(std::begin(BASIS_GATES), std::end(BASIS_GATES), qasm_inst.gate_name);
     if (basis_gate_it != std::end(BASIS_GATES))
     {
+        if (inst_read_ % 1'000'000 == 0)
+            std::cout << "[ PROGRAM_INFO ] read " << inst_read_/1'000'000 << "M instructions\n";
+        inst_read_++;
+
         INSTRUCTION::TYPE inst_type = static_cast<INSTRUCTION::TYPE>(
                                             std::distance(std::begin(BASIS_GATES), basis_gate_it));
 
@@ -315,6 +320,9 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
         {
             // Given our basis gates, there can only be one parameter for rotation gates.
             rotation = expr::evaluate_expression(qasm_inst.params[0]).readout_fixed_point_angle();
+            // ignore gates with an angle of 0:
+            if (rotation.popcount() == 0)
+                return;
             urotseq = unroll_rotation(rotation);
         }
 
@@ -888,8 +896,10 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`"
             << "\n\t\tgridsynth output: ";
-#else
-//  std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`" << "\n";
+#elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
+    std::cout << "[ PROGRAM_INFO ] running gridsynth for angle: " << fpa::to_string(rotation) 
+                                                                    << ", hex string: " << rotation.to_hex_string()
+                                                                    << ", precision: " << precision << "\n";
 #endif
     
     // run gridsynth and read its output:
@@ -948,9 +958,12 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
 
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
-#else
-//  std::cout << "\tgs gate count (post opt) = " << urotseq_reduced_size << "\n";
+#elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
+    std::cout << "\tgs gate count (post opt) = " << urotseq_reduced_size << "\n";
 #endif
+
+    if (urotseq_reduced_size == 0)
+        throw std::runtime_error("gridsynth returned an empty urotseq, original size: " + std::to_string(urotseq_original_size));
 
     return out;
 }

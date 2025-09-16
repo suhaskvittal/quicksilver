@@ -249,19 +249,22 @@ TEMPL_CLASS::to_hex_string() const
 {
     std::stringstream ss;
 
-    for (size_t i = 0; i < NUM_WORDS; i++)
+    std::string out;
+    for (ssize_t i = NUM_WORDS-1; i >= 0; i--)
     {
         word_type w = backing_array_[i];
-        for (size_t j = 0; j < BITS_PER_WORD; j += 4)
+        for (ssize_t j = BITS_PER_WORD-4; j >= 0; j -= 4)
         {
             word_type nibble = (w >> j) & 0xf;
             ss << std::hex << nibble;
         }
         ss << " ";
+        
+        // only update `w` if the this word is nonzero
+        if (w)
+            out = ss.str();
     }
 
-    std::string out = ss.str();
-    std::reverse(out.begin(), out.end());
     return out;
 }
 

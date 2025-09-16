@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
 {
     if (argc < 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <input-file> <output-file> [optional: <stats-output-file>]\n";
+        std::cerr << "Usage: " << argv[0] << " <input-file> <output-file> [optional: <stats-output-file> <rotation-precision>]\n";
         return 1;
     }
 

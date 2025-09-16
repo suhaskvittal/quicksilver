@@ -154,6 +154,8 @@ private:
     size_t num_bits_declared_{0};
 
     FILE* ostrm_{nullptr};
+
+    uint64_t inst_read_{0};
 public:
     PROGRAM_INFO(FILE* ostrm=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 

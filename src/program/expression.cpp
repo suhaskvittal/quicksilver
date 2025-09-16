@@ -9,6 +9,8 @@
 
 #include <strings.h>
 
+//#define EXPRESSION_EVAL_DEBUG
+
 namespace prog
 {
 namespace expr
@@ -68,6 +70,8 @@ VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
         }
         else if (ident.find("fpa") != std::string::npos)
         {
+            constexpr size_t NUM_BITS_PER_NIBBLE = fpa_type::BITS_PER_WORD/4;
+
             // create hex string:
             size_t width_start_idx = ident.find("fpa") + 3;
             size_t hex_ident_start_idx = ident.find("0x");
@@ -76,9 +80,10 @@ VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
             size_t hex_start_idx = hex_ident_start_idx + 2;
 
             std::array<fpa_type::word_type, fpa_type::NUM_WORDS> words{};
-            size_t nibble_count{0};
-            size_t word_idx{0};
-            for (ssize_t i = ident.size()-1; i >= hex_start_idx; i--)
+            int nibble_count{NUM_BITS_PER_NIBBLE-1};
+            int word_idx{fpa_type::NUM_WORDS-1};
+
+            for (int i = hex_start_idx; i < ident.size(); i++)
             {
                 char c = ident[i];
                 fpa_type::word_type value{0};
@@ -92,18 +97,15 @@ VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
                     throw std::runtime_error("Unknown character `" + std::string{c} + "` found in expression: " + ident);
 
                 words[word_idx] |= value << (nibble_count*4);
-                nibble_count++;
-
-                if (nibble_count == fpa_type::BITS_PER_WORD/4)
+                nibble_count--;
+                if (nibble_count < 0)
                 {
-                    nibble_count = 0;
-                    word_idx++;
+                    nibble_count = NUM_BITS_PER_NIBBLE-1;
+                    word_idx--;
                 }
             }
 
             fixed_point = fpa_type(words);
-            fixed_point.lshft(fpa_type::NUM_BITS - num_bits);
-
             state = STATE::CAN_USE_FIXED_POINT;
         }
         else

@@ -11,43 +11,63 @@ import multiprocessing as mp
 #################################################################
 #################################################################
 
+RSA_MODE = 64
+
 # 128-bit prime numbers used to generate the RSA public key
-#jp = 249338061461969271388931484822172864483
+#p = 249338061461969271388931484822172864483
 #q = 318086665464420588304853690890664293979
 
 # 256-bit RSA public key
-#N = 79311112543800559059544670893166856913365574321673273203857240979443239847857
-#A = 329916967358087561489242136217384669929
-#A_INV = 40081242936043274348142380556789957492624533695234575448927119922306278098771
+if RSA_MODE == 256:
+    N = 79311112543800559059544670893166856913365574321673273203857240979443239847857
+    A = 329916967358087561489242136217384669929
+    A_INV = 40081242936043274348142380556789957492624533695234575448927119922306278098771
 
-#NUM_BITS = 256
 
 # 128-bit RSA public key
-N = 168425339336371607834480189065517156539
-A = 15286634156585511877
-A_INV = 156007382077471147457263837412622610738 
-NUM_BITS = 128
+if RSA_MODE == 128:
+    N = 168425339336371607834480189065517156539
+    A = 15286634156585511877
+    A_INV = 156007382077471147457263837412622610738 
+
+# 64 bit RSA public key
+if RSA_MODE == 64:
+    N = 13410852825427549511
+    A = 3445096335
+    A_INV = pow(A, -1, N)
 
 # 16-bit RSA public key
-#N = 22499
-#A = 230
-#A_INV = 9880
-#NUM_BITS = 16
+if RSA_MODE == 16:
+    N = 22499
+    A = 230
+    A_INV = 9880
+
+NUM_BITS = RSA_MODE
+
+#################################################################
+#################################################################
+
+# note that fixed point angles here are stored such that the LSB corresponds to pi/2
+# this is the opposite of the convention used in C++
+# we do this because it makes it easier to create the string representation of the angle 
+# and read it from the file (see `expression.cpp`)
+def create_fpa_string(x: int) -> str:
+    return hex(reverse_bits(x))
 
 #################################################################
 #################################################################
 
 def _qft_impl(qr: str, inv: bool) -> str:
     steps = []
+    # initialize `rot` to pi/2 + pi/4 + ... etc.
     rot = ((1<<NUM_BITS)-1) >> 1
     for i in range(NUM_BITS):
-#       rot_angle = [ f'pi/{j+1}' for j in range(i+1, NUM_BITS) ]
-#       angle_string = ' + '.join(rot_angle)
-        angle_string = hex(reverse_bits(rot))
+        angle_string = create_fpa_string(rot)
         angle_string = f'fpa{2*NUM_BITS}{angle_string}' 
         steps.append(f'h {qr}[{i}];\n')
         if rot > 0:
             steps.append(f'cp({angle_string}) {qr}[{i+1}], {qr}[{i}];\n')
+        # drop msb from `rot` -- this removes `pi/2**(NUM_BITS-i-1)` from `rot`
         rot >>= 1
 
     if inv:
@@ -143,14 +163,21 @@ def cua(c: str, qx: str, qr: str, anc: str, a: int, a_inv: int) -> str:
 #################################################################
 #################################################################
 
-NUM_PROCESSES = 8
-NUM_ITERATIONS = 2*NUM_BITS
+MAX_ITERATION = 2*NUM_BITS
 
-ITERATION_TEXT = ['' for _ in range(NUM_PROCESSES)]
-
-def _aggregate_iterations(q: mp.Queue):
+if __name__ == '__main__':
     output_file = f'bisquit/qasm/shor_rsa{NUM_BITS}.qasm'
-    base_iter = 0
+
+    # only do some iterations so the file isn't too large -- eventually loops will be added, but until then...
+    iter_inc_freq = 8
+    # iid selection:
+    iter_list = []
+    for i in range(0, MAX_ITERATION, iter_inc_freq):
+        idx = random.randint(0, iter_inc_freq-1)
+        iter_list.append(i+idx)
+
+    a, a_inv = A, A_INV
+    rot = random.randint(0, 2**(2*NUM_BITS-1)-1)
 
     with open(output_file, 'w') as ostrm:
         ostrm.write(f'OPENQASM 2.0;\n')
@@ -163,54 +190,20 @@ def _aggregate_iterations(q: mp.Queue):
         # initialization:
         ostrm.write(f'x q;\n') # vector op
 
-        while base_iter < NUM_ITERATIONS:
-            print('building iterations ', base_iter, ' to ', base_iter+NUM_PROCESSES)
-            cnt = 0
-            while cnt < len(ITERATION_TEXT):
-                (out, idx) = q.get()
-                ITERATION_TEXT[idx-base_iter] = out
-                cnt += 1
-
-            # write iterations to file
-            for j in range(NUM_PROCESSES):
-                ostrm.write(f'\n\n// iteration {base_iter+j}\n\n')
-                ostrm.write(ITERATION_TEXT[j])
-
-            # update current base iter
-            base_iter += NUM_PROCESSES
-
-def _generate_loop_iter(a: int, a_inv: int, rot: int, iter_idx: int, q: mp.Queue):
-    out = cua('c', 'q', 'anc_blk', 'anc_mod_adder', a, a_inv)
-    out += f'rz(fpa{2*NUM_BITS}{hex(reverse_bits(rot))}) c;\n'
-    q.put((out, iter_idx))
-
-if __name__ == '__main__':
-    a, a_inv = A, A_INV
-    rot = random.randint(0, 2**(2*NUM_BITS-1)-1)
-
-    shared_queue = mp.Queue()
-
-    p_reduce = mp.Process(target=_aggregate_iterations, args=(shared_queue,))
-    p_reduce.start()
-
-    for i in range(0, NUM_ITERATIONS, NUM_PROCESSES):
-        p_iter_list = []
-        for j in range(NUM_PROCESSES):
-            ii = i+j
+        for i in range(0, MAX_ITERATION):
             a = (a*a) % N
             a_inv = (a_inv*a_inv) % N
             # remove top `2*NUM_BITS-ii` bits of rot
-            mask = ((1<<(2*NUM_BITS-ii))-1) << ii
+            mask = ((1<<(2*NUM_BITS-i))-1) << i
             _rot = rot & ~mask
 
-            p_iter = mp.Process(target=_generate_loop_iter, args=(a, a_inv, rot, ii, shared_queue))
-            p_iter.start()
-            p_iter_list.append(p_iter)
-
-        for p_iter in p_iter_list:
-            p_iter.join()
-
-    p_reduce.join()
+            if i in iter_list:
+                ostrm.write(f'// iteration {i}\n\n')
+                iter_text = cua('c', 'q', 'anc_blk', 'anc_mod_adder', a, a_inv)
+                ostrm.write(iter_text)
+                if _rot != 0:
+                    ostrm.write(f'rz(fpa{2*NUM_BITS}{hex(reverse_bits(_rot))}) c;\n')
+                
 
 #################################################################
 #################################################################

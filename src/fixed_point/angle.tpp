@@ -77,6 +77,9 @@ negate_inplace(FPA_TYPE<W>& x)
             flip all bits after the lsb.
     */
 
+    if (x.popcount() == 0)
+        return;
+
     auto [word_idx, bit_idx] = x.lsb();
     
     // for the lsb word, we need to flip all bits after the lsb bit.
@@ -252,7 +255,10 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
     }
     else
     {
-        ss << std::setprecision(5) << convert_fpa_to_float(x);
+        if (cnt < cnt_neg)
+            ss << std::setprecision(5) << convert_fpa_to_float(x);
+        else
+            ss << "-" << std::setprecision(5) << convert_fpa_to_float(nx);
     }
     return ss.str();
 }
