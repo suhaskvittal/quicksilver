@@ -1,16 +1,16 @@
 /*
     author: Suhas Vittal
-    date:   27 August 2025
+    date:   2025 September 17
 */
 
 #ifndef SIM_MEMORY_h
 #define SIM_MEMORY_h
 
-#include "sim/clock.h"
-#include "sim/compute.h"
-#include "sim/meminfo.h"
+#include "sim/operable.h"
+#include "sim/client.h"
 
-#include <utility>
+#include <deque>
+#include <tuple>
 #include <vector>
 
 namespace sim
@@ -19,62 +19,89 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+enum class MEMORY_EVENT_TYPE
+{
+    MEMORY_ACCESS_COMPLETED,
+    COMPUTE_COMPLETED_INST
+};
+
+struct MEMORY_EVENT_INFO
+{
+    // the bank that has completed the request (for `MEMORY_ACCESS_COMPLETED` events)
+    size_t bank_with_completed_request{};
+};
+
 /*
     This is a group of logical memory blocks (i.e., QLDPC code blocks).
 
-    A single block is represented by a memory "bank". Only one request can
-    be served per cycle, but each bank can be accessed independently. So,
-    for example, bank/block 0 can be accessed while bank/block 1 is serving
-    a request from a prior cycle.
+    A single block is represented by a memory "bank". Only one request
+    can be served per cycle, but each bank can be accessed independently.
+    So, for example, bank/block 0 can be accessed while bank/block 1 is
+    serving a request from a prior cycle.
 
     All banks must be of the same code block. This is a simulator simplification,
-    but also a likely hardware constraint, as different QEC codes require different
-    connectivity.
+    but also a likely hardware constraint on fixed connectivity hardware like
+    superconducting qubits, as different QEC codes require different connectivity.
 */
-struct MEMORY_MODULE : public CLOCKABLE
+class MEMORY_MODULE : public OPERABLE<MEMORY_EVENT_TYPE, MEMORY_EVENT_INFO>
 {
-    using client_qubit_type = std::pair<int8_t, qubit_type>;  // client_id, qubit_id     
-    using bank_type = std::vector<client_qubit_type>;
-    using qubit_lookup_result_type = std::pair<std::vector<bank_type>::iterator, bank_type::iterator>;
+public:
+    using typename OPERABLE<MEMORY_EVENT_TYPE, MEMORY_EVENT_INFO>::event_type;
+
+    struct bank_type
+    {
+        std::vector<QUBIT> contents;
+        uint64_t cycle_free{0};
+
+        bank_type() =default;
+        bank_type(size_t capacity) : contents(capacity, QUBIT{-1,-1}) {}
+    };
 
     struct request_type
     {
-        uint64_t   inst_number;
-        CLIENT*    client;
-        int8_t     client_id;
-        qubit_type requested_qubit;
+        QUBIT qubit;
     };
 
-    using request_buffer_type = std::vector<request_type>;
+    using search_result_type = std::tuple<bool, std::vector<bank_type>::iterator, std::vector<QUBIT>::iterator>;
 
-    // number of banks
-    const size_t num_banks_{0};
+    // set by `COMPUTE`
+    ssize_t output_patch_idx_;
 
-    // module pin in the compute memory
-    size_t output_patch_idx{0};
-
-    // this is a pointer to `compute` (so we can perform a move)
-    COMPUTE* compute_;
-
-    // the contents of the memory -- tracked in software
+    const size_t num_banks_;
+    const size_t capacity_per_bank_;
+private:
     std::vector<bank_type> banks_;
+    std::vector<request_type> request_buffer_;
+public:
+    MEMORY_MODULE(double freq_khz, size_t num_banks, size_t capacity_per_bank);
 
-    // request buffer -- this is an infinitely deep buffer as it is managed by software
-    request_buffer_type request_buffer_;
+    search_result_type find_qubit(QUBIT);
+    search_result_type find_uninitialized_qubit();
 
-    MEMORY_MODULE(double freq_ghz, size_t num_banks, size_t capacity_per_bank);
+    void initiate_memory_access(QUBIT);
 
-    void operate() override;
+    void dump_contents();
 
-    qubit_lookup_result_type find_qubit(int8_t client_id, qubit_type qubit_id);
-    qubit_lookup_result_type find_uninitialized_qubit();
+    void OP_init() override {}
+protected:
+    void OP_handle_event(event_type) override;
+private:
+    bool serve_memory_request(const request_type&);
 
-    bool try_and_serve_request(request_buffer_type::iterator req_it);
+    std::vector<request_type>::iterator find_request_for_qubit(QUBIT);
+    std::vector<request_type>::iterator find_request_for_bank(size_t, std::vector<request_type>::iterator);
+
+    friend void mem_alloc_qubits_in_round_robin(std::vector<MEMORY_MODULE*>, std::vector<QUBIT>);
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void mem_alloc_qubits_in_round_robin(std::vector<MEMORY_MODULE*>, std::vector<QUBIT>);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 }   // namespace sim
 
-#endif // SIM_MEMORY_h
+#endif

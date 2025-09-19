@@ -45,7 +45,7 @@ sc_phys_qubit_count(size_t dx, size_t dz)
 size_t
 bb_phys_qubit_count(size_t d)
 {
-    return 72 * (d/6);
+    return 2 * 72 * (d/6);
 }
 
 size_t
@@ -131,7 +131,13 @@ _create_factory(const factory_info& fi, double freq_khz, size_t level, size_t bu
         throw std::runtime_error("_create_factory: unknown factory type " + fi.which);
     }
 
-    sim::T_FACTORY* f = new sim::T_FACTORY{freq_khz, fi.e_out, initial_input_count, output_count, num_rotation_steps, buffer_capacity, level};
+    sim::T_FACTORY* f = new sim::T_FACTORY{freq_khz, 
+                                            fi.e_out, 
+                                            initial_input_count,
+                                            output_count,
+                                            num_rotation_steps,
+                                            buffer_capacity,
+                                            level};
     return f;
 }
 
@@ -208,18 +214,19 @@ fact_create_factory_config_for_target_logical_error_rate(double e, size_t max_ph
 
     if (l2_factory_exists)
     {
-        std::vector<sim::T_FACTORY*> l1_fact;
+        std::vector<sim::T_FACTORY*> l1_fact, l2_fact;
         std::copy_if(factories.begin(), factories.end(), std::back_inserter(l1_fact),
-                    [] (auto* f) { return f->level == 0; });
+                    [] (auto* f) { return f->level_ == 0; });
+        std::copy_if(factories.begin(), factories.end(), std::back_inserter(l2_fact),
+                    [] (auto* f) { return f->level_ == 1; });
 
         if (l1_fact.empty())
             throw std::runtime_error("fact_create_factory_config_for_target_logical_error_rate: no L1 factories found");
 
-        for (auto* f : factories)
-        {
-            if (f->level == 1)
-                f->resource_producers = l1_fact;
-        }
+        for (auto* f : l1_fact)
+            f->next_level_ = l2_fact;
+        for (auto* f : l2_fact)
+            f->previous_level_ = l1_fact;
     }
 
     return {factories, qubit_count};
@@ -230,6 +237,9 @@ fact_create_factory_config_for_target_logical_error_rate(double e, size_t max_ph
 
 // want a 99% success rate for the application
 const double TARGET_APP_SUCCESS_RATE{0.99};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 int
 main(int argc, char* argv[])
@@ -312,18 +322,24 @@ main(int argc, char* argv[])
         size_t cmp_num_rows = ceil(_fpdiv(cmp_count, cmp_patches_per_row));
         double cmp_freq_ghz = sim::compute_freq_khz(cmp_sc_round_ns, cmp_sc_code_distance);
 
-        size_t mem_bb_banks_per_module = ceil(_fpdiv(num_program_qubits - cmp_count, mem_bb_num_modules * mem_bb_qubits_per_bank));
+        size_t mem_bb_banks_per_module = (num_program_qubits > cmp_count) 
+                                        ? ceil(_fpdiv(num_program_qubits - cmp_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
+                                        : 0;
         double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_round_ns, mem_bb_code_distance);
 
         size_t fact_max_phys_qubits = ceil(num_program_qubits * sc_phys_qubit_count(cmp_sc_code_distance) * fact_prog_fraction);
 
         // initialize factories:
-        auto [t_factories, fact_phys_qubits] = 
-            fact_create_factory_config_for_target_logical_error_rate(target_error_rate_per_cycle, fact_max_phys_qubits, cmp_sc_round_ns);
+        std::vector<sim::T_FACTORY*> t_factories;
+        size_t fact_phys_qubits;
+        std::tie(t_factories, fact_phys_qubits) = fact_create_factory_config_for_target_logical_error_rate(
+                                                        target_error_rate_per_cycle,
+                                                        fact_max_phys_qubits,
+                                                        cmp_sc_round_ns);
         size_t fact_l1_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                            [] (auto* f) { return f->level == 0; });
+                                            [] (auto* f) { return f->level_ == 0; });
         size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                            [] (auto* f) { return f->level == 1; });
+                                            [] (auto* f) { return f->level_ == 1; });
         std::cout << "fact_l1_count = " << fact_l1_count << ", fact_l2_count = " << fact_l2_count << "\n";
 
         // initialize memory:
@@ -336,13 +352,7 @@ main(int argc, char* argv[])
         size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
 
         // initialize compute
-        sim::COMPUTE* cmp = new sim::COMPUTE(cmp_freq_ghz, {trace}, cmp_num_rows, cmp_patches_per_row, t_factories, mem_modules);
-
-        // setup clock for all components:
-        std::vector<sim::CLOCKABLE*> clockables{cmp};
-        clockables.insert(clockables.end(), t_factories.begin(), t_factories.end());
-        clockables.insert(clockables.end(), mem_modules.begin(), mem_modules.end());
-        sim::setup_clk_scale_for_group(clockables);
+        sim::GL_CMP = new sim::COMPUTE(cmp_freq_ghz, {trace}, cmp_num_rows, cmp_patches_per_row, t_factories, mem_modules);
 
         // run simulation until EOF
         std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";
@@ -353,19 +363,55 @@ main(int argc, char* argv[])
         sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
         sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
 
-        uint64_t tick{0};
+        // run initialization:
+        sim::GL_CMP->OP_init();
+        for (auto* m : mem_modules)
+            m->OP_init();
+        for (auto* f : t_factories)
+            f->OP_init();
+
+
         bool done;
         do
         {
-            sim::print_progress(std::cout, cmp, tick, 1'000'000, 50'000'000);
-            for (auto* c : clockables)
-                c->tick();
+            // arbitrate events:
+            sim::T_FACTORY* earliest_fact = sim::arbitrate_event_selection_from_vector(t_factories);
+            sim::MEMORY_MODULE* earliest_mem = sim::arbitrate_event_selection_from_vector(mem_modules);
+
+            /*
+            std::cout << "pending events:\n";
+            if (earliest_fact->has_event())
+            {
+                std::cout << "\tfactory next event: t =" << earliest_fact->next_event().time_ns 
+                            << "ns, id = " << static_cast<int>(earliest_fact->next_event().id) 
+                            << ", num events = " << earliest_fact->num_events() << "\n";
+            }
+            if (earliest_mem->has_event())
+            {
+                std::cout << "\tmemory next event: t =" << earliest_mem->next_event().time_ns 
+                            << "ns, id = " << static_cast<int>(earliest_mem->next_event().id) 
+                            << ", num events = " << earliest_mem->num_events() << "\n";
+            }
+            if (sim::GL_CMP->has_event())
+            {
+                std::cout << "\tcompute next event: t =" << sim::GL_CMP->next_event().time_ns 
+                            << "ns, id = " << static_cast<int>(sim::GL_CMP->next_event().id) 
+                            << ", num events = " << sim::GL_CMP->num_events() << "\n";
+            }
+            */
+
+            bool deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
+
+            if (deadlock)
+            {
+                sim::GL_CMP->dump_deadlock_info();
+                throw std::runtime_error("deadlock detected");
+            }
 
             // check if we are done:
-            const auto& clients = cmp->clients();
+            const auto& clients = sim::GL_CMP->get_clients();
             done = std::all_of(clients.begin(), clients.end(),
                                 [] (const auto& c) { return c->has_hit_eof_once; });
-            tick++;
         }
         while (!done);
 
@@ -375,12 +421,12 @@ main(int argc, char* argv[])
         // than the logical error rate
         
         // compute required error rate that would have achieved the application success rate anyways.
-        double cmp_cycles = static_cast<double>(cmp->current_cycle());
+        double cmp_cycles = static_cast<double>(sim::GL_CMP->current_cycle());
         double log_1_minus_acceptable_error_rate_per_cycle = (1.0/cmp_cycles) * log(TARGET_APP_SUCCESS_RATE);
         double acceptable_error_rate_per_cycle = 1.0 - exp(log_1_minus_acceptable_error_rate_per_cycle);
         size_t required_code_distance = sc_distance_for_target_logical_error_rate(acceptable_error_rate_per_cycle);
 
-        sim::print_stats(std::cout, cmp, t_factories, mem_modules);
+        sim::print_stats(std::cout);
         sim::print_stat_line(std::cout, "L1_FACTORY_COUNT", fact_l1_count, false);
         sim::print_stat_line(std::cout, "L2_FACTORY_COUNT", fact_l2_count, false);
         sim::print_stat_line(std::cout, "COMPUTE_TOTAL_PHYSICAL_QUBITS", cmp_phys_qubits, false);
@@ -405,7 +451,7 @@ main(int argc, char* argv[])
         }
 
         // deallocate memory:
-        delete cmp;
+        delete sim::GL_CMP;
         for (auto* f : t_factories)
             delete f;
         for (auto* m : mem_modules)

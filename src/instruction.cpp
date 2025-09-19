@@ -94,6 +94,7 @@ operator<<(std::ostream& os, const INSTRUCTION& inst)
 
     for (size_t i = 0; i < inst.qubits.size(); ++i)
         os << " " << inst.qubits[i];
+    os << " (" << inst.inst_number << ")";
 
     return os;
 }

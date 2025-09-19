@@ -57,11 +57,11 @@ set(SIM_FILES
     src/sim.cpp
     src/sim/client.cpp
     src/sim/clock.cpp
+    src/sim/cmp/replacement.cpp
+    src/sim/cmp/replacement/lru.cpp
+    src/sim/cmp/replacement/lti.cpp
     src/sim/compute.cpp
-    src/sim/compute/replacement.cpp
-    src/sim/compute/replacement/lru.cpp
-    src/sim/compute/replacement/lti.cpp
-    src/sim/magic_state.cpp
+    src/sim/factory.cpp
     src/sim/memory.cpp
     src/sim/routing.cpp)
 
@@ -70,7 +70,7 @@ set(SIM_FILES
 
 # Quicksilver simulator library:
 
-add_library(qssl STATIC ${SIM_FILES})
+add_library(qssl SHARED ${SIM_FILES})
 target_include_directories(qssl PUBLIC "src")
 target_compile_options(qssl PUBLIC ${COMPILE_OPTIONS})
 target_compile_definitions(qssl PUBLIC -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
@@ -97,17 +97,10 @@ target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
 ###################################################
 ###################################################
 
-# simulator:
-add_executable(qs_sim main/qs_sim.cpp ${SIM_FILES})
-target_link_libraries(qs_sim PRIVATE qssl)
-target_compile_options(qs_sim PRIVATE ${COMPILE_OPTIONS})
-
 # iterative simulator for memory evaluations:
-add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${SIM_FILES})
+add_executable(qs_sim_mem main/qs_sim_mem_search.cpp)
 target_link_libraries(qs_sim_mem PRIVATE qssl)
 target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
-
-target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB)
 
 ###################################################
 ###################################################

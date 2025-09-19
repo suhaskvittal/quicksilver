@@ -8,19 +8,41 @@
 #ifndef SIM_h
 #define SIM_h
 
+#include "sim/client.h"
 #include "sim/clock.h"
 #include "sim/compute.h"
-#include "sim/client.h"
-#include "sim/routing.h"
-#include "sim/magic_state.h"
+#include "sim/factory.h"
 #include "sim/memory.h"
 
 #include <iostream>
 #include <iomanip>
 #include <string>
+#include <random>
 
 namespace sim
 {
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+extern uint64_t GL_CURRENT_TIME_NS;
+
+// global pointer to the compute module
+extern COMPUTE* GL_CMP;
+
+// random number generators:
+extern std::mt19937 GL_RNG;
+extern std::uniform_real_distribution<double> FP_RAND;
+
+// global flags:
+extern bool     GL_PRINT_PROGRESS;
+extern uint64_t GL_PRINT_PROGRESS_FREQ;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+// implementation flags -- use this to setup your own designs
+bool GL_IMPL_RZ_PREFETCH{false};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -33,11 +55,12 @@ print_stat_line(std::ostream& out, std::string name, T value, bool indent=true)
     out << std::setw(52) << std::left << name << " : " << std::setw(12) << std::right << value << "\n";
 }
 
+void print_stats(std::ostream&);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void print_stats(std::ostream& out, sim::COMPUTE*, std::vector<sim::T_FACTORY*>, std::vector<sim::MEMORY_MODULE*>);
-void print_progress(std::ostream& out, COMPUTE*, uint64_t tick, uint64_t dot_freq, uint64_t newline_freq);
+void arbitrate_event_execution();
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

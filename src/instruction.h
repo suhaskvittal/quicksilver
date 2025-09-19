@@ -94,8 +94,14 @@ struct INSTRUCTION
         Simulation variables:
     */
     uint64_t inst_number{};
-    bool     is_running{false};
+    uint64_t total_resource_stall_cycles{0};
+    uint64_t total_memory_stall_cycles{0};
+    bool is_scheduled{false};
     uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
+
+    // this is for tracking the start of a stall
+    uint64_t resource_stall_start_cycle{std::numeric_limits<uint64_t>::max()};
+    uint64_t memory_stall_start_cycle{std::numeric_limits<uint64_t>::max()};
 
     // gates like RZ/RX require multiple sub-operations to complete, so `uop_completed` 
     // is used to track the progress of the instruction.

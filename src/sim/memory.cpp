@@ -1,156 +1,217 @@
 /*
     author: Suhas Vittal
-    date:   27 August 2025
+    date:   17 September 2025
 */
 
+#include "sim/compute.h"
+#include <functional>
 #include "sim/memory.h"
 
-constexpr size_t LD_CYCLES = 2;
-constexpr size_t ST_CYCLES = 1;
-
-// #define QS_SIM_DEBUG
+//#define MEMORY_VERBOSE
 
 namespace sim
 {
 
+extern COMPUTE* GL_CMP;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-static const MEMORY_MODULE::client_qubit_type UNITIALIZED{-1,-1};
-
-MEMORY_MODULE::MEMORY_MODULE(double freq_ghz, size_t num_banks, size_t capacity_per_bank)
-    :CLOCKABLE(freq_ghz),
+MEMORY_MODULE::MEMORY_MODULE(double freq_khz, size_t num_banks, size_t capacity_per_bank)
+    :OPERABLE(freq_khz),
     num_banks_(num_banks),
-    banks_(num_banks, bank_type(capacity_per_bank, UNITIALIZED))
-{}
+    capacity_per_bank_(capacity_per_bank),
+    banks_(num_banks, bank_type(capacity_per_bank))
+{
+    request_buffer_.reserve(128);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+MEMORY_MODULE::search_result_type
+MEMORY_MODULE::find_qubit(QUBIT qubit)
+{
+    for (auto b_it = banks_.begin(); b_it != banks_.end(); b_it++)
+    {
+        auto q_it = std::find(b_it->contents.begin(), b_it->contents.end(), qubit);
+        if (q_it != b_it->contents.end())
+            return std::make_tuple(true, b_it, q_it);
+    }
+
+    return std::make_tuple(false, banks_.end(), banks_[0].contents.end());
+}
+
+MEMORY_MODULE::search_result_type
+MEMORY_MODULE::find_uninitialized_qubit()
+{
+    return find_qubit(QUBIT{-1,-1});
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-MEMORY_MODULE::operate()
+MEMORY_MODULE::initiate_memory_access(QUBIT qubit)
 {
-    // if there are no requests, we can exit
-    if (request_buffer_.empty())
+    // create a new request:
+    // first make sure that the qubit does not already have a request:
+    auto req_it = find_request_for_qubit(qubit);
+    if (req_it != request_buffer_.end())
         return;
 
-    for (auto req_it = request_buffer_.begin(); req_it != request_buffer_.end(); req_it++)
+    // otherwise, create a new request:
+    request_type req{qubit};
+    if (!serve_memory_request(req))
+        request_buffer_.push_back(req);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_MODULE::dump_contents()
+{
+    for (size_t i = 0; i < banks_.size(); i++)
     {
-        if (try_and_serve_request(req_it))
+        std::cerr << "bank " << i << ":\n";
+        for (size_t j = 0; j < banks_[i].contents.size(); j++)
+            std::cerr << "\t" << j << " : " << banks_[i].contents[j] << "\n";
+    }
+}
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_MODULE::OP_handle_event(event_type event)
+{
+#if defined(MEMORY_VERBOSE)
+    std::cout << "[ MEMORY ] request queue contents:\n";
+    for (const auto& req : request_buffer_)
+    {
+        auto [found, b_it, q_it] = this->find_qubit(req.qubit);
+        size_t bank_idx = std::distance(banks_.begin(), b_it);
+        std::cout << "\t\t" << req.qubit << ", bank = " << bank_idx << "\n";
+    }
+#endif
+
+    if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED)
+    {
+        size_t free_bank_idx = event.info.bank_with_completed_request;
+        // find a request mapping to this bank and issue it
+        auto req_it = find_request_for_bank(free_bank_idx, request_buffer_.begin());
+
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tmemory access completed for bank " << free_bank_idx << ", cycle = " << current_cycle() << "\n";
+        if (req_it != request_buffer_.end())
+            std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
+        else
+            std::cout << "\tno request found for bank " << free_bank_idx << "\n";
+#endif
+
+        while (req_it != request_buffer_.end() && !serve_memory_request(*req_it))
         {
-            request_buffer_.erase(req_it);
-            break;
+#if defined(MEMORY_VERBOSE)
+            if (req_it != request_buffer_.end())
+                std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
+            else
+                std::cout << "\tno request found for bank " << free_bank_idx << "\n";
+#endif
+            req_it = find_request_for_bank(free_bank_idx, req_it+1);
         }
+
+        if (req_it != request_buffer_.end())
+            request_buffer_.erase(req_it);
     }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-MEMORY_MODULE::qubit_lookup_result_type
-MEMORY_MODULE::find_qubit(int8_t client_id, qubit_type qubit_id)
-{
-    for (auto b_it = banks_.begin(); b_it != banks_.end(); b_it++)
+    else if (event.id == MEMORY_EVENT_TYPE::COMPUTE_COMPLETED_INST)
     {
-        auto q_it = std::find_if(b_it->begin(), b_it->end(),
-                                [client_id, qubit_id] (const auto& cq) { return cq.first == client_id && cq.second == qubit_id; });
-        if (q_it != b_it->end())
-            return std::make_pair(b_it, q_it);
+        // then, retry all pending requests
+        auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
+                                [this] (const auto& req) { return this->serve_memory_request(req); });
+        request_buffer_.erase(it, request_buffer_.end());
     }
-
-    return std::make_pair(banks_.end(), banks_[0].end());
-}
-
-MEMORY_MODULE::qubit_lookup_result_type
-MEMORY_MODULE::find_uninitialized_qubit()
-{
-    return find_qubit(-1,-1);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 bool
-MEMORY_MODULE::try_and_serve_request(request_buffer_type::iterator req_it)
+MEMORY_MODULE::serve_memory_request(const request_type& req)
 {
-    // 1. get qubit info (will be used later)
-    auto& rq_qubit_info = req_it->client->qubits[req_it->requested_qubit];
-    auto [b_it, q_it] = find_qubit(req_it->client_id, req_it->requested_qubit);
-    [[ maybe_unused ]] size_t bank_id = std::distance(banks_.begin(), b_it);
+    constexpr uint64_t MSWAP_MEM_CYCLES = 3;  // note that these are memory cycles
 
-#if defined(QS_SIM_DEBUG)
-    if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
-    {
-        std::cout << "request @ bank " << bank_id
-                << ": client = " << req_it->client_id+0 
-                << ", qubit = " << req_it->requested_qubit << "\n";
-
-    }
+#if defined(MEMORY_VERBOSE)
+    std::cout << "[ MEMORY ] initiated memory access to qubit " << req.qubit << " cycle " << current_cycle() << "\n";
 #endif
 
-    // 2. figure out how long it will take to "rotate" to
-    //       the desired qubit and fetch the data
+    auto [found, b_it, q_it] = find_qubit(req.qubit);
+    if (!found)
+        throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
 
-    // we can rotate the data left or right -- choose minimum latency
-    size_t right_access_latency = std::distance(b_it->begin(), q_it);
-    size_t left_access_latency = std::distance(q_it, b_it->end());
+    [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
 
-    size_t access_latency = std::min(left_access_latency, right_access_latency);
-    size_t compute_cycles_for_ld = convert_cycles_between_frequencies(
-                                                access_latency + LD_CYCLES, freq_khz_, compute_->freq_khz_);
-    size_t compute_cycles_for_st = convert_cycles_between_frequencies(
-                                                access_latency + LD_CYCLES + ST_CYCLES, freq_khz_, compute_->freq_khz_);
-
-    // 3. check if routing space is available to serve the request
-    auto victim = compute_->select_victim_qubit(req_it->client_id, req_it->requested_qubit);
-
-    if (victim == nullptr)
-        return false;
-
-#if defined(QS_SIM_DEBUG)
-    if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    if (b_it->cycle_free > current_cycle())
     {
-        std::cout << "\tvictim: client = " << victim->memloc_info.client_id+0 
-                << ", qubit = " << victim->memloc_info.qubit_id 
-                << ", t_free = " << victim->memloc_info.t_free << "\n";
-
-        if (victim->memloc_info.where == MEMINFO::LOCATION::MEMORY)
-            std::cout << "\tvictim is in memory\n";
-        else
-            std::cout << "\tvictim is in compute\n";
-    }
-#endif
-
-    PATCH& m_patch = compute_->patches_[output_patch_idx];
-    PATCH& q_patch = *compute_->find_patch_containing_qubit(victim->memloc_info.client_id, victim->memloc_info.qubit_id);
-
-    if (!compute_->alloc_routing_space(m_patch, q_patch, compute_cycles_for_ld, compute_cycles_for_ld))
-    {
-#if defined(QS_SIM_DEBUG)
-        if (compute_->cycle_ % QS_SIM_DEBUG_FREQ == 0)
-            std::cout << "\tcould not get routing space\n";
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tbank " << bank_idx << " is not free yet -- cycle_free = " << b_it->cycle_free << "\n";
 #endif
         return false;
     }
 
-    // 4. we can do the request:
-    // 4.1. update the bank contents:
-    *q_it = std::make_pair(victim->memloc_info.client_id, victim->memloc_info.qubit_id);
+    // first determine how long it will take to rotate the qubit to the head of the bank
+    uint64_t left_rotation_cycles = std::distance(b_it->contents.begin(), q_it);
+    uint64_t right_rotation_cycles = std::distance(q_it, b_it->contents.end());
+    uint64_t rotation_cycles = std::min(left_rotation_cycles, right_rotation_cycles);
 
-    // 4.2. rotate the data to the desired qubit
-    std::rotate(b_it->begin(), q_it, b_it->end());
+    uint64_t rotation_completion_cycle = std::max(current_cycle(), b_it->cycle_free) + rotation_cycles;
 
-    // 4.3. update the requested and evicted qubits' states
-    rq_qubit_info.memloc_info.where = MEMINFO::LOCATION::COMPUTE;
-    rq_qubit_info.memloc_info.t_free = compute_->cycle_ + compute_cycles_for_ld;
+    // now, ask `GL_CMP` to route the memory access
+    // convert `MSWAP_MEM_CYCLES` to compute cycles
+    uint64_t earliest_start_time_ns = convert_cycles_to_ns(rotation_completion_cycle, OP_freq_khz);
+    uint64_t mswap_time_ns = convert_cycles_to_ns(MSWAP_MEM_CYCLES, OP_freq_khz);
 
-    victim->memloc_info.where = MEMINFO::LOCATION::MEMORY;
-    victim->memloc_info.t_free = compute_->cycle_ + compute_cycles_for_st;
+    // perform the memory swap and convert to compute cycles
+    auto [victim_found, victim, access_time_ns] = 
+            GL_CMP->route_memory_access(output_patch_idx_, req.qubit, earliest_start_time_ns, mswap_time_ns);
 
-    // 4.4. update patch info
-    q_patch.client_id = req_it->client_id;
-    q_patch.qubit_id = req_it->requested_qubit;
+    if (!victim_found)
+    {
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tfailed to find victim for qubit " << req.qubit << "\n";
+#endif
+        return false;
+    }
 
+    // update memory:
+    *q_it = victim;
+    // complete the rotation now that we have assigned `*q_it`
+    std::rotate(b_it->contents.begin(), q_it, b_it->contents.end());
+
+    // update when bank is free -- note that `access_time_ns` accounts for `rotation_completion_cycle`
+    uint64_t mem_access_cycles = convert_ns_to_cycles(access_time_ns, OP_freq_khz);
+    uint64_t cmp_access_cycles = convert_ns_to_cycles(access_time_ns, GL_CMP->OP_freq_khz);
+    uint64_t mem_access_done_cycle = current_cycle() + mem_access_cycles;
+    b_it->cycle_free = mem_access_done_cycle;
+
+    // submit completion events
+    MEMORY_EVENT_INFO mem_event_info;
+    mem_event_info.bank_with_completed_request = bank_idx;
+    OP_add_event_using_cycles(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, mem_access_cycles + 1, mem_event_info);
+
+    COMPUTE_EVENT_INFO cmp_event_info;
+    cmp_event_info.mem_accessed_qubit = req.qubit;
+    cmp_event_info.mem_victim_qubit = victim;
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, cmp_access_cycles + 1, cmp_event_info);
+
+#if defined(MEMORY_VERBOSE)
+    std::cout << "\tserved memory request for qubit " << req.qubit << " in bank " << bank_idx 
+                << "\n\t\tcompletion cycle = " << mem_access_done_cycle
+                << "\n\t\tvictim = " << victim
+                << "\n";
+    std::cout << "\tbank " << bank_idx << " state:\n";
+    for (size_t i = 0; i < banks_[bank_idx].contents.size(); i++)
+        std::cout << "\t\t" << i << " : " << banks_[bank_idx].contents[i] << "\n";
+#endif
 
     return true;
 }
@@ -158,4 +219,83 @@ MEMORY_MODULE::try_and_serve_request(request_buffer_type::iterator req_it)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-} // namespace sim
+std::vector<MEMORY_MODULE::request_type>::iterator
+MEMORY_MODULE::find_request_for_qubit(QUBIT qubit)
+{
+    return std::find_if(request_buffer_.begin(), request_buffer_.end(),
+                        [qubit] (const auto& req) { return req.qubit == qubit; });
+}
+
+std::vector<MEMORY_MODULE::request_type>::iterator
+MEMORY_MODULE::find_request_for_bank(size_t idx, std::vector<request_type>::iterator search_from_req_it)
+{
+    auto target_b_it = banks_.begin() + idx;
+    return std::find_if(search_from_req_it, request_buffer_.end(),
+                        [this, target_b_it] (const auto& req)
+                        {
+                            auto [found, b_it, q_it] = this->find_qubit(req.qubit);
+                            return found && (b_it == target_b_it);
+                        });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+mem_alloc_qubits_in_round_robin(std::vector<MEMORY_MODULE*> mem_modules, std::vector<QUBIT> qubits)
+{
+    // make sure there is enough space amongst all modules
+    size_t total_capacity = std::transform_reduce(mem_modules.begin(), mem_modules.end(), 
+                                            size_t{0},
+                                            std::plus<size_t>(),
+                                            [] (const auto* m) { return m->capacity_per_bank_ * m->num_banks_; });
+    if (qubits.size() > total_capacity)
+        throw std::runtime_error("not enough space in memory to allocate all qubits");
+
+    size_t mem_idx{0};
+    std::vector<size_t> mem_bank_idx(mem_modules.size(), 0);
+    std::vector<bool> mem_done(mem_modules.size(), false);
+
+    size_t i{0};
+    while (i < qubits.size())
+    {
+        if (mem_done[mem_idx])
+        {
+            mem_idx = (mem_idx+1) % mem_modules.size();
+            continue;
+        }
+
+        MEMORY_MODULE* m = mem_modules[mem_idx];
+        size_t bank_idx = mem_bank_idx[mem_idx];
+        
+        size_t j{0};
+        for (; j < m->num_banks_; j++)
+        {
+            auto& bank = m->banks_[bank_idx];
+            auto q_it = std::find(bank.contents.begin(), bank.contents.end(), QUBIT{-1,-1});
+            if (q_it != bank.contents.end())
+            {
+                *q_it = qubits[i];
+                break;
+            }
+
+            bank_idx = (bank_idx+1) % m->num_banks_;
+        }
+
+        if (j == m->num_banks_)
+        {
+            mem_done[mem_idx] = true;
+            mem_idx = (mem_idx+1) % mem_modules.size();
+        }
+        else
+        {
+            mem_bank_idx[mem_idx] = (bank_idx+1) % m->num_banks_;
+            mem_idx = (mem_idx+1) % mem_modules.size();
+            i++;
+        }
+    }
+}
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}   // namespace sim

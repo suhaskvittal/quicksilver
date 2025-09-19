@@ -1,299 +1,224 @@
 /*
     author: Suhas Vittal
-    date:   27 August 2025
+    date:   16 September 2025
 */
-
+#include "sim/clock.h"
 #include "sim/compute.h"
-#include "compute.h"
-#include "sim/compute/replacement/lru.h"
-#include "sim/compute/replacement/lti.h"
-#include "sim/memory.h"
+#include "sim/cmp/replacement/lru.h"
+#include "sim/cmp/replacement/lti.h"
 
+#include <limits>
 #include <unordered_set>
 
-constexpr size_t NUM_CCZ_UOPS = 13;
-constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
-
-std::mt19937 GL_RNG{0};
-static std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
+//#define COMPUTE_VERBOSE
 
 namespace sim
 {
 
+constexpr size_t NUM_CCZ_UOPS = 13;
+constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
+
+extern std::mt19937 GL_RNG;
+extern std::uniform_real_distribution<double> FP_RAND;
+
+extern bool GL_PRINT_PROGRESS;
+extern uint64_t GL_PRINT_PROGRESS_FREQ;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::COMPUTE(double freq_ghz, 
-                    const std::vector<std::string>& client_trace_files,
-                    size_t num_rows, 
-                    size_t num_patches_per_row, 
-                    const std::vector<T_FACTORY*>& t_factories, 
-                    const std::vector<MEMORY_MODULE*>& memory,
-                    REPLACEMENT repl_id)
-    :CLOCKABLE(freq_ghz),
+size_t
+_get_max_t_factory_level(std::vector<T_FACTORY*> t_fact)
+{
+    auto max_it = std::max_element(t_fact.begin(), t_fact.end(),
+                            [] (const T_FACTORY* a, const T_FACTORY* b) { return a->level_ < b->level_; });
+    return (*max_it)->level_;
+}
+
+COMPUTE::COMPUTE(double freq_khz, 
+                std::vector<std::string> client_trace_files,
+                size_t num_rows, 
+                size_t num_patches_per_row,
+                std::vector<T_FACTORY*> t_fact,
+                std::vector<MEMORY_MODULE*> mem_modules,
+                REPLACEMENT_POLICY repl_policy)
+    :OPERABLE(freq_khz),
+    target_t_fact_level_(_get_max_t_factory_level(t_fact)),
     num_rows_(num_rows),
     num_patches_per_row_(num_patches_per_row),
-    full_row_width_inc_ancilla_(num_patches_per_row_+1),
-    patches_(num_rows * num_patches_per_row + 2*(num_patches_per_row+2)),
-    t_fact_(t_factories),
-    memory_(memory)
+    rename_tables_(client_trace_files.size()),
+    t_fact_(t_fact),
+    mem_modules_(mem_modules)
 {
-    // configure `target_t_fact_level_`:
-    auto max_fact_it = std::max_element(t_factories.begin(), t_factories.end(),
-                                        [] (T_FACTORY* f1, T_FACTORY* f2) { return f1->level < f2->level; });
-    target_t_fact_level_ = (*max_fact_it)->level;
+    // initialize replacement policy:
+    switch (repl_policy)
+    {
+    case REPLACEMENT_POLICY::LTI:
+        repl_ = std::make_unique<cmp::repl::LTI>(this);
+        break;
+    case REPLACEMENT_POLICY::LRU:
+        repl_ = std::make_unique<cmp::repl::LRU>(this);
+        break;
+    default:
+        throw std::runtime_error("invalid replacement policy");
+    }
 
-    // number of patches reserved for resource pins are the number of factories at or higher than the target T factory level:
-    size_t patches_reserved_for_resource_pins = std::count_if(t_factories.begin(), t_factories.end(),
-                                                        [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level >= lvl; });
-    // one patch per module:
-    size_t patches_reserved_for_memory_pins = memory_.size();
+    // initialize routing space:
+    auto routing_elements = con_init_routing_space();
+    // initialize patches:
+    con_init_patches(routing_elements);
+    // finally initialize clients
+    con_init_clients(client_trace_files);
+}
 
-    // bound the number of patches reserved for resource pins and memory pins -- can only take up one full row
-    patches_reserved_for_resource_pins = std::max(patches_reserved_for_resource_pins, full_row_width_inc_ancilla_);
-    patches_reserved_for_memory_pins = std::max(patches_reserved_for_memory_pins, full_row_width_inc_ancilla_);
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
-    patch_idx_compute_start_ = patches_reserved_for_resource_pins;
-    patch_idx_memory_start_ = patches_reserved_for_resource_pins + num_rows*num_patches_per_row;
+COMPUTE::memory_route_result_type
+COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT incoming_qubit, uint64_t route_min_start_time_ns, uint64_t mswap_time_ns)
+{
+    std::optional<QUBIT> victim = repl_->select_victim(incoming_qubit);
+    if (!victim.has_value())
+        return {false, QUBIT{-1,-1}, 0};
 
-    // initialize the routing space + compute memory
-    auto [junctions, buses] = init_routing_space();
-    init_compute(junctions, buses);
+    auto v_patch_it = find_patch_containing_qubit(*victim);
+    if (v_patch_it == patches_.end())
+        throw std::runtime_error("victim qubit " + victim->to_string() + " not found in compute patches");
 
-    // determine amount of program memory required:
-    size_t total_qubits_required = std::transform_reduce(clients_.begin(), clients_.end(), 
-                                            size_t{0}, 
-                                            std::plus<size_t>{}, 
-                                            [] (const client_ptr& c) { return c->qubits.size(); });
-    size_t avail_patches = patches_.size() - patches_reserved_for_resource_pins - patches_reserved_for_memory_pins;
-    if (avail_patches < total_qubits_required)
-        throw std::runtime_error("Not enough space to allocate all program qubits");
+    PATCH& v_patch = *v_patch_it;
+    PATCH& m_patch = patches_[mem_patch_idx];
 
-    // initialize the clients
-    init_clients(client_trace_files);
+    auto v_bus_it = find_next_available_bus(v_patch);
+    auto m_bus_it = find_next_available_bus(m_patch);
 
-    // connect memory to this compute:
-    for (auto* m : memory_)
-        m->compute_ = this;
+    uint64_t earliest_start_cycle = convert_ns_to_cycles(route_min_start_time_ns, OP_freq_khz);
+    uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
+    cycle_routing_start = std::max(cycle_routing_start, earliest_start_cycle);
 
-    // initialize the replacement policy:
-    if (repl_id == REPLACEMENT::LRU)
-        repl_ = std::make_unique<compute::repl::LRU>(this);
-    else if (repl_id == REPLACEMENT::LTI)
-        repl_ = std::make_unique<compute::repl::LTI>(this);
-    else
-        throw std::runtime_error("Invalid replacement policy ID: " + std::to_string(static_cast<size_t>(repl_id)));
+    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(v_bus_it, m_bus_it, cycle_routing_start);
+
+    uint64_t cmp_cycles_for_mswap = convert_ns_to_cycles(mswap_time_ns, OP_freq_khz);
+    uint64_t completion_cycle = routing_alloc_cycle + cmp_cycles_for_mswap;
+    update_free_times_along_routing_path(path, completion_cycle, completion_cycle);
+
+    // update operands' available cycles
+    qubit_available_cycle_[*victim] = completion_cycle;
+    qubit_available_cycle_[incoming_qubit] = completion_cycle;
+
+    // set `v_patch` contents to `incoming_qubit`
+    v_patch.contents = incoming_qubit;
+
+    uint64_t access_time_ns = convert_cycles_to_ns(completion_cycle - current_cycle(), OP_freq_khz);
+
+    return {true, *victim, access_time_ns};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::operate()
+COMPUTE::OP_init()
 {
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    // start all clients in init
+    for (auto& c : clients_)
     {
-        std::cout << "--------------------------------\n";
-        std::cout << "COMPUTE CYCLE " << cycle_ << "\n";
+        client_fetch(c);
+        client_schedule(c);
     }
-#endif
+}
 
-    size_t ii = cycle_ % clients_.size();
-    for (size_t i = 0; i < clients_.size(); i++)
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::dump_deadlock_info()
+{
+    std::cerr << "=========COMPUTE DEADLOCK INFO================\n";
+    std::cerr << "current cycle = " << current_cycle() << "\n";
+
+    std::cerr << "compute memory contents:\n";
+    for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
     {
-        client_ptr& c = clients_[ii];
-        exec_results_.clear();
+        std::cerr << "\tPATCH " << (i-compute_start_idx_) << ", contents = " << patches_[i].contents << "\n";
+    }
 
-#if defined(QS_SIM_DEBUG)
-        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+    for (auto& c : clients_)
+    {
+        std::cerr << "CLIENT " << static_cast<int>(c->id) << ":\n";
+        for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
         {
-            std::cout << "CLIENT " << c->id
-                    << " (trace = " << c->trace_file 
-                    << ", #qubits = " << c->qubits.size() 
-                    << ", inst done = " << c->s_inst_done  
-                    << ")\n";
-        }
-#endif
-
-        // 1. retire any instructions at the head of a window,
-        //    or update the number of cycles until done
-        client_try_retire(c);
-
-        // 2. check if any instruction is ready to be executed. 
-        //    An instruction is ready to be executed if it is at the head of all its arguments' windows.
-        client_try_execute(c);
-
-        // 3. check if any instructions can be fetched (read from trace file)
-        //    This is done if any qubit has an empty window.
-        client_try_fetch(c);
-
-        // update stats using `exec_results_`:
-        exec_result_type cycle_stall{0};
-        bool any_stalled = false;
-        for (exec_result_type r : exec_results_)
-        {
-            c->s_inst_stalled += (r > 0);
-            c->s_inst_stalled_by_type[r]++;
-            any_stalled |= (r > 0);
+            QUBIT q{c->id, qid};
+            std::cerr << "\tQUBIT " << qid << ", cycle avail = " << qubit_available_cycle_[q] << ", instruction window:\n";
+            for (auto* inst : inst_windows_[q])
+            {
+                bool is_sw = is_software_instruction(inst->type);
+                std::vector<bool> ready(inst->qubits.size(), false);
+                std::transform(inst->qubits.begin(), inst->qubits.end(), ready.begin(),
+                                [this, &c, inst, is_sw] (qubit_type qid) 
+                                {
+                                    QUBIT q{c->id, qid};
+                                    const auto& w = this->inst_windows_[q];
+                                    bool at_head = (!w.empty() && w.front() == inst);
+                                    return at_head;
+                                });
+                if (!inst->is_scheduled && std::none_of(ready.begin(), ready.end(), [](bool r) { return r; }))
+                    continue;
             
-            cycle_stall |= r;
+                bool has_memory_stall = std::find_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(), [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_memory_.end();
+                bool has_resource_stall = std::find_if(inst_waiting_for_resource_.begin(), inst_waiting_for_resource_.end(), [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_resource_.end();
+
+                std::cerr << "\t\t" << *inst << ", uop " << inst->uop_completed << "/" << inst->num_uops 
+                        << ", scheduled = " << inst->is_scheduled << ", ready = ";
+                for (bool r : ready)
+                    std::cerr << r << " ";
+                std::cerr << ", cycle done = " << inst->cycle_done 
+                        << ", has memory stall = " << has_memory_stall 
+                        << ", has resource stall = " << has_resource_stall << "\n";
+            }
         }
-        c->s_cycles_stalled += (cycle_stall > 0);
-        c->s_cycles_stalled_by_type[cycle_stall]++;
-
-        ii = (ii+1) % clients_.size();
     }
+}
 
-#if defined(QS_SIM_DEBUG)
-    // print factory information:
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::OP_handle_event(event_type event)
+{
+    if (event.id == COMPUTE_EVENT_TYPE::MAGIC_STATE_AVAIL)
     {
-        for (auto* f : t_fact_)
-            std::cout << "FACTORY L" << f->level << " (buffer_occu = " << f->buffer_occu << ", step = " << f->step << ")\n";
-
-        // print memory information:
-        for (size_t i = 0; i < memory_.size(); i++)
-        {
-            std::cout << "MEMORY MODULE " << i 
-                        << " (num_banks = " << memory_[i]->num_banks_ 
-                        << ", request buffer size = " << memory_[i]->request_buffer_.size() << ")\n";
-        }
-    }
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "[ COMPUTE ] got event: magic state available @ cycle = " << current_cycle() << "\n";
 #endif
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-COMPUTE::alloc_routing_space(const PATCH& src, const PATCH& dst, uint64_t block_endpoints_for, uint64_t block_path_for)
-{
-    // check if the bus is free
-    if (src.buses.empty() || dst.buses.empty())
-        throw std::runtime_error("source/destination has no buses at all");
-
-    auto src_it = find_free_bus(src);
-    auto dst_it = find_free_bus(dst);
-
-    if (src_it == src.buses.end() || dst_it == dst.buses.end())
-        return false;
-
-    // now check if we can route:
-    if (*src_it == *dst_it)
-    {
-        (*src_it)->t_free = cycle_ + block_endpoints_for;
+        retry_instructions(RETRY_TYPE::RESOURCE, event.info);
     }
-    else
+    else if (event.id == COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE)
     {
-        auto path = route_path_from_src_to_dst(*src_it, *dst_it, cycle_);
-        if (path.empty())
-            return false;
-
-        for (auto& r : path)
-            r->t_free = cycle_ + block_path_for;
-
-        // hold the endpoints for `endpoint_latency` cycles:
-        (*src_it)->t_free = cycle_ + block_endpoints_for;
-        (*dst_it)->t_free = cycle_ + block_endpoints_for;
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "[ COMPUTE ] got event: memory access done @ cycle = " << current_cycle() 
+                << " requested = " << event.info.mem_accessed_qubit << ")"
+                << " victim = " << event.info.mem_victim_qubit << "\n";
+#endif
+        retry_instructions(RETRY_TYPE::MEMORY, event.info);
     }
-
-    return true;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-CLIENT::qubit_info_type*
-COMPUTE::select_victim_qubit(int8_t incoming_client_id, qubit_type incoming_qubit_id)
-{
-    const auto& incoming_client = clients_[incoming_client_id];
-    const auto& incoming_qubit_info = incoming_client->qubits[incoming_qubit_id];
-    auto victim =  repl_->select_victim(incoming_qubit_info);
-
-    return victim;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::tuple<size_t, MEMORY_MODULE::qubit_lookup_result_type>
-_find_module_with_uninitialized_qubit(const std::vector<MEMORY_MODULE*>& memory, size_t start_from_idx)
-{
-    for (size_t i = 0; i < memory.size(); i++)
+    else if (event.id == COMPUTE_EVENT_TYPE::INST_EXECUTE)
     {
-        size_t ii = (start_from_idx+i) % memory.size();
-        auto lookup_result = memory[ii]->find_uninitialized_qubit();
-        if (lookup_result.first != memory[ii]->banks_.end())
-            return std::make_tuple(ii, lookup_result);
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "[ COMPUTE ] got event: instruction execute @ cycle = " << current_cycle() 
+                    << ", instruction \"" << *event.info.inst << "\"\n";
+#endif
+        client_execute(clients_[event.info.client_id], event.info.inst);
     }
-
-    return std::make_tuple(memory.size(), MEMORY_MODULE::qubit_lookup_result_type{});
-}
-
-void
-COMPUTE::init_clients(const std::vector<std::string>& client_trace_files)
-{
-    size_t patch_idx{patch_idx_compute_start_};
-
-    // initialize all clients;
-    for (size_t i = 0; i < client_trace_files.size(); i++)
+    else if (event.id == COMPUTE_EVENT_TYPE::INST_COMPLETE)
     {
-        client_ptr c{new sim::CLIENT(client_trace_files[i], i)};
-        clients_.push_back(std::move(c));
-    }
-
-    // place qubits into compute memory (round robin fashion to be fair)
-    int8_t client_id{0};
-    std::vector<size_t> client_qubit_idx(clients_.size(), 0);
-
-    // place qubits into memory once `patch_idx` reaches `patch_idx_memory_start_`:
-    // do this in a round robin fashion to maximize module level and bank level parallelism
-    size_t mem_idx{0};
-    std::vector<size_t> mem_bank_idx(memory_.size(), 0);
-
-    bool all_done{false};
-    while (!all_done)
-    {
-        size_t idx = client_qubit_idx[client_id];
-        client_ptr& c = clients_[client_id];
-
-        if (idx >= c->qubits.size()) // update all done since this client is done
-        {
-            all_done = std::all_of(clients_.begin(), clients_.end(),
-                                    [&client_qubit_idx] (const client_ptr& c) 
-                                    { 
-                                        return c->qubits.size() == client_qubit_idx[c->id]; 
-                                    });
-        }
-        else
-        {
-            auto& q = c->qubits[idx];
-
-            if (patch_idx >= patch_idx_memory_start_)
-            {
-                // place qubits into memory -- find a module with uninitialized qubit:
-                MEMORY_MODULE::qubit_lookup_result_type lookup_result;
-                std::tie(mem_idx, lookup_result) = _find_module_with_uninitialized_qubit(memory_, mem_idx);
-                if (mem_idx == memory_.size())
-                    throw std::runtime_error("Not enough space in memory to allocate all qubits");
-
-                auto [b_it, q_it] = lookup_result;
-                *q_it = std::make_pair(c->id, idx);
-                q.memloc_info.where = MEMINFO::LOCATION::MEMORY;
-                mem_idx = (mem_idx+1) % memory_.size();
-            }
-            else
-            {
-                // place in memory -- just need to set patch information:
-                patches_[patch_idx].client_id = c->id;
-                patches_[patch_idx].qubit_id = idx;
-                patch_idx++;
-            }
-            client_qubit_idx[client_id]++;
-        }
-
-        client_id = (client_id+1) % clients_.size();
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "[ COMPUTE ] got event: instruction complete @ cycle = " << current_cycle() 
+                    << ", instruction \"" << *event.info.inst << "\"\n";
+#endif
+        auto& c = clients_[event.info.client_id];
+        client_retire(c, event.info.inst);
+        client_fetch(c);
+        client_schedule(c);
     }
 }
 
@@ -301,320 +226,234 @@ COMPUTE::init_clients(const std::vector<std::string>& client_trace_files)
 ////////////////////////////////////////////////////////////
 
 void
-_connect(ROUTING_BASE::ptr_type j, ROUTING_BASE::ptr_type b)
+_connect(ROUTING_COMPONENT::ptr_type src, ROUTING_COMPONENT::ptr_type dst)
 {
-    j->connections.push_back(b);
-    b->connections.push_back(j);
+    src->connections.push_back(dst);
+    dst->connections.push_back(src);
 }
 
-COMPUTE::bus_info
-COMPUTE::init_routing_space()
+COMPUTE::routing_info
+COMPUTE::con_init_routing_space()
 {
     // buses and junctions are arranged by pairs of rows:
     const size_t num_row_pairs = (num_rows_+1)/2;  // need to +1 to handle singleton row
 
-    // number of junctions is num_row_pairs + 1
-    // number of buses is 2 * num_row_pairs + 1
-    const size_t num_junctions = num_row_pairs + 1;
-    const size_t num_buses = 2 * num_row_pairs + 1;
-    std::vector<sim::ROUTING_BASE::ptr_type> junctions(num_junctions);
-    std::vector<sim::ROUTING_BASE::ptr_type> buses(num_buses);
-    
-    for (size_t i = 0; i < junctions.size(); i++)
-        junctions[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i, sim::ROUTING_BASE::TYPE::JUNCTION});
+    const size_t num_junctions = 2*num_row_pairs + 2;
+    const size_t num_buses = 3*num_row_pairs + 1;
 
+    std::vector<ROUTING_COMPONENT::ptr_type> junctions(num_junctions);
+    std::vector<ROUTING_COMPONENT::ptr_type> buses(num_buses);
+
+    for (size_t i = 0; i < junctions.size(); i++)
+        junctions[i] = ROUTING_COMPONENT::ptr_type(new ROUTING_COMPONENT);
+    
     for (size_t i = 0; i < buses.size(); i++)
-        buses[i] = sim::ROUTING_BASE::ptr_type(new sim::ROUTING_BASE{i,sim::ROUTING_BASE::TYPE::BUS});
+        buses[i] = ROUTING_COMPONENT::ptr_type(new ROUTING_COMPONENT);
 
     for (size_t i = 0; i < num_row_pairs; i++)
     {
-        //  i ----- 2i ------
-        //  |                   
-        // 2i+1
-        //  |                   
-        // i+1 --- 2i+2 -----
-        _connect(junctions[i], buses[2*i]);
-        _connect(junctions[i], buses[2*i+1]);
-        _connect(junctions[i+1], buses[2*i+1]);
+        // 2i ----- 3i ------ 2i+1
+        //  |                  |
+        // 3i+1               3i+2
+        //  |                  |
+        // 2i+2 --- 3i+3 ----- 2i+3
+        _connect(junctions[2*i], buses[3*i]);
+        _connect(junctions[2*i+1], buses[3*i]);
+
+        _connect(junctions[2*i], buses[3*i+1]);
+        _connect(junctions[2*i+2], buses[3*i+1]);
+
+        _connect(junctions[2*i+1], buses[3*i+2]);
+        _connect(junctions[2*i+3], buses[3*i+2]);
     }
 
-    // and the last remaining bus + junction
-    _connect(junctions[num_junctions-1], buses[num_buses-1]);
+    // connect last bus
+    _connect(buses[num_buses-1], junctions[num_junctions-2]);
+    _connect(buses[num_buses-1], junctions[num_junctions-1]);
 
-    return bus_info{junctions, buses};
+    return routing_info{junctions, buses};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::init_compute(const bus_array& junctions, const bus_array& buses)
+COMPUTE::con_init_patches(routing_info routing_elements)
 {
-    // First setup the magic state pins:
-    std::vector<sim::T_FACTORY*> top_level_t_fact;
-    std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(top_level_t_fact),
-                [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level == lvl; });
+    auto [junctions, buses] = routing_elements;
 
-    // connect the magic state factories (interleave if there are more top level factories than
-    // space at the top)
+    std::vector<T_FACTORY*> top_level_t_fact;
+    std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(top_level_t_fact),
+                [lvl=target_t_fact_level_] (T_FACTORY* f) { return f->level_ == lvl; });
+
+    const size_t full_row_width_inc_ancilla = num_patches_per_row_ + 2;
+
+    const size_t num_factory_pins = std::min(top_level_t_fact.size(), full_row_width_inc_ancilla);
+    const size_t num_memory_pins = std::min(mem_modules_.size(), full_row_width_inc_ancilla);
+    const size_t total_patches = num_rows_*num_patches_per_row_ + num_factory_pins + num_memory_pins;
+
+    patches_.resize(total_patches);
+
+    // determine the following:
+    compute_start_idx_ = num_factory_pins;
+    memory_start_idx_ = compute_start_idx_ + num_rows_*num_patches_per_row_;
+
+    // now connect the magic state factories:
     for (size_t i = 0; i < top_level_t_fact.size(); i++)
     {
-        auto* fact = top_level_t_fact[i];
+        T_FACTORY* f = top_level_t_fact[i];
+        size_t i_mod = i % full_row_width_inc_ancilla;
+        f->output_patch_idx_ = i_mod;
 
-        // set the output patch index:
-        fact->output_patch_idx = i % full_row_width_inc_ancilla_;  // this allows us to interleave the factories
-
-        // create bus and junction connections:
-        PATCH& fp = patches_[fact->output_patch_idx];
-        if (fact->output_patch_idx == 0)
-            fp.buses.push_back(junctions[0]);
-        else
-            fp.buses.push_back(buses[0]);
+        PATCH& fp = patches_[f->output_patch_idx_];
+        if (i == i_mod)
+        {
+            if (i_mod == 0)
+                fp.buses.push_back(junctions[0]);
+            else if (i_mod == full_row_width_inc_ancilla-1)
+                fp.buses.push_back(junctions[1]);
+            else
+                fp.buses.push_back(buses[0]);
+        }
     }
 
     // now connect the program memory patches:
-    for (size_t p = patch_idx_compute_start_; p < patch_idx_memory_start_; p++)
+    for (size_t p = compute_start_idx_; p < memory_start_idx_; p++)
     {
         // get row idx and column idx:
-        size_t r = p / num_patches_per_row_;
-        size_t c = p % num_patches_per_row_;
+        size_t r = (p-compute_start_idx_) / num_patches_per_row_;
+        size_t c = (p-compute_start_idx_) % num_patches_per_row_;
 
         // compute row pair idx:
-        size_t rp = (r+1)/2;
+        size_t rp = r/2;
 
-        // determine where the patch is so we can connect buses:
         bool is_upper = (r & 1) == 0;  // even rows are always upper
         bool is_lower = ((r & 1) == 1) || (r == num_rows_-1);  // odd rows are always lower, and the last row is always lower
         bool is_left = (c == 0);
-    
+        bool is_right = (c == num_patches_per_row_-1);
+
         if (is_upper)
-            patches_[p].buses.push_back(buses[2*rp]);
+            patches_[p].buses.push_back(buses[3*rp]);
         if (is_left)
-            patches_[p].buses.push_back(buses[2*rp+1]);
+            patches_[p].buses.push_back(buses[3*rp+1]);
         if (is_lower)
-            patches_[p].buses.push_back(buses[2*rp+2]);
+            patches_[p].buses.push_back(buses[3*rp+2]);
+        if (is_right)
+            patches_[p].buses.push_back(buses[3*rp+3]);
     }
 
     // set the connections for the memory pins -- do same interleaving as for factories
     const auto& last_bus = buses.back();
+    const auto& penult_junction = junctions[junctions.size()-2];
     const auto& last_junction = junctions.back();
-    for (size_t i = 0; i < memory_.size(); i++)
+    for (size_t i = 0; i < mem_modules_.size(); i++)
     {
-        auto* m = memory_[i];
-        m->output_patch_idx = (i % full_row_width_inc_ancilla_) + patch_idx_memory_start_;
+        auto* m = mem_modules_[i];
+        size_t i_mod = i % full_row_width_inc_ancilla;
+        m->output_patch_idx_ = i_mod + compute_start_idx_;
 
-        PATCH& mp = patches_[m->output_patch_idx];
-        if (m->output_patch_idx == 0)
-            mp.buses.push_back(last_junction);
+        PATCH& mp = patches_[m->output_patch_idx_];
+        if (i == i_mod)
+        {
+            if (i_mod == 0)
+                mp.buses.push_back(penult_junction);
+            else if (i_mod == full_row_width_inc_ancilla-1)
+                mp.buses.push_back(last_junction);
+            else
+                mp.buses.push_back(last_bus);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::con_init_clients(std::vector<std::string> client_trace_files)
+{
+    // initialize all clients:
+    for (size_t i = 0; i < client_trace_files.size(); i++)
+        clients_.push_back(std::make_unique<CLIENT>(client_trace_files[i], i));
+
+    
+    // place qubits into compute memory (round robin fashion to be fair)
+    QUBIT curr_qubit{0,0};
+
+    // place qubits into memory once `patch_idx` reaches `patch_idx_memory_start_`:
+    // do this in a round robin fashion to maximize module level and bank level parallelism
+    std::vector<QUBIT> qubits_to_place_in_mem;
+
+    size_t p{compute_start_idx_};
+    std::vector<bool> clients_done(clients_.size(), false);
+    bool all_done{false};
+    while (!all_done)
+    {
+        const auto& c = clients_[curr_qubit.client_id];
+        if (curr_qubit.qubit_id >= c->num_qubits)
+        {
+            if (!clients_done[curr_qubit.client_id])
+            {
+                clients_done[curr_qubit.client_id] = true;
+                all_done = std::all_of(clients_done.begin(), clients_done.end(), [](bool b) { return b; });
+            }
+        }
+        else if (p >= memory_start_idx_)
+        {
+            qubits_to_place_in_mem.push_back(curr_qubit);
+        }
         else
-            mp.buses.push_back(last_bus);
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-_update_instruction_and_check_if_done(COMPUTE::inst_ptr inst, uint64_t cycle)
-{
-    if (inst->cycle_done <= cycle)  { return true; }
-    else                            { inst->cycle_done--; return false; }
-}
-
-void
-_retire_instruction(COMPUTE::client_ptr& c, COMPUTE::inst_ptr inst)
-{
-    // update stats:
-    c->s_inst_done++;
-    if (inst->num_uops > 0)
-        c->s_unrolled_inst_done += inst->num_uops;
-    else
-        c->s_unrolled_inst_done++;
-
-    // remove the instruction from all windows it is in
-    for (qubit_type qid : inst->qubits)
-    {
-        auto& q = c->qubits[qid];
-        if (q.inst_window.front() != inst)
         {
-            throw std::runtime_error("instruction `" + inst->to_string() 
-                                    + "` is not at the head of qubit " 
-                                    + std::to_string(qid) + " window");
+            patches_[p].contents = curr_qubit;
+            p++;
         }
-        q.inst_window.pop_front();
-    }
-    delete inst;
-}
 
-void
-COMPUTE::client_try_retire(client_ptr& c)
-{
-    // retire any instructions at the head of a window,
-    // or update the number of cycles until done
-    for (auto& q : c->qubits)
-    {
-        if (q.inst_window.empty())
-            continue;
-
-        inst_ptr& inst = q.inst_window.front();
-        // if the instruction has uops, we need to retire them.
-        // once there are no uops left, we can retire the instruction.
-        if (inst->num_uops > 0)
+        curr_qubit.client_id++;
+        if (curr_qubit.client_id >= clients_.size())
         {
-            if (inst->curr_uop != nullptr && _update_instruction_and_check_if_done(inst->curr_uop, cycle_))
-            {
-                delete inst->curr_uop;
-                inst->curr_uop = nullptr;
-                inst->uop_completed++;
-                inst->is_running = false;
-                if (inst->uop_completed == inst->num_uops)
-                    _retire_instruction(c, inst);
-            }
-        }
-        else if (_update_instruction_and_check_if_done(inst, cycle_))
-        {
-            _retire_instruction(c, inst);
+            curr_qubit.client_id = 0;
+            curr_qubit.qubit_id++;
         }
     }
+
+    mem_alloc_qubits_in_round_robin(mem_modules_, qubits_to_place_in_mem);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::client_try_execute(client_ptr& c)
+COMPUTE::client_fetch(client_ptr& c)
 {
-    // check if any instruction is ready to be executed. 
-    //    An instruction is ready to be executed if it is at the head of all its arguments' windows.
-    std::unordered_set<inst_ptr> visited;
-    for (auto& q : c->qubits)
+    constexpr size_t INST_READ_LIMIT{64};  // only read 64 instructions at a time to avoid taking too long
+
+    // find a qubit with an empty window:
+    std::vector<QUBIT> qubits;
+    for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
+        qubits.push_back(QUBIT{c->id, qid});
+
+    auto q_it = std::find_if(qubits.begin(), qubits.end(),
+                            [this] (const auto& q) { return this->inst_windows_[q].empty(); });
+    
+    size_t num_read{0}; 
+    while (q_it != qubits.end() && num_read < INST_READ_LIMIT)
     {
-        if (q.inst_window.empty())
-            continue;
-
-        inst_ptr inst = q.inst_window.front();
-        if (visited.count(inst))
-            continue;
-        visited.insert(inst);
-
-        bool all_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(), 
-                                    [&c, &inst] (qubit_type id) 
-                                    {
-                                        return c->qubits[id].inst_window.front() == inst;
-                                    });
-
-#if defined(QS_SIM_DEBUG)
-        if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+        bool found_target_qubit{false};
+        while (num_read < INST_READ_LIMIT && !found_target_qubit)
         {
-            if (all_ready)
-            {
-                std::cout << "\tfound ready instruction: " << (*inst) << ", args ready =";
+            // read next instruction:
+            inst_ptr inst = c->read_instruction_from_trace();
+            if (inst->type == INSTRUCTION::TYPE::NIL)
+                continue;
+            num_read++;
 
-                for (qubit_type qid : inst->qubits)
-                    std::cout << " " << static_cast<int>(c->qubits[qid].inst_window.front() == inst);
-
-                std::cout << ", inst number = " << inst->inst_number 
-                        << ", is running = " << static_cast<int>(inst->is_running) 
-                        << ", cycle done = " << inst->cycle_done
-                        << "\n";
-            }
-        }
-#endif
-
-        if (all_ready && !inst->is_running)
-        {
-            auto result = execute_instruction(c, inst);
-            exec_results_.push_back(result);
-
-            // update replacement policy on success
-            if (result == EXEC_RESULT_SUCCESS)
-            {
-                for (qubit_type qid : inst->qubits)
-                {
-                    const auto& q = c->qubits[qid];
-                    repl_->update_on_use(q);
-                }
-            }
-            
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-            {
-                constexpr std::string_view RESULT_STRINGS[]
-                {
-                    "SUCCESS", "MEMORY_STALL", "ROUTING_STALL", "RESOURCE_STALL", "WAITING_FOR_QUBIT_TO_BE_READY"
-                };
-
-                std::cout << "\t\tresult: " << RESULT_STRINGS[static_cast<size_t>(result)] << "\n";
-                if (result == EXEC_RESULT_SUCCESS)
-                {
-                    std::cout << "\t\twill be done @ cycle " << inst->cycle_done 
-                                << ", uops = " << inst->uop_completed << " of " << inst->num_uops << "\n";
-                    if (inst->curr_uop != nullptr)
-                    {
-                        std::cout << "\t\t\tcurr uop: " << (*inst->curr_uop)
-                            << "\n\t\t\tuop will be done @ cycle: " << inst->curr_uop->cycle_done << "\n";
-                    }
-                }
-            }
-#endif
-        }
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-COMPUTE::client_try_fetch(client_ptr& c)
-{
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-    {
-        // print instruction window states:
-        std::cout << "\tINSTRUCTION WINDOW:\n";
-        for (size_t i = 0; i < std::min(c->qubits.size(), size_t{10}); i++)
-        {
-            if (!c->qubits[i].inst_window.empty())
-            {
-                std::cout << "\t\tQUBIT " << i << ": " 
-                        << *(c->qubits[i].inst_window.front()) 
-                        << " (count = " << c->qubits[i].inst_window.size() << ")\n";
-            }
-        }
-    }
-#endif
-
-    // read instructions from the trace and add them to instruction windows.
-    // stop when all windows have at least one instruction.
-    auto it = std::find_if(c->qubits.begin(), c->qubits.end(),
-                           [] (const auto& q) { return q.inst_window.empty(); });
-    qubit_type target_qubit = std::distance(c->qubits.begin(), it);
-
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-        std::cout << "\tsearching for instructions that operate on qubit " << target_qubit << "\n";
-#endif
-
-    size_t limit{8};
-    while (it != c->qubits.end() && limit > 0)
-    {
-        while (limit > 0) // keep going until we get an instruction that operates on `target_qubit`
-        {
-            inst_ptr inst{new INSTRUCTION(c->read_instruction_from_trace())};
-            inst->inst_number = c->s_inst_read;
-            c->s_inst_read++;
-
-            // handle renaming if this isn't a SWAP
+            // handle any renaming:
+            /*
             if (inst->type != INSTRUCTION::TYPE::SWAP)
             {
-                for (auto& q : inst->qubits)
-                    q = renamed_qubits_[c->id].count(q) ? renamed_qubits_[c->id][q] : q;
+                for (qubit_type qid : inst->qubits)
+                    qid = rename_tables_[c->id].count(qid) ? rename_tables_[c->id].at(qid) : qid;
             }
-            
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-                std::cout << "\t\tREAD instruction: " << (*inst) << "\n";
-#endif
+            */
 
             // set the number of uops (may depend on simulator config)
             if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
@@ -625,22 +464,153 @@ COMPUTE::client_try_fetch(client_ptr& c)
                 inst->num_uops = 0;
 
             // add the instruction to the windows of all the qubits it operates on
-            for (qubit_type q : inst->qubits)
-                c->qubits[q].inst_window.push_back(inst);
-
-            // check if the instruction operates on `target_qubit`
-            auto qubits_it = std::find(inst->qubits.begin(), inst->qubits.end(), target_qubit);
-            if (qubits_it != inst->qubits.end())
-                break;
-
-            limit--;
+            for (qubit_type qid : inst->qubits)
+            {
+                QUBIT q{c->id, qid};
+                inst_windows_[q].push_back(inst);
+                found_target_qubit |= (q == *q_it);
+            }
         }
 
-        // check again for any empty windows
-        it = std::find_if(c->qubits.begin(), c->qubits.end(),
-                           [] (const auto& q) { return q.inst_window.empty(); });
-    }   
+        q_it = std::find_if(qubits.begin(), qubits.end(),
+                                [this] (const auto& q) { return this->inst_windows_[q].empty(); });
+    }
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::client_schedule(client_ptr& c)
+{
+    // note that instructions may appear in different windows, so we need to keep track of visited instructions
+    std::unordered_set<inst_ptr> visited;
+
+    for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
+    {
+        QUBIT q{c->id, qid};
+        const auto& win = inst_windows_[q];
+        if (win.empty())
+            continue;
+
+        inst_ptr inst = win.front();
+        if (visited.count(inst) || inst->is_scheduled)
+            continue;
+        visited.insert(inst);
+
+        // verify two things:
+        //   1. the instruction is at the head of qubits' windows
+        //   2. all qubits can actually operate at this time (if this is not a software instruction)
+        bool all_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
+                                        [this, client_id=c->id, inst] (qubit_type qid) 
+                                        {
+                                            QUBIT q{client_id, qid};
+                                            const auto& w = this->inst_windows_[q];
+                                            bool at_head = (!w.empty() && w.front() == inst);
+                                            return at_head;
+                                        });
+        if (!all_ready)
+            continue;
+
+        inst->is_scheduled = true;
+
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "\tclient " << static_cast<int>(c->id) 
+                    << " instruction \"" << *inst << "\" is ready @ cycle = " << current_cycle() << "\n";
+#endif
+
+        // schedule the instruction execution:
+        std::vector<uint64_t> avail_cycles;
+        std::transform(inst->qubits.begin(), inst->qubits.end(), std::back_inserter(avail_cycles),
+                        [this, client_id=c->id] (qubit_type qid) 
+                        {
+                            QUBIT q{client_id, qid};
+                            return this->qubit_available_cycle_[q];
+                        });
+        auto max_it = std::max_element(avail_cycles.begin(), avail_cycles.end());
+        if (*max_it > current_cycle())
+            OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::INST_EXECUTE, *max_it - current_cycle(), COMPUTE_EVENT_INFO{c->id, inst});
+        else // save a little time and execute right now:
+            client_execute(c, inst);
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::client_execute(client_ptr& c, inst_ptr inst)
+{
+    auto result = execute_instruction(c, inst);
+    process_execution_result(c, inst, result);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
+{
+#if defined(COMPUTE_VERBOSE)
+    std::cout << "\tinstruction \"" << *inst << "\" is being completed @ cycle = " << current_cycle()
+            << ", uop " << inst->uop_completed << " of " << inst->num_uops << "\n";
+#endif
+
+    bool all_done{true};
+    if (inst->num_uops > 0)
+    {
+        // if `num_uops > 0` then `all_done` depends on the number of uops completed
+        if (inst->curr_uop != nullptr)
+        {
+            delete inst->curr_uop;
+            inst->curr_uop = nullptr;
+            inst->is_scheduled = false;
+            inst->uop_completed++;
+            all_done = (inst->uop_completed == inst->num_uops);
+        }
+    }
+
+    if (all_done)
+    {
+        c->s_inst_done++;
+        if (inst->num_uops > 0)
+            c->s_unrolled_inst_done += inst->num_uops;
+        else
+            c->s_unrolled_inst_done++;
+
+        // remove the instruction from all windows it is in
+        for (qubit_type qid : inst->qubits)
+        {
+            QUBIT q{c->id, qid};
+            inst_ptr front_inst = inst_windows_[q].front();
+            if (front_inst != inst)
+            {
+                std::cerr << "instruction window of qubit " << qid << ":\n";
+                for (auto* inst : inst_windows_[q])
+                    std::cerr << "\t" << *inst << "\n";
+                throw std::runtime_error("instruction `" + inst->to_string() 
+                                        + "` is not at the head of qubit " 
+                                        + std::to_string(qid) + " window");
+            }
+            inst_windows_[q].pop_front();
+        }
+        delete inst;
+
+        // print progress if flag is set:
+        if (GL_PRINT_PROGRESS && c->s_inst_done % GL_PRINT_PROGRESS_FREQ == 0)
+        {
+            std::cout << "CLIENT " << static_cast<int>(c->id)
+                        << " @ " << c->s_inst_done << " instructions done\n"
+                        << "\tunrolled instructions done = " << c->s_unrolled_inst_done << "\n"
+                        << "\tcompute cycle = " << current_cycle() << "\n";
+        }
+
+        // as this instruction is retired, it may be possible to find victims for any pending memory requests
+        for (auto* m : mem_modules_)
+            m->OP_add_event(MEMORY_EVENT_TYPE::COMPUTE_COMPLETED_INST, 0);
+    }
+}
+
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -648,153 +618,185 @@ COMPUTE::client_try_fetch(client_ptr& c)
 COMPUTE::exec_result_type
 COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 {
-    // complete immediately -- do not have to wait for qubits to be ready
+    // check if the instruction is a software instruction
     if (is_software_instruction(inst->type))
-        return handle_sw_instruction(c, inst);
+        return do_sw_gate(c, inst);
 
-    exec_result_type result{0};
+    // do memory access if necessary
+    exec_result_type result{};
 
-    // check if all qubits are in compute memory:
-    for (qubit_type qid : inst->qubits)
+    std::vector<PATCH*> qubit_patches(inst->qubits.size());
+    for (size_t i = 0; i < inst->qubits.size(); i++)
     {
-        auto& q = c->qubits[qid];
-
-        // ensure all instructions are ready:
-        if (q.memloc_info.t_free > cycle_)
+        QUBIT q{c->id, inst->qubits[i]};
+        auto patch_it = find_patch_containing_qubit(q);
+        if (patch_it == patches_.end())
         {
-            // if we are waiting for a qubit to return from memory, then this is a memory stall
-            result = (q.memloc_info.where == MEMINFO::LOCATION::COMPUTE) 
-                            ? EXEC_RESULT_WAITING_FOR_QUBIT_TO_BE_READY 
-                            : EXEC_RESULT_MEMORY_STALL;
-            break;
-        }
+            // this means that the qubit is memory -- we need to do a memory access
+            result.is_memory_stall = true;
 
-        // if a qubit is not in memory, we need to make a memory request:
-        if (q.memloc_info.where == MEMINFO::LOCATION::MEMORY)
-        {
-            // make memory request:
-            MEMORY_MODULE::request_type req{inst->inst_number, c.get(), q.memloc_info.client_id, q.memloc_info.qubit_id};
-
-            // find memory module containing qubit:
-            auto m_it = find_memory_module_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
-            (*m_it)->request_buffer_.push_back(req);
-
-#if defined(QS_SIM_DEBUG)
-            if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
+            // find the module that contains the qubit and initiate the memory access
+            auto module_it = find_memory_module_containing_qubit(q);
+            if (module_it == mem_modules_.end())
             {
-                std::cout << "\t\tmemory request for instruction " << *inst
-                            << "\tclient = " << q.memloc_info.client_id+0 
-                            << ", qubit = " << q.memloc_info.qubit_id << "\n";
+                std::cerr << "compute patches:\n";
+                for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+                    std::cerr << "\t" << patches_[i].contents << "\n";
+
+                for (size_t i = 0; i < mem_modules_.size(); i++)
+                {
+                    std::cerr << "memory module " << i << "------------------\n";
+                    mem_modules_[i]->dump_contents();
+                }
+
+                throw std::runtime_error("qubit " + q.to_string() + " not found in any memory module");
             }
-#endif
+            (*module_it)->initiate_memory_access(q);
 
-            // set `t_until_in_compute` and `t_free` 
-            // to `std::numeric_limits<uint64_t>::max()` to indicate that
-            // this is blocked:
-            q.memloc_info.t_free = std::numeric_limits<uint64_t>::max();
-
-            result = EXEC_RESULT_MEMORY_STALL;
         }
-    }
-
-    // if any qubit is unavailable we need to exit:
-    if (result != EXEC_RESULT_SUCCESS)
-    {
-        // if the gate requires a resource state, then we are also interested if we would have stalled regardless
-        if (inst->type == INSTRUCTION::TYPE::T 
-                || inst->type == INSTRUCTION::TYPE::TDG
-                || inst->type == INSTRUCTION::TYPE::TX
-                || inst->type == INSTRUCTION::TYPE::TXDG)
+        else
         {
-            bool resource_avail = std::any_of(t_fact_.begin(), t_fact_.end(), 
-                                    [lvl=target_t_fact_level_] (auto* f) { return f->level >= lvl && f->buffer_occu > 0; });
-            if (!resource_avail)
-                result |= EXEC_RESULT_RESOURCE_STALL;
+            qubit_patches[i] = &(*patch_it);
         }
+    }
+
+    // return early if we are waiting for memory
+    if (result.is_memory_stall)
         return result;
-    }
 
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-        std::cout << "\t\tall qubits are available -- trying to execute instruction: " << (*inst) << "\n";
-#endif
+    return do_gate(c, inst, qubit_patches);
+}
 
-    // if this is a gate that requires a resource, make sure the resource is available:
-    switch (inst->type)
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type result)
+{
+    if (result.is_memory_stall)
     {
-    case INSTRUCTION::TYPE::H:
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::SX:
-    case INSTRUCTION::TYPE::SXDG:
-        result = handle_h_s_gate(c, inst);
-        break;
-    case INSTRUCTION::TYPE::CX:
-    case INSTRUCTION::TYPE::CZ:
-        result = handle_cxz_gate(c, inst);
-        break;
-    case INSTRUCTION::TYPE::RX:
-    case INSTRUCTION::TYPE::RZ:
-        result = handle_rxz_gate(c, inst);
-        break;
-    case INSTRUCTION::TYPE::CCX:
-    case INSTRUCTION::TYPE::CCZ:
-        result = handle_ccxz_gate(c, inst);
-        break;
-    case INSTRUCTION::TYPE::MZ:
-    case INSTRUCTION::TYPE::MX:
-        inst->cycle_done = cycle_ + 1;
-        inst->is_running = true;
-        result = EXEC_RESULT_SUCCESS;
-        break;
-    default:
-        throw std::runtime_error("unsupported instruction: " + inst->to_string());
+        inst_waiting_for_memory_.emplace_back(inst, c->id);
+        inst->memory_stall_start_cycle = current_cycle();
+
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "\tinstruction \"" << *inst << "\" is waiting for memory access\n";
+#endif
     }
+    else if (result.is_resource_stall)
+    {
+        inst_waiting_for_resource_.emplace_back(inst, c->id);
+        inst->resource_stall_start_cycle = current_cycle();
+
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "\tinstruction \"" << *inst << "\" is waiting for resource\n";
+#endif
+    }
+    else
+    {
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "\tclient " << static_cast<int>(c->id) 
+                    << " instruction \"" << *inst << "\" will complete @ cycle = " 
+                    << (current_cycle() + result.cycles_until_done) 
+                    << ", latency = " << result.cycles_until_done
+                    << "\n";
+#endif
+        if (result.cycles_until_done > 1'000'000)
+            throw std::runtime_error("instruction " + inst->to_string() + " will take too long to complete -- definitely a bug");
+
+        COMPUTE_EVENT_INFO event_info;
+        event_info.client_id = c->id;
+        event_info.inst = inst;
         
-    return result;
-}
+        OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::INST_COMPLETE, result.cycles_until_done, event_info);
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
+        // set the qubit availability for all qubits in the instruction
+        // also delete the instruction from the windows of all qubits
+        for (qubit_type qid : inst->qubits)
+        {
+            QUBIT q{c->id, qid};
+            qubit_available_cycle_[q] = current_cycle() + result.cycles_until_done;
+        }
 
-PATCH::bus_array::const_iterator
-COMPUTE::find_free_bus(const PATCH& p) const
-{
-    return std::find_if(p.buses.begin(), p.buses.end(), 
-                        [c=cycle_] (const auto& b) { return b->t_free <= c; });
-}
+        // update stall related stats:
+        uint64_t routing_stall_cycles = result.routing_stall_cycles;
+        uint64_t memory_stall_cycles = current_cycle() - inst->memory_stall_start_cycle;
+        uint64_t resource_stall_cycles = current_cycle() - inst->resource_stall_start_cycle;
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
+        inst->cycle_done = current_cycle() + result.cycles_until_done;
 
-std::vector<PATCH>::iterator
-COMPUTE::find_patch_containing_qubit(int8_t client_id, qubit_type qubit_id)
-{
-    return std::find_if(patches_.begin(), patches_.end(),
-                        [client_id, qubit_id] (const auto& p) { return p.client_id == client_id && p.qubit_id == qubit_id; });
-}
-
-std::vector<MEMORY_MODULE*>::iterator
-COMPUTE::find_memory_module_containing_qubit(int8_t client_id, qubit_type qubit_id)
-{
-    return std::find_if(memory_.begin(), memory_.end(),
-                        [client_id, qubit_id] (const auto& m) 
-                        { 
-                            auto [b_it, q_it] = m->find_qubit(client_id, qubit_id);
-                            return b_it != m->banks_.end();
-                        });
+        c->s_inst_routing_stall_cycles += routing_stall_cycles;
+        c->s_inst_resource_stall_cycles += resource_stall_cycles;
+        c->s_inst_memory_stall_cycles += memory_stall_cycles;
+    }
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 COMPUTE::exec_result_type
-COMPUTE::handle_sw_instruction(client_ptr& c, inst_ptr inst)
+COMPUTE::do_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
 {
+    exec_result_type result{};
+
+    switch (inst->type)
+    {
+    case INSTRUCTION::TYPE::X:
+    case INSTRUCTION::TYPE::Y:
+    case INSTRUCTION::TYPE::Z:
+    case INSTRUCTION::TYPE::SWAP:
+        result = do_sw_gate(c, inst);
+        break;
+
+    case INSTRUCTION::TYPE::H:
+    case INSTRUCTION::TYPE::S:
+    case INSTRUCTION::TYPE::SDG:
+    case INSTRUCTION::TYPE::SX:
+    case INSTRUCTION::TYPE::SXDG:
+        result = do_h_or_s_gate(c, inst, qubit_patches);
+        break;
+
+    case INSTRUCTION::TYPE::T:
+    case INSTRUCTION::TYPE::TX:
+    case INSTRUCTION::TYPE::TDG:
+    case INSTRUCTION::TYPE::TXDG:
+        result = do_t_gate(c, inst, qubit_patches);
+        break;
+
+    case INSTRUCTION::TYPE::CX:
+    case INSTRUCTION::TYPE::CZ:
+        result = do_cx_gate(c, inst, qubit_patches);
+        break;
+
+    case INSTRUCTION::TYPE::RZ:
+    case INSTRUCTION::TYPE::RX:
+        result = do_rz_gate(c, inst, qubit_patches);
+        break;
+
+    case INSTRUCTION::TYPE::CCX:
+    case INSTRUCTION::TYPE::CCZ:
+        result = do_ccx_gate(c, inst, qubit_patches);
+        break;
+
+    default:
+        throw std::runtime_error("invalid instruction type: " + std::string{BASIS_GATES[static_cast<size_t>(inst->type)]});
+    }
+
+    return result;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE::exec_result_type
+COMPUTE::do_sw_gate(client_ptr& c, inst_ptr inst)
+{
+    exec_result_type result{};
+
+    /*
     if (inst->type == INSTRUCTION::TYPE::SWAP)
     {
-        auto& rename_table = renamed_qubits_[c->id];
-        // rename the arguments:
+        // update qubit renaming table and then exit
+        auto& rename_table = rename_tables_[c->id];
         qubit_type q1 = inst->qubits[0],
                    q2 = inst->qubits[1];
         
@@ -807,135 +809,33 @@ COMPUTE::handle_sw_instruction(client_ptr& c, inst_ptr inst)
         // swap the values in the table;
         std::swap(rename_table[q1], rename_table[q2]);
     }
+    */
 
-    inst->cycle_done = cycle_ + 1;
-    inst->is_running = true;
-    return EXEC_RESULT_SUCCESS;
+    // exit
+    result.cycles_until_done = 0;
+    return result;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 COMPUTE::exec_result_type
-COMPUTE::handle_h_s_gate(client_ptr& c, inst_ptr inst)
+COMPUTE::do_h_or_s_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
 {
-    // these are all 2-cycle gates that require the bus:
-    // H requires a rotation (extension)
-    // S, SDG, etc. require an ancilla in Y basis (occupies bus) + Z/X basis merge, followed by ancilla measurement.
-    //    A clifford correction is required afterward to ensure correctness, but this is always a software
-    //    instruction. 
-
-    // get qubit and its patch:
-    auto& q = c->qubits[inst->qubits[0]];
-    
-    // get qubit patch:
-    const auto& q_patch = *find_patch_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
-
-    // check if there is a free bus next to the patch:
-#if defined(QS_SIM_DEBUG)
-    if (cycle_ % QS_SIM_DEBUG_FREQ == 0)
-    {
-        std::cout << "\t\tbuses near qubit " << inst->qubits[0] << " (patch = " << q_patch.client_id << ", " << q_patch.qubit_id << "):";
-        for (auto& b : q_patch.buses)
-            std::cout << " " << b->t_free;
-        std::cout << "\n";
-    }
-#endif
-
-    auto it = find_free_bus(q_patch);
-    if (it == q_patch.buses.end())
-    {
-        return EXEC_RESULT_ROUTING_STALL;
-    }
-    else
-    {
-        q.memloc_info.t_free = cycle_ + 2;
-        (*it)->t_free = cycle_ + 2;
-        inst->cycle_done = cycle_ + 2;
-        inst->is_running = true;
-        return EXEC_RESULT_SUCCESS;
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-COMPUTE::exec_result_type
-COMPUTE::handle_cxz_gate(client_ptr& c, inst_ptr inst)
-{
-    // this is a 2-cycle gate that requires the bus:
-    // As we allocate an ancilla on the bus that needs to connect to the control and target
-    // qubits, we need to route from the control to the target and occupy all bus components.
-    // on the path.
-    auto& ctrl = c->qubits[inst->qubits[0]];
-    auto& target = c->qubits[inst->qubits[1]];
-
-    const auto& c_patch = *find_patch_containing_qubit(ctrl.memloc_info.client_id, ctrl.memloc_info.qubit_id);
-    const auto& t_patch = *find_patch_containing_qubit(target.memloc_info.client_id, target.memloc_info.qubit_id);
-
-    if (alloc_routing_space(c_patch, t_patch, 2, 2))
-    {
-        inst->cycle_done = cycle_ + 2;
-        inst->is_running = true;
-
-        ctrl.memloc_info.t_free = cycle_ + 2;
-        target.memloc_info.t_free = cycle_ + 2;
-        return EXEC_RESULT_SUCCESS;
-    }
-    else
-    {
-        return EXEC_RESULT_ROUTING_STALL;
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-COMPUTE::exec_result_type
-COMPUTE::handle_t_gate(client_ptr& c, inst_ptr inst)
-{
-    // with 50% probability, we need to apply a clifford correction.
-    // This is a S or SX gate -- either way, takes 2 cycles)
-    // no need to actually simulate the S/SX gate, just add extra latency.
-    bool clifford_correction = FP_RAND(GL_RNG) < 0.5;
-    const uint64_t endpoint_latency = clifford_correction ? 4 : 2;
-    const uint64_t path_latency = 2;
-
-    auto& q = c->qubits[inst->qubits[0]];
-    const auto& q_patch = *find_patch_containing_qubit(q.memloc_info.client_id, q.memloc_info.qubit_id);
-
-    // keep trying until we succeed or there is no factory that has a resource state:
     exec_result_type result{};
-    bool any_factory_has_resource{false};
-    for (size_t i = 0; i < t_fact_.size() && !inst->is_running; i++)
-    {
-        auto* fact = t_fact_[i];
-        if (fact->level != target_t_fact_level_ || fact->buffer_occu == 0)
-            continue;
 
-        any_factory_has_resource = true;
-        // get the factory's output patch and consume the magic state:
-        PATCH& f_patch = patches_[fact->output_patch_idx];
-
-        if (alloc_routing_space(f_patch, q_patch, endpoint_latency, path_latency))
-        {
-            inst->cycle_done = cycle_ + 2 + 2*static_cast<int>(clifford_correction);
-            inst->is_running = true;
-
-            q.memloc_info.t_free = cycle_ + 2 + 2*static_cast<int>(clifford_correction);
-
-            fact->buffer_occu--;
-
-            result = EXEC_RESULT_SUCCESS;
-        }
-        else
-        {
-            result = EXEC_RESULT_ROUTING_STALL;
-        }
-    }
-
-    if (!any_factory_has_resource)
-        result |= EXEC_RESULT_RESOURCE_STALL;
+    // both gates requires 2 cycles to complete + routing space
+    PATCH& q_patch = *qubit_patches[0];
+    auto bus_it = find_next_available_bus(q_patch);
+    uint64_t cycle_routing_start = std::max(bus_it->cycle_free, current_cycle());
+    
+    // compute amount of time spent in routing stall:
+    uint64_t latency = (cycle_routing_start - current_cycle()) + 2;
+    bus_it->cycle_free = current_cycle() + latency;
+    
+    // only 2 cycles are spent actually doing the gate -- any other latency is due to routing
+    result.routing_stall_cycles = latency - 2;
+    result.cycles_until_done = latency;
 
     return result;
 }
@@ -944,24 +844,91 @@ COMPUTE::handle_t_gate(client_ptr& c, inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 COMPUTE::exec_result_type
-COMPUTE::handle_rxz_gate(client_ptr& c, inst_ptr inst) 
+COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
 {
-    // create uop and run it:
+    exec_result_type result{};
+
+    // find a factory with a resource state
+    std::vector<T_FACTORY*> producers;
+    std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(producers),
+                [this] (T_FACTORY* f) { return f->level_ >= this->target_t_fact_level_ && f->buffer_occu_ > 0; });
+    if (producers.empty())
+    {
+        result.is_resource_stall = true;
+    }
+    else
+    {
+        bool clifford_correction = (GL_RNG() & 1) > 0;
+        uint64_t latency = clifford_correction ? 4 : 2;
+
+        PATCH& q_patch = *qubit_patches[0];
+        auto q_bus_it = find_next_available_bus(q_patch);
+
+        for (auto* f : producers)
+        {
+            // TODO: check if routing space is available
+            PATCH& f_patch = patches_[f->output_patch_idx_];
+            auto f_bus_it = find_next_available_bus(f_patch);
+
+            // three way max to determine when to start routing
+            uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
+
+            auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
+            update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
+
+            // note that `routing_alloc_cycle - current_cycle()` is number of cycles spent waiting for routing space
+            f->consume_state();
+            result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
+            result.cycles_until_done = latency + result.routing_stall_cycles;
+            return result;
+        }
+    }
+
+    return result;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE::exec_result_type
+COMPUTE::do_cx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
+{
+    exec_result_type result{};
+
+    PATCH& q0_patch = *qubit_patches[0];
+    PATCH& q1_patch = *qubit_patches[1];
+    auto q0_bus_it = find_next_available_bus(q0_patch);
+    auto q1_bus_it = find_next_available_bus(q1_patch);
+
+    uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
+
+    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
+    update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
+
+    result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
+    result.cycles_until_done = 2 + result.routing_stall_cycles;
+    return result;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE::exec_result_type
+COMPUTE::do_rz_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
+{
     if (inst->curr_uop == nullptr)
     {
         size_t uop_idx = inst->uop_completed;
         inst->curr_uop = new INSTRUCTION(inst->urotseq[uop_idx], inst->qubits);
     }
-    auto result = execute_instruction(c, inst->curr_uop);
-    inst->is_running = (result == EXEC_RESULT_SUCCESS);
-    return result;
+    return do_gate(c, inst->curr_uop, qubit_patches);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 COMPUTE::exec_result_type
-COMPUTE::handle_ccxz_gate(client_ptr& c, inst_ptr inst)
+COMPUTE::do_ccx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patches)
 {
     using uop_spec_type = std::pair<INSTRUCTION::TYPE, std::array<ssize_t, 2>>;
 
@@ -986,9 +953,6 @@ COMPUTE::handle_ccxz_gate(client_ptr& c, inst_ptr inst)
         {CX, {0,1}}
     };
 
-    // depending on simulator config, we will want to use magic states or synthillation
-
-    // T state implementation:
     int64_t uop_idx = static_cast<int64_t>(inst->uop_completed);
     if (inst->curr_uop == nullptr)
     {
@@ -1023,10 +987,99 @@ COMPUTE::handle_ccxz_gate(client_ptr& c, inst_ptr inst)
         }
     }
 
-    auto result = execute_instruction(c, inst->curr_uop);
-    inst->is_running = (result == EXEC_RESULT_SUCCESS);
-    return result;
+    return do_gate(c, inst->curr_uop, qubit_patches);
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::retry_instructions(RETRY_TYPE type, COMPUTE_EVENT_INFO event_info)
+{
+    if (type == RETRY_TYPE::MEMORY)
+    {
+        // find instructions waiting for the completed memory access to finish:
+        QUBIT q = event_info.mem_accessed_qubit;
+        for (size_t i = 0; i < inst_waiting_for_memory_.size(); i++)
+        {
+            auto [inst, client_id] = inst_waiting_for_memory_[i];
+
+            bool client_match = client_id == q.client_id;
+            bool qubit_match = std::find(inst->qubits.begin(), inst->qubits.end(), q.qubit_id) != inst->qubits.end();
+            if (client_match && qubit_match)
+            {
+                auto& c = clients_[client_id];
+                auto result = execute_instruction(c, inst);
+                // if we are not stalled by memory anymore, then we can remove the instruction from the buffer
+                if (!result.is_memory_stall)
+                {
+                    process_execution_result(c, inst, result);
+                    inst_waiting_for_memory_[i].first = nullptr;  // set to nullptr to indicate that this entry is invalid
+                }
+            }
+        }
+        
+        auto inst_it = std::remove_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(),
+                                    [](const auto& pair) { return pair.first == nullptr; });
+        inst_waiting_for_memory_.erase(inst_it, inst_waiting_for_memory_.end());
+    }
+    else if (type == RETRY_TYPE::RESOURCE)
+    {
+        if (inst_waiting_for_resource_.empty())
+            return;
+
+        auto [inst, client_id] = inst_waiting_for_resource_.front();
+        auto result = execute_instruction(clients_[client_id], inst);
+        if (!result.is_resource_stall)
+        {
+            process_execution_result(clients_[client_id], inst, result);
+            inst_waiting_for_resource_.pop_front();
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<PATCH>::iterator
+COMPUTE::find_patch_containing_qubit(QUBIT q)
+{
+    return std::find_if(patches_.begin(), patches_.end(),
+                        [q] (const PATCH& p) { return p.contents == q; });
+}
+
+std::vector<PATCH>::const_iterator
+COMPUTE::find_patch_containing_qubit_c(QUBIT q) const
+{
+    return std::find_if(patches_.begin(), patches_.end(),
+                        [q] (const PATCH& p) { return p.contents == q; });
+}
+
+std::vector<MEMORY_MODULE*>::iterator
+COMPUTE::find_memory_module_containing_qubit(QUBIT q)
+{
+    return std::find_if(mem_modules_.begin(), mem_modules_.end(),
+                        [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
+}
+
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_type>& path, 
+                                            uint64_t cmp_cycle_free_bulk, 
+                                            uint64_t cmp_cycle_free_endpoints)
+{
+    for (size_t i = 0; i < path.size(); i++)
+    {
+        if (i == 0 || i == path.size()-1)
+            path[i]->cycle_free = cmp_cycle_free_endpoints;
+        else
+            path[i]->cycle_free = cmp_cycle_free_bulk;
+    }
+}
+
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -1034,7 +1087,7 @@ COMPUTE::handle_ccxz_gate(client_ptr& c, inst_ptr inst)
 bool
 is_software_instruction(INSTRUCTION::TYPE type)
 {
-    return type == INSTRUCTION::TYPE::X 
+    return type == INSTRUCTION::TYPE::X
         || type == INSTRUCTION::TYPE::Y
         || type == INSTRUCTION::TYPE::Z
         || type == INSTRUCTION::TYPE::SWAP;

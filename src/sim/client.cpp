@@ -1,11 +1,10 @@
 /*
     author: Suhas Vittal
-    date:   25 August 2025
+    date:   15 September 2025
 */
 
 #include "client.h"
 
-#include <fstream>
 #include <iostream>
 
 namespace sim
@@ -14,90 +13,108 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CLIENT::CLIENT(std::string _trace_file, int8_t _id)
-    :trace_file(_trace_file),
-    id(_id)
+bool
+QUBIT::operator==(const QUBIT& other) const
 {
-    size_t num_qubits = open_file(trace_file);
-
-    qubits = std::vector<qubit_info_type>(num_qubits);
-    for (size_t i = 0; i < qubits.size(); i++)
-    {
-        qubits[i].memloc_info.client_id = id;
-        qubits[i].memloc_info.qubit_id = i;
-    }
+    return client_id == other.client_id && qubit_id == other.qubit_id;
 }
+
+std::string
+QUBIT::to_string() const
+{
+    return "q" + std::to_string(qubit_id) + " (c" + std::to_string(client_id) + ")";
+}
+
+std::ostream&
+operator<<(std::ostream& os, const QUBIT& q)
+{
+    os << q.to_string();
+    return os;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+CLIENT::CLIENT(std::string trace_file, int8_t id)
+    :trace_file(trace_file),
+    id(id),
+    num_qubits(open_file())
+{}
 
 CLIENT::~CLIENT()
 {
-    if (trace_file_type == TRACE_FILE_TYPE::GZ)
-        gzclose(trace_gz_istrm);
-    else
-        fclose(trace_bin_istrm);
+    close_file();
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-INSTRUCTION
+CLIENT::inst_ptr
 CLIENT::read_instruction_from_trace()
 {
     INSTRUCTION::io_encoding enc{};
-    
-    // reopen the file if we hit EOF
+
     if (eof())
     {
         has_hit_eof_once = true;
-
-        if (trace_file_type == TRACE_FILE_TYPE::GZ)
-            gzclose(trace_gz_istrm);
-        else
-            fclose(trace_bin_istrm);
-
-        open_file(trace_file);
+        // reload the file:
+        close_file();
+        open_file();
     }
 
-    if (trace_file_type == TRACE_FILE_TYPE::GZ)
-        enc.read_write([this] (void* buf, size_t size) { return gzread(this->trace_gz_istrm, buf, size); });
-    else
-        enc.read_write([this] (void* buf, size_t size) { return fread(buf, 1, size, this->trace_bin_istrm); });
-
-    if (enc.type_id == static_cast<uint8_t>(INSTRUCTION::TYPE::RZ) ||
-        enc.type_id == static_cast<uint8_t>(INSTRUCTION::TYPE::RX))
+    if (trace_istrm.index() == GEN_IO_BIN_IDX)
     {
-        if (enc.urotseq_size == 0)
-            throw std::runtime_error("RZ/RX instruction has empty unrolled rotation sequence");
+        FILE* istrm = std::get<FILE*>(trace_istrm);
+        enc.read_write([istrm] (void* buf, size_t size) { return fread(buf, 1, size, istrm); });
+    }
+    else
+    {
+        gzFile istrm = std::get<gzFile>(trace_istrm);
+        enc.read_write([istrm] (void* buf, size_t size) { return gzread(istrm, buf, size); });
     }
 
-    INSTRUCTION out(std::move(enc));
-    return out;
+    inst_ptr inst{new INSTRUCTION(std::move(enc))};
+    inst->inst_number = s_inst_read++;
+    return inst;
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 bool
 CLIENT::eof() const
 {
-    return trace_file_type == TRACE_FILE_TYPE::GZ ? gzeof(trace_gz_istrm) : feof(trace_bin_istrm);
+    if (trace_istrm.index() == GEN_IO_BIN_IDX)
+        return feof(std::get<FILE*>(trace_istrm));
+    else
+        return gzeof(std::get<gzFile>(trace_istrm));
 }
 
 size_t
-CLIENT::open_file(const std::string& trace_file)
+CLIENT::open_file()
 {
-    uint32_t num_qubits;
-    if (trace_file.find(".gz") != std::string::npos)
+    bool is_gz = trace_file.find(".gz") != std::string::npos;
+    uint32_t n{0};
+    if (is_gz)
     {
-        trace_file_type = TRACE_FILE_TYPE::GZ;
-        trace_gz_istrm = gzopen(trace_file.c_str(), "rb");
-
-        gzread(trace_gz_istrm, &num_qubits, 4);
+        trace_istrm = gzopen(trace_file.c_str(), "rb");
+        gzread(std::get<gzFile>(trace_istrm), &n, 4);
     }
     else
     {
-        trace_file_type = TRACE_FILE_TYPE::BINARY;
-        trace_bin_istrm = fopen(trace_file.c_str(), "rb");
-
-        fread(&num_qubits, 4, 1, trace_bin_istrm);
+        trace_istrm = fopen(trace_file.c_str(), "rb");
+        fread(&n, 4, 1, std::get<FILE*>(trace_istrm));
     }
-    return num_qubits;
+    return static_cast<size_t>(n);
+}
+
+void
+CLIENT::close_file()
+{
+    if (trace_istrm.index() == GEN_IO_BIN_IDX)
+        fclose(std::get<FILE*>(trace_istrm));
+    else
+        gzclose(std::get<gzFile>(trace_istrm));
 }
 
 ////////////////////////////////////////////////////////////

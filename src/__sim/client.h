@@ -1,0 +1,73 @@
+/*
+    author: Suhas Vittal
+    date:   25 August 2025
+*/
+
+#ifndef SIM_CLIENT_h
+#define SIM_CLIENT_h
+
+#include "instruction.h"
+#include "sim/meminfo.h"
+
+#include <cstdio>
+#include <cstdint>
+#include <deque>
+#include <unordered_map>
+#include <vector>
+
+#include <zlib.h>
+
+namespace sim
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+struct CLIENT
+{
+    using inst_ptr = INSTRUCTION*;
+    using inst_window_type = std::deque<inst_ptr>;
+
+    enum class TRACE_FILE_TYPE { BINARY, GZ };
+
+    struct qubit_info_type
+    {
+        inst_window_type inst_window;
+        MEMINFO          memloc_info;
+    };
+
+    const int8_t id;
+
+    uint64_t s_inst_read{0};
+    uint64_t s_inst_done{0};
+    uint64_t s_unrolled_inst_done{0};
+    uint64_t s_cycles_stalled{0};
+    uint64_t s_inst_stalled{0};
+
+    // there are 16 possible combinations of stalls, so we use an array:
+    std::array<uint64_t, 16> s_cycles_stalled_by_type{};
+    std::array<uint64_t, 16> s_inst_stalled_by_type{};
+
+    std::vector<qubit_info_type> qubits;
+
+    std::string       trace_file;
+    TRACE_FILE_TYPE   trace_file_type;
+    FILE*             trace_bin_istrm;
+    gzFile            trace_gz_istrm;
+
+    bool has_hit_eof_once{false};
+    
+    CLIENT(std::string trace_file, int8_t id);
+    ~CLIENT();
+
+    INSTRUCTION read_instruction_from_trace();
+    bool eof() const;
+    size_t open_file(const std::string& trace_file);  // returns number of qubits
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}   // namespace sim
+
+#endif

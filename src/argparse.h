@@ -15,24 +15,36 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct ARGPARSE
+/*
+    For simplicity, we implement using a builder design pattern:
+*/
+class ARGPARSE
 {
-    std::string usage;
+public:
+    // name, description, pointer to variable, is required
+    // we require that the value have a default constructor (which it should -- int, double or string)
+    template <class T> using argument_type = std::tuple<std::string_view, std::string_view, T*, bool>;
 
-    std::vector<std::string> cli_inputs;
-    size_t cli_idx{0};
+    using int_type = int64_t;
+    using float_type = double;
+    using string_type = std::string;
+    using flag_type = bool;
+private:
+    std::vector<argument_type<std::string_view>> strings;
+    std::vector<argument_type<int64_t>> ints;
+    std::vector<argument_type<double>> floats;
+    std::vector<argument_type<bool>> flags;
 
-    ARGPARSE(int argc, char** argv);
+    std::string usage{};
+public:
+    ARGPARSE() =default;
 
-    template <class T> void read_required(std::string_view param_name, T&);
-    /*
-        Usage: all optional params must be prefixed with "--". So, for example, if I have a param named "foo",
-            I will pass "foo" as `param_name`. The CLI input should be "--foo bar".
-        Set the default value for optionals beforehand.
-        Flags only have a single dash.
-    */
-    template <class T> bool find_optional(std::string_view param_name, T&);
-    bool                    find_flag(std::string_view flag_name);
+    template <class T> ARGPARSE& required(std::string_view name, std::string_view description, T*);
+    template <class T> ARGPARSE& optional(std::string_view name, std::string_view description, T*, T default);
+    void parse(int argc, char** argv);
+private:
+    template <class T> void add(std::string_view name, std::string_view description, T* ptr, bool is_required);
+    template <class T> void lookup_and_set(std::vector<argument_type<T>>& values, std::string_view name, T value);
 };
 
 template <class T> T convert_string_to_type(std::string);
@@ -40,53 +52,46 @@ template <class T> T convert_string_to_type(std::string);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ARGPARSE::ARGPARSE(int argc, char** argv)
-    :cli_inputs(argc)
+template <class T> ARGPARSE&
+ARGPARSE::required(std::string_view name, std::string_view description, T* ptr)
 {
-    for (int i = 1; i < argc; i++)
-        cli_inputs[i-1] = std::string{argv[i]};
+    add(name, description, ptr, true);
+    return *this;
+}
+
+template <class T> ARGPARSE&
+ARGPARSE::optional(std::string_view name, std::string_view description, T* ptr, T default_val)
+{
+    add(name, description, ptr, false);
+    *ptr = default_val;
+    return *this;
+}
+
+template <class T> void
+ARGPARSE::add(std::string_view name, std::string_view description, T* ptr, bool is_required)
+{
+    if constexpr (std::is_same<T, int_type>::value)
+        ints.push_back(std::make_tuple(name, description, ptr, is_required));
+    else if constexpr (std::is_same<T, float_type>::value)
+        floats.push_back(std::make_tuple(name, description, ptr, is_required));
+    else if constexpr (std::is_same<T, flag_type>::value)
+        flags.push_back(std::make_tuple(name, description, ptr, is_required));
+    else if constexpr (std::is_same<T, string_type>::value)
+        strings.push_back(std::make_tuple(name, description, ptr, is_required));
+    else
+        throw std::runtime_error("invalid type: " + std::string(typeid(T).name()) + " for argument " + std::string(name));
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 template <class T> void
-ARGPARSE::read_required(std::string_view name, T& out)
+ARGPARSE::lookup_and_set(std::vector<argument_type<T>>& values, std::string_view name, T value)
 {
-    if (cli_idx >= cli_inputs.size())
-        throw std::runtime_error("missing required param: " + std::string{name} + "\n\n" + usage);
-
-    std::string v = cli_inputs[cli_idx];
-    if (v == "-h" || v == "--help")
-        throw std::runtime_error(usage);
-
-    out = convert_string_to_type<T>(v);
-    cli_idx++;
-}
-
-template <class T> bool
-ARGPARSE::find_optional(std::string_view name, T& out)
-{
-    std::string match_param = "--" + std::string{name};
-    auto it = std::find(cli_inputs.begin(), cli_inputs.end(), match_param);
-    if (it != cli_inputs.end())
-    {
-        std::string v = *(it+1);
-        out = convert_string_to_type<T>(v);
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-bool
-ARGPARSE::find_flag(std::string_view name)
-{
-    std::string match_flag = "-" + std::string{name};
-    auto it = std::find(cli_inputs.begin(), cli_inputs.end(), match_flag);
-    return it != cli_inputs.end();
+    auto it = std::find_if(values.begin(), values.end(), [name] (const auto& x) { return std::get<0>(x) == name; });
+    if (it == values.end())
+        throw std::runtime_error("usage: " + usage + "\n\nerror: " + std::string(name) + " is not a valid argument");
+    *std::get<2>(*it) = value;
 }
 
 ////////////////////////////////////////////////////////////
