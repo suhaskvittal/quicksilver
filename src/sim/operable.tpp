@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 #define TEMPL_PARAMS    template <class EVENT_ID_TYPE, class EVENT_INFO_TYPE>
 #define TEMPL_CLASS     OPERABLE<EVENT_ID_TYPE, EVENT_INFO_TYPE>

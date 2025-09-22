@@ -53,6 +53,7 @@ set(BINARY_GEN_FILES
     src/program/expression.cpp)
 
 set(SIM_FILES
+    src/argparse.cpp
     src/instruction.cpp
     src/sim.cpp
     src/sim/client.cpp

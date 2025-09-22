@@ -94,8 +94,8 @@ struct INSTRUCTION
         Simulation variables:
     */
     uint64_t inst_number{};
-    uint64_t total_resource_stall_cycles{0};
-    uint64_t total_memory_stall_cycles{0};
+    uint64_t total_isolated_resource_stall_cycles{0};
+    uint64_t total_isolated_memory_stall_cycles{0};
     bool is_scheduled{false};
     uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
 

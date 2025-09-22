@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <iomanip>
 #include <string>
+#include <string_view>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -21,91 +24,139 @@
 class ARGPARSE
 {
 public:
-    // name, description, pointer to variable, is required
-    // we require that the value have a default constructor (which it should -- int, double or string)
-    template <class T> using argument_type = std::tuple<std::string_view, std::string_view, T*, bool>;
+    enum class TYPE_INFO { STRING, INT, FLOAT, FLAG };
 
-    using int_type = int64_t;
-    using float_type = double;
-    using string_type = std::string;
-    using flag_type = bool;
+    struct required_argument_type
+    {
+        std::string_view name;
+        std::string_view description;
+        void* ptr;
+        TYPE_INFO type;
+    };
+
+    struct optional_argument_type
+    {
+        std::string_view flag_name{""};  // i.e., '-v'
+        std::string_view full_name{""};  // i.e., '--verbose'
+        std::string_view description;
+        void* ptr;
+        TYPE_INFO type;
+    };
 private:
-    std::vector<argument_type<std::string_view>> strings;
-    std::vector<argument_type<int64_t>> ints;
-    std::vector<argument_type<double>> floats;
-    std::vector<argument_type<bool>> flags;
+    std::vector<required_argument_type> required_arguments;
+    std::vector<optional_argument_type> optional_arguments;
 
-    std::string usage{};
+    std::stringstream usage_strm;
+    std::stringstream options_strm;
 public:
     ARGPARSE() =default;
 
-    template <class T> ARGPARSE& required(std::string_view name, std::string_view description, T*);
-    template <class T> ARGPARSE& optional(std::string_view name, std::string_view description, T*, T default);
+    template <class T> ARGPARSE& required(std::string_view name, std::string_view description, T& ref);
+    template <class T, class DT> ARGPARSE& optional(std::string_view flag_name, std::string_view full_name, 
+                                            std::string_view description, T& ref, DT default_value);
     void parse(int argc, char** argv);
-private:
-    template <class T> void add(std::string_view name, std::string_view description, T* ptr, bool is_required);
-    template <class T> void lookup_and_set(std::vector<argument_type<T>>& values, std::string_view name, T value);
 };
 
-template <class T> T convert_string_to_type(std::string);
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void read_argument_and_write_to_ptr(std::string, void*, ARGPARSE::TYPE_INFO);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class T> constexpr ARGPARSE::TYPE_INFO
+argparse_get_type_info()
+{
+    if constexpr (std::is_same<T, std::string>::value)
+        return ARGPARSE::TYPE_INFO::STRING;
+    else if constexpr (std::is_same<T, int64_t>::value)
+        return ARGPARSE::TYPE_INFO::INT;
+    else if constexpr (std::is_same<T, double>::value)
+        return ARGPARSE::TYPE_INFO::FLOAT;
+    else
+        return ARGPARSE::TYPE_INFO::FLAG;
+}
+
+template <class T> constexpr void
+argparse_check_valid_type()
+{
+    if constexpr (std::is_same<T, std::string>::value)
+        return;
+    else if constexpr (std::is_same<T, int64_t>::value)
+        return;
+    else if constexpr (std::is_same<T, double>::value)
+        return;
+    else if constexpr (std::is_same<T, bool>::value)
+        return;
+    else
+    {
+        throw std::runtime_error("invalid type for argparse: " + std::string(typeid(T).name())
+                            + ", only valid types are std::string, int64_t, double, and bool");
+    }
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 template <class T> ARGPARSE&
-ARGPARSE::required(std::string_view name, std::string_view description, T* ptr)
+ARGPARSE::required(std::string_view name, std::string_view description, T& ref)
 {
-    add(name, description, ptr, true);
+    if (optional_arguments.size() > 0)
+        throw std::runtime_error("required arguments must be added before optional arguments");
+
+    argparse_check_valid_type<T>();
+
+    required_arguments.push_back({name, description, static_cast<void*>(&ref), 
+                                    argparse_get_type_info<T>()});
+
+    usage_strm << " <" << name << ">";
+    options_strm << std::setw(48) << std::left << name
+                << std::setw(80) << std::left << description 
+                << std::setw(8) << std::left << "string"
+                << std::setw(24) << std::left << "required" << "\n";
+
     return *this;
 }
 
-template <class T> ARGPARSE&
-ARGPARSE::optional(std::string_view name, std::string_view description, T* ptr, T default_val)
+template <class T, class DT> ARGPARSE&
+ARGPARSE::optional(std::string_view flag_name,
+                        std::string_view full_name,
+                        std::string_view description,
+                        T& ref,
+                        DT default_value)
 {
-    add(name, description, ptr, false);
-    *ptr = default_val;
+    argparse_check_valid_type<T>();
+
+    ref = static_cast<T>(default_value);
+    optional_arguments.push_back({flag_name, full_name, description, static_cast<void*>(&ref), 
+                                    argparse_get_type_info<T>()});
+
+    std::string name_string;
+    if (flag_name.empty())
+        name_string = std::string{full_name};
+    else if (full_name.empty())
+        name_string = std::string{flag_name};
+    else
+        name_string = std::string{flag_name} + ", " + std::string{full_name};
+
+    std::string type_string;
+    if constexpr (std::is_same<T, std::string>::value)
+        type_string = "string";
+    else if constexpr (std::is_same<T, int64_t>::value)
+        type_string = "int";
+    else if constexpr (std::is_same<T, double>::value)
+        type_string = "float";
+    else if constexpr (std::is_same<T, bool>::value)
+        type_string = "bool";
+
+    options_strm << std::setw(48) << std::left << name_string
+                << std::setw(80) << std::left << description 
+                << std::setw(8) << std::left << type_string
+                << std::setw(24) << std::left << "optional, default: " << default_value
+                << "\n";
+
     return *this;
-}
-
-template <class T> void
-ARGPARSE::add(std::string_view name, std::string_view description, T* ptr, bool is_required)
-{
-    if constexpr (std::is_same<T, int_type>::value)
-        ints.push_back(std::make_tuple(name, description, ptr, is_required));
-    else if constexpr (std::is_same<T, float_type>::value)
-        floats.push_back(std::make_tuple(name, description, ptr, is_required));
-    else if constexpr (std::is_same<T, flag_type>::value)
-        flags.push_back(std::make_tuple(name, description, ptr, is_required));
-    else if constexpr (std::is_same<T, string_type>::value)
-        strings.push_back(std::make_tuple(name, description, ptr, is_required));
-    else
-        throw std::runtime_error("invalid type: " + std::string(typeid(T).name()) + " for argument " + std::string(name));
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class T> void
-ARGPARSE::lookup_and_set(std::vector<argument_type<T>>& values, std::string_view name, T value)
-{
-    auto it = std::find_if(values.begin(), values.end(), [name] (const auto& x) { return std::get<0>(x) == name; });
-    if (it == values.end())
-        throw std::runtime_error("usage: " + usage + "\n\nerror: " + std::string(name) + " is not a valid argument");
-    *std::get<2>(*it) = value;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class T> T
-convert_string_to_type(std::string s)
-{
-    if constexpr (std::is_integral<T>::value)
-        return static_cast<T>(std::stoll(s));
-    else if constexpr (std::is_floating_point<T>::value)
-        return static_cast<T>(std::stof(s));
-    else
-        return s;
 }
 
 ////////////////////////////////////////////////////////////

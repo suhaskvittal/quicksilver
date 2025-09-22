@@ -245,11 +245,12 @@ int
 main(int argc, char* argv[])
 {
     std::string trace;
+
+    int64_t inst_sim{-1};
+    int64_t inst_sim_assume_total{-1};
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
-    size_t cmp_num_surface_codes{4};
     double cmp_surface_code_fraction{0.1};
-    bool   cmp_create_budget_using_fraction{false};
 
     // factory budget: this is a bit complicated. We do the following to ensure a fair analysis:
     //   (1) N = number of program qubits
@@ -259,33 +260,36 @@ main(int argc, char* argv[])
     double fact_prog_fraction{0.6};
 
     // memory budget can be allocated absolutely (`mem_num_modules`) or as a proportion of the total number of program qubits (`mem_fraction_budget`)
-    size_t mem_bb_num_modules{2};
-    size_t mem_bb_qubits_per_bank{12};
+    int64_t mem_bb_num_modules{2};
+    int64_t mem_bb_qubits_per_bank{12};
 
     // other fixed sim parameters:
-    uint64_t cmp_sc_round_ns{1200};
-    uint64_t mem_bb_round_ns{1800};
+    int64_t cmp_sc_round_ns{1200};
+    int64_t mem_bb_round_ns{1800};
 
     // initial sim parameters:
-    size_t cmp_sc_code_distance{19};
-    size_t mem_bb_code_distance{18};
+    int64_t cmp_sc_code_distance{19};
+    int64_t mem_bb_code_distance;
 
-    ARGPARSE pp(argc, argv);
+    ARGPARSE()
+        .required("trace", "path to trace file", trace)
+        .required("inst-sim", "number of instructions to simulate", inst_sim)
+        .required("inst-sim-assume-total", "number of instructions assumed to be in the larger program", inst_sim_assume_total)
+        // simulator verbosity:
+        .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
+        // configuration:
+        .optional("", "--cmp-surface-code-fraction", "fraction of program qubits to allocate to surface codes", cmp_surface_code_fraction, 0.1)
+        .optional("", "--fact-prog-fraction", "fraction of program qubits to allocate to factories", fact_prog_fraction, 0.6)
+        .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
+        .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
+        .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
+        .optional("", "--mem-bb-round-ns", "round time for memory banks", mem_bb_round_ns, 1800)
+        .optional("", "--initial-cmp-sc-code-distance", "initial surface code distance", cmp_sc_code_distance, 19)
+        .parse(argc, argv);
 
-    pp.read_required("trace", trace);
+    sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
 
-    if (!pp.find_optional("cmp_num_surface_codes", cmp_num_surface_codes))
-        cmp_create_budget_using_fraction = pp.find_optional("cmp_surface_code_fraction", cmp_surface_code_fraction);
-
-    pp.find_optional("fact_prog_fraction", fact_prog_fraction);
-
-    pp.find_optional("mem_bb_num_modules", mem_bb_num_modules);
-    pp.find_optional("mem_bb_qubits_per_bank", mem_bb_qubits_per_bank);
-
-    pp.find_optional("cmp_sc_round_ns", cmp_sc_round_ns);
-    pp.find_optional("mem_bb_round_ns", mem_bb_round_ns);
-
-    pp.find_optional("initial_cmp_sc_code_distance", cmp_sc_code_distance);
+    // bb code distance is a function of the sc code distance
     mem_bb_code_distance = mem_bb_distance_for_given_sc_distance(cmp_sc_code_distance);
 
     // read trace to identify number of program qubits:
@@ -312,9 +316,8 @@ main(int argc, char* argv[])
         // figure out variable sim parameters:
         double target_error_rate_per_cycle = sc_logical_error_rate(cmp_sc_code_distance);
 
-        size_t cmp_count = cmp_create_budget_using_fraction ? ceil(cmp_surface_code_fraction*num_program_qubits) 
-                                                            : cmp_num_surface_codes;
         // require a 4 qubit minimum
+        size_t cmp_count = ceil(cmp_surface_code_fraction*num_program_qubits);
         cmp_count = std::max(size_t{4}, cmp_count);
 
         size_t cmp_phys_qubits = cmp_count * sc_phys_qubit_count(cmp_sc_code_distance);
@@ -371,34 +374,13 @@ main(int argc, char* argv[])
             f->OP_init();
 
 
+        sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
         bool done;
         do
         {
             // arbitrate events:
             sim::T_FACTORY* earliest_fact = sim::arbitrate_event_selection_from_vector(t_factories);
             sim::MEMORY_MODULE* earliest_mem = sim::arbitrate_event_selection_from_vector(mem_modules);
-
-            /*
-            std::cout << "pending events:\n";
-            if (earliest_fact->has_event())
-            {
-                std::cout << "\tfactory next event: t =" << earliest_fact->next_event().time_ns 
-                            << "ns, id = " << static_cast<int>(earliest_fact->next_event().id) 
-                            << ", num events = " << earliest_fact->num_events() << "\n";
-            }
-            if (earliest_mem->has_event())
-            {
-                std::cout << "\tmemory next event: t =" << earliest_mem->next_event().time_ns 
-                            << "ns, id = " << static_cast<int>(earliest_mem->next_event().id) 
-                            << ", num events = " << earliest_mem->num_events() << "\n";
-            }
-            if (sim::GL_CMP->has_event())
-            {
-                std::cout << "\tcompute next event: t =" << sim::GL_CMP->next_event().time_ns 
-                            << "ns, id = " << static_cast<int>(sim::GL_CMP->next_event().id) 
-                            << ", num events = " << sim::GL_CMP->num_events() << "\n";
-            }
-            */
 
             bool deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
 
@@ -411,7 +393,7 @@ main(int argc, char* argv[])
             // check if we are done:
             const auto& clients = sim::GL_CMP->get_clients();
             done = std::all_of(clients.begin(), clients.end(),
-                                [] (const auto& c) { return c->has_hit_eof_once; });
+                                [inst_sim] (const auto& c) { return c->s_unrolled_inst_done >= inst_sim; });
         }
         while (!done);
 
@@ -422,11 +404,18 @@ main(int argc, char* argv[])
         
         // compute required error rate that would have achieved the application success rate anyways.
         double cmp_cycles = static_cast<double>(sim::GL_CMP->current_cycle());
+
+        // scale cycles by `inst_sim_assume_total/inst_sim`
+        double inst_sim_ratio = static_cast<double>(inst_sim_assume_total) / static_cast<double>(inst_sim);
+        cmp_cycles *= inst_sim_ratio;
+
         double log_1_minus_acceptable_error_rate_per_cycle = (1.0/cmp_cycles) * log(TARGET_APP_SUCCESS_RATE);
         double acceptable_error_rate_per_cycle = 1.0 - exp(log_1_minus_acceptable_error_rate_per_cycle);
         size_t required_code_distance = sc_distance_for_target_logical_error_rate(acceptable_error_rate_per_cycle);
 
         sim::print_stats(std::cout);
+        sim::print_stat_line(std::cout, "INST_SIM_RATIO", inst_sim_ratio, false);
+        sim::print_stat_line(std::cout, "SCALED_CMP_CYCLES", cmp_cycles, false);
         sim::print_stat_line(std::cout, "L1_FACTORY_COUNT", fact_l1_count, false);
         sim::print_stat_line(std::cout, "L2_FACTORY_COUNT", fact_l2_count, false);
         sim::print_stat_line(std::cout, "COMPUTE_TOTAL_PHYSICAL_QUBITS", cmp_phys_qubits, false);
@@ -439,7 +428,7 @@ main(int argc, char* argv[])
         sim::print_stat_line(std::cout, "REQUIRED_CODE_DISTANCE", required_code_distance, false);
         sim::print_stat_line(std::cout, "REQUIRED_ERROR_RATE_PER_CYCLE", acceptable_error_rate_per_cycle, false);
 
-        if (cmp_sc_code_distance == required_code_distance || cmp_sc_code_distance == required_code_distance+1)
+        if (cmp_sc_code_distance == required_code_distance || cmp_sc_code_distance == required_code_distance+1 || (sim_iter >= 3 && required_code_distance <= cmp_sc_code_distance))
         {
             converged = true;
         }

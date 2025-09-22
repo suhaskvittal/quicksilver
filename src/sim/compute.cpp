@@ -7,6 +7,8 @@
 #include "sim/cmp/replacement/lru.h"
 #include "sim/cmp/replacement/lti.h"
 
+#include "sim.h"
+
 #include <limits>
 #include <unordered_set>
 
@@ -17,12 +19,6 @@ namespace sim
 
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
-
-extern std::mt19937 GL_RNG;
-extern std::uniform_real_distribution<double> FP_RAND;
-
-extern bool GL_PRINT_PROGRESS;
-extern uint64_t GL_PRINT_PROGRESS_FREQ;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -572,6 +568,8 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
 
     if (all_done)
     {
+        uint64_t unrolled_inst_done_before = c->s_unrolled_inst_done;
+
         c->s_inst_done++;
         if (inst->num_uops > 0)
             c->s_unrolled_inst_done += inst->num_uops;
@@ -597,12 +595,23 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
         delete inst;
 
         // print progress if flag is set:
-        if (GL_PRINT_PROGRESS && c->s_inst_done % GL_PRINT_PROGRESS_FREQ == 0)
+        bool pp = (c->s_unrolled_inst_done % GL_PRINT_PROGRESS_FREQ) 
+                    < (unrolled_inst_done_before % GL_PRINT_PROGRESS_FREQ);
+        if (GL_PRINT_PROGRESS && pp)
         {
+            double t_min = (static_cast<double>(current_cycle()) / OP_freq_khz) * 1e-3 / 60.0;
+            double urot_inst_rate = static_cast<double>(c->s_unrolled_inst_done) / t_min * 1e-3;
+            double mips = c->s_unrolled_inst_done / sim_walltime_s() * 1e-6;
+            double sim_ratio = (t_min * 60) / sim_walltime_s();
             std::cout << "CLIENT " << static_cast<int>(c->id)
-                        << " @ " << c->s_inst_done << " instructions done\n"
-                        << "\tunrolled instructions done = " << c->s_unrolled_inst_done << "\n"
-                        << "\tcompute cycle = " << current_cycle() << "\n";
+                        << " @ " << c->s_unrolled_inst_done << " unrolled instructions done (virtual instructions done = " << c->s_inst_done << ")\n"
+                        << "\tcompute cycle = " << current_cycle() << "\n"
+                        << "\tsimulated execution time = " << t_min << " minutes\n"
+                        << "\tinstruction rate = " << urot_inst_rate << " kiloinstructions/minute\n"
+                        << "\tsimulator wall time = " << sim_walltime() << "\n"
+                        << "\tsimulator speed = " << mips << " MIPS\n"
+                        << "\tsim speed to walltime ratio = " << sim_ratio << " seconds simulated / seconds walltime\n"
+                        << "\n";
         }
 
         // as this instruction is retired, it may be possible to find victims for any pending memory requests
@@ -662,7 +671,26 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 
     // return early if we are waiting for memory
     if (result.is_memory_stall)
+    {
+        // check if there is also a concurrent resource stall
+        bool needs_resource = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TX
+                                || inst->type == INSTRUCTION::TYPE::TDG || inst->type == INSTRUCTION::TYPE::TXDG
+                                || inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX
+                                || inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
+        // can also happen if the uop is a t gate:
+        if (needs_resource)
+        {
+            size_t num_resource_states_avail = std::transform_reduce(t_fact_.begin(), t_fact_.end(),
+                                                                        size_t{0},
+                                                                        std::plus<size_t>{},
+                                                                        [this] (T_FACTORY* f) 
+                                                                        { 
+                                                                            return (f->level_ >= this->target_t_fact_level_ ? f->buffer_occu_ : 0);
+                                                                        });
+            result.is_resource_stall = (num_resource_states_avail == 0);
+        }
         return result;
+    }
 
     return do_gate(c, inst, qubit_patches);
 }
@@ -676,7 +704,10 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
     if (result.is_memory_stall)
     {
         inst_waiting_for_memory_.emplace_back(inst, c->id);
-        inst->memory_stall_start_cycle = current_cycle();
+        
+        // only start tracking if this is an isolated memory stall
+        if (!result.is_resource_stall)
+            inst->memory_stall_start_cycle = std::min(inst->memory_stall_start_cycle, current_cycle());
 
 #if defined(COMPUTE_VERBOSE)
         std::cout << "\tinstruction \"" << *inst << "\" is waiting for memory access\n";
@@ -685,7 +716,7 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
     else if (result.is_resource_stall)
     {
         inst_waiting_for_resource_.emplace_back(inst, c->id);
-        inst->resource_stall_start_cycle = current_cycle();
+        inst->resource_stall_start_cycle = std::min(inst->resource_stall_start_cycle, current_cycle());
 
 #if defined(COMPUTE_VERBOSE)
         std::cout << "\tinstruction \"" << *inst << "\" is waiting for resource\n";
@@ -719,14 +750,14 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
 
         // update stall related stats:
         uint64_t routing_stall_cycles = result.routing_stall_cycles;
-        uint64_t memory_stall_cycles = current_cycle() - inst->memory_stall_start_cycle;
-        uint64_t resource_stall_cycles = current_cycle() - inst->resource_stall_start_cycle;
+        uint64_t memory_stall_cycles = inst->total_isolated_memory_stall_cycles;
+        uint64_t resource_stall_cycles = inst->total_isolated_resource_stall_cycles;
 
         inst->cycle_done = current_cycle() + result.cycles_until_done;
 
         c->s_inst_routing_stall_cycles += routing_stall_cycles;
-        c->s_inst_resource_stall_cycles += resource_stall_cycles;
         c->s_inst_memory_stall_cycles += memory_stall_cycles;
+        c->s_inst_resource_stall_cycles += resource_stall_cycles;
     }
 }
 
@@ -1013,6 +1044,13 @@ COMPUTE::retry_instructions(RETRY_TYPE type, COMPUTE_EVENT_INFO event_info)
                 // if we are not stalled by memory anymore, then we can remove the instruction from the buffer
                 if (!result.is_memory_stall)
                 {
+                    // update stall statistics:
+                    if (current_cycle() > inst->memory_stall_start_cycle)
+                    {
+                        inst->total_isolated_memory_stall_cycles += current_cycle() - inst->memory_stall_start_cycle;
+                        inst->memory_stall_start_cycle = std::numeric_limits<uint64_t>::max();
+                    }
+
                     process_execution_result(c, inst, result);
                     inst_waiting_for_memory_[i].first = nullptr;  // set to nullptr to indicate that this entry is invalid
                 }
@@ -1032,6 +1070,15 @@ COMPUTE::retry_instructions(RETRY_TYPE type, COMPUTE_EVENT_INFO event_info)
         auto result = execute_instruction(clients_[client_id], inst);
         if (!result.is_resource_stall)
         {
+            // update stall statistics:
+            if (current_cycle() > inst->resource_stall_start_cycle)
+            {
+                inst->total_isolated_resource_stall_cycles += current_cycle() - inst->resource_stall_start_cycle;
+                inst->resource_stall_start_cycle = std::numeric_limits<uint64_t>::max();
+            }
+
+            inst->resource_stall_start_cycle = std::numeric_limits<uint64_t>::max();
+
             process_execution_result(clients_[client_id], inst, result);
             inst_waiting_for_resource_.pop_front();
         }

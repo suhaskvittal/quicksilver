@@ -14,6 +14,7 @@
 #include "sim/factory.h"
 #include "sim/memory.h"
 
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -27,6 +28,9 @@ namespace sim
 
 extern uint64_t GL_CURRENT_TIME_NS;
 
+// simulation wall clock start time
+extern std::chrono::steady_clock::time_point GL_SIM_WALL_START;
+
 // global pointer to the compute module
 extern COMPUTE* GL_CMP;
 
@@ -35,14 +39,14 @@ extern std::mt19937 GL_RNG;
 extern std::uniform_real_distribution<double> FP_RAND;
 
 // global flags:
-extern bool     GL_PRINT_PROGRESS;
-extern uint64_t GL_PRINT_PROGRESS_FREQ;
+extern bool    GL_PRINT_PROGRESS;
+extern int64_t GL_PRINT_PROGRESS_FREQ;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 // implementation flags -- use this to setup your own designs
-bool GL_IMPL_RZ_PREFETCH{false};
+extern bool GL_IMPL_RZ_PREFETCH;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -60,7 +64,11 @@ void print_stats(std::ostream&);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void arbitrate_event_execution();
+// returns the wall time elapsed since `GL_SIM_WALL_START` in format "<minutes>m <seconds>s <milliseconds>ms"
+std::string sim_walltime();
+
+// returns the number of seconds elapsed since `GL_SIM_WALL_START`
+double sim_walltime_s();
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

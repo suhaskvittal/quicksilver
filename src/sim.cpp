@@ -7,6 +7,8 @@
 
 #include <unordered_map>
 #include <vector>
+#include <sstream>
+#include <iomanip>
 
 namespace sim
 {
@@ -16,9 +18,15 @@ COMPUTE* GL_CMP;
 std::mt19937 GL_RNG{0};
 std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
 
-bool GL_PRINT_PROGRESS{true};
-uint64_t GL_PRINT_PROGRESS_FREQ{100000};
 uint64_t GL_CURRENT_TIME_NS{0};
+
+// simulation wall clock start time
+std::chrono::steady_clock::time_point GL_SIM_WALL_START;
+
+bool GL_PRINT_PROGRESS{false};
+int64_t GL_PRINT_PROGRESS_FREQ{-1};
+
+bool GL_IMPL_RZ_PREFETCH{false};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -45,6 +53,9 @@ print_stats(std::ostream& out)
 
         print_stat_line(out, "VIRTUAL_INST_DONE", c->s_inst_done);
         print_stat_line(out, "UNROLLED_INST_DONE", c->s_unrolled_inst_done);
+        print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);
+        print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
+        print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
     }
 
     // print factory stats:
@@ -67,6 +78,31 @@ print_stats(std::ostream& out)
         print_stat_line(out, "PROD_TRIES", tot_prod_tries);
         print_stat_line(out, "FAILURES", tot_failures);
     }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::string
+sim_walltime()
+{
+    auto duration = std::chrono::duration<double>(std::chrono::steady_clock::now() - GL_SIM_WALL_START);
+    double total_seconds = duration.count();
+    
+    int minutes = static_cast<int>(total_seconds) / 60;
+    double remaining_seconds = total_seconds - (minutes * 60);
+    int seconds = static_cast<int>(remaining_seconds);
+    int milliseconds = static_cast<int>((remaining_seconds - seconds) * 1000);
+    
+    std::ostringstream oss;
+    oss << minutes << "m " << seconds << "s " << milliseconds << "ms";
+    return oss.str();
+}
+
+double
+sim_walltime_s()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - GL_SIM_WALL_START).count();
 }
 
 ////////////////////////////////////////////////////////////
