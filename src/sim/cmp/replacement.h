@@ -32,11 +32,12 @@ struct REPLACEMENT_POLICY_BASE
         `update_on_use` is called when a qubit inside of compute is used.
     */
     virtual void update_on_use(QUBIT) =0;
+    virtual void update_on_fill(QUBIT) =0;
     /*
         `select_victim` is called when a qubit outside of compute is requested.
         The qubit that is requested is passed in as an argument.
     */
-    virtual std::optional<QUBIT> select_victim(QUBIT requested) =0;
+    virtual std::optional<QUBIT> select_victim(QUBIT requested, bool is_prefetch) =0;
     /*
         Check is a qubit is a valid victim for replacement. This
         is a rudimentary set of checks. Descendants can override

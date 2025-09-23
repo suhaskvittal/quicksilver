@@ -109,6 +109,10 @@ struct INSTRUCTION
     size_t   uop_completed{0};
     size_t   num_uops{0};
 
+    // prefetch metadata -- to avoid unnecessary memory accesses
+    bool has_initiated_prefetch{false};
+    bool has_pending_prefetch_request{false};
+
     INSTRUCTION(TYPE, std::vector<qubit_type>);
     INSTRUCTION(io_encoding&&);
     INSTRUCTION(const INSTRUCTION&) =default;

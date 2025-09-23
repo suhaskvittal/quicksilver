@@ -29,8 +29,14 @@ LRU::update_on_use(QUBIT q)
     count++;
 }
 
+void
+LRU::update_on_fill(QUBIT q)
+{
+    update_on_use(q);
+}
+
 std::optional<QUBIT>
-LRU::select_victim(QUBIT requested)
+LRU::select_victim(QUBIT requested, bool is_prefetch)
 {
     const auto& clients = cmp->get_clients();
 
@@ -41,7 +47,12 @@ LRU::select_victim(QUBIT requested)
         for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
         {
             QUBIT q{c->id, qid};
-            if (is_valid_victim(q, requested) && (!victim.has_value() || last_use[q] < victim_cycle))
+            if (!is_valid_victim(q, requested))
+                continue;
+            if (cmp->get_instruction_window(q).empty())
+                return std::make_optional(q);
+
+            if (!victim.has_value() || last_use[q] < victim_cycle)
             {
                 victim_cycle = last_use[q];
                 victim = q;

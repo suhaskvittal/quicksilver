@@ -30,7 +30,8 @@ struct LRU : public REPLACEMENT_POLICY_BASE
     LRU(COMPUTE*);
 
     void update_on_use(QUBIT) override;
-    std::optional<QUBIT> select_victim(QUBIT) override;
+    void update_on_fill(QUBIT) override;
+    std::optional<QUBIT> select_victim(QUBIT, bool is_prefetch) override;
 };
 
 ////////////////////////////////////////////////////////////

@@ -31,9 +31,9 @@ REPLACEMENT_POLICY_BASE::is_valid_victim(QUBIT q, QUBIT requested) const
     COMPUTE::inst_ptr q_inst = q_win.front();
 
     bool client_match = (q.client_id == requested.client_id);
-    bool inst_match = q_inst == ref_inst;
+    bool inst_earlier = q_inst->inst_number < ref_inst->inst_number;
 
-    return is_valid_victim(q) && !(client_match && inst_match);
+    return is_valid_victim(q) && !(client_match && inst_earlier);
 }
 
 }   // namespace cmp

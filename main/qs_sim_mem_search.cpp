@@ -246,29 +246,30 @@ main(int argc, char* argv[])
 {
     std::string trace;
 
-    int64_t inst_sim{-1};
-    int64_t inst_sim_assume_total{-1};
+    int64_t inst_sim;
+    int64_t inst_sim_assume_total;
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
-    double cmp_surface_code_fraction{0.1};
+    double cmp_surface_code_fraction;
+    int64_t cmp_repl_id;
 
     // factory budget: this is a bit complicated. We do the following to ensure a fair analysis:
     //   (1) N = number of program qubits
     //   (2) P = number of physical qubits required to implement N surface code qubits. Note that not all program qubits will be implemented
     //          using the compute budget.
     //   (3) We give magic state factories `fact_prog_fraction * P` physical qubits.
-    double fact_prog_fraction{0.6};
+    double fact_prog_fraction;
 
     // memory budget can be allocated absolutely (`mem_num_modules`) or as a proportion of the total number of program qubits (`mem_fraction_budget`)
-    int64_t mem_bb_num_modules{2};
-    int64_t mem_bb_qubits_per_bank{12};
+    int64_t mem_bb_num_modules;
+    int64_t mem_bb_qubits_per_bank;
 
     // other fixed sim parameters:
-    int64_t cmp_sc_round_ns{1200};
-    int64_t mem_bb_round_ns{1800};
+    int64_t cmp_sc_round_ns;
+    int64_t mem_bb_round_ns;
 
     // initial sim parameters:
-    int64_t cmp_sc_code_distance{19};
+    int64_t cmp_sc_code_distance;
     int64_t mem_bb_code_distance;
 
     ARGPARSE()
@@ -277,8 +278,11 @@ main(int argc, char* argv[])
         .required("inst-sim-assume-total", "number of instructions assumed to be in the larger program", inst_sim_assume_total)
         // simulator verbosity:
         .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
+        // setup:
+        .optional("-rzpf", "--rz-prefetch", "enable rz directed prefetch", sim::GL_IMPL_RZ_PREFETCH, false)
         // configuration:
         .optional("", "--cmp-surface-code-fraction", "fraction of program qubits to allocate to surface codes", cmp_surface_code_fraction, 0.1)
+        .optional("-crepl", "--cmp-repl-policy", "replacement policy for compute", cmp_repl_id, static_cast<int>(sim::COMPUTE::REPLACEMENT_POLICY::LTI))
         .optional("", "--fact-prog-fraction", "fraction of program qubits to allocate to factories", fact_prog_fraction, 0.6)
         .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
         .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
@@ -290,7 +294,11 @@ main(int argc, char* argv[])
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
 
     // bb code distance is a function of the sc code distance
+    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = static_cast<sim::COMPUTE::REPLACEMENT_POLICY>(cmp_repl_id);
     mem_bb_code_distance = mem_bb_distance_for_given_sc_distance(cmp_sc_code_distance);
+
+    if (sim::GL_IMPL_RZ_PREFETCH)
+        std::cout << "*** enabling rz directed prefetch ***\n";
 
     // read trace to identify number of program qubits:
     uint32_t num_program_qubits{};
@@ -355,7 +363,7 @@ main(int argc, char* argv[])
         size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
 
         // initialize compute
-        sim::GL_CMP = new sim::COMPUTE(cmp_freq_ghz, {trace}, cmp_num_rows, cmp_patches_per_row, t_factories, mem_modules);
+        sim::GL_CMP = new sim::COMPUTE(cmp_freq_ghz, {trace}, cmp_num_rows, cmp_patches_per_row, t_factories, mem_modules, cmp_repl);
 
         // run simulation until EOF
         std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";

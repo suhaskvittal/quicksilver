@@ -71,9 +71,14 @@ COMPUTE::COMPUTE(double freq_khz,
 ////////////////////////////////////////////////////////////
 
 COMPUTE::memory_route_result_type
-COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT incoming_qubit, uint64_t route_min_start_time_ns, uint64_t mswap_time_ns)
+COMPUTE::route_memory_access(
+    size_t mem_patch_idx,
+    QUBIT incoming_qubit,
+    uint64_t route_min_start_time_ns,
+    uint64_t mswap_time_ns,
+    bool is_prefetch)
 {
-    std::optional<QUBIT> victim = repl_->select_victim(incoming_qubit);
+    std::optional<QUBIT> victim = repl_->select_victim(incoming_qubit, is_prefetch);
     if (!victim.has_value())
         return {false, QUBIT{-1,-1}, 0};
 
@@ -104,8 +109,10 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT incoming_qubit, uint64_
     // set `v_patch` contents to `incoming_qubit`
     v_patch.contents = incoming_qubit;
 
-    uint64_t access_time_ns = convert_cycles_to_ns(completion_cycle - current_cycle(), OP_freq_khz);
+    // update replacement policy:
+    repl_->update_on_fill(incoming_qubit);
 
+    uint64_t access_time_ns = convert_cycles_to_ns(completion_cycle - current_cycle(), OP_freq_khz);
     return {true, *victim, access_time_ns};
 }
 
@@ -596,7 +603,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
 
         // print progress if flag is set:
         bool pp = (c->s_unrolled_inst_done % GL_PRINT_PROGRESS_FREQ) 
-                    < (unrolled_inst_done_before % GL_PRINT_PROGRESS_FREQ);
+                    <= (unrolled_inst_done_before % GL_PRINT_PROGRESS_FREQ);
         if (GL_PRINT_PROGRESS && pp)
         {
             double t_min = (static_cast<double>(current_cycle()) / OP_freq_khz) * 1e-3 / 60.0;
@@ -645,23 +652,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             result.is_memory_stall = true;
 
             // find the module that contains the qubit and initiate the memory access
-            auto module_it = find_memory_module_containing_qubit(q);
-            if (module_it == mem_modules_.end())
-            {
-                std::cerr << "compute patches:\n";
-                for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-                    std::cerr << "\t" << patches_[i].contents << "\n";
-
-                for (size_t i = 0; i < mem_modules_.size(); i++)
-                {
-                    std::cerr << "memory module " << i << "------------------\n";
-                    mem_modules_[i]->dump_contents();
-                }
-
-                throw std::runtime_error("qubit " + q.to_string() + " not found in any memory module");
-            }
-            (*module_it)->initiate_memory_access(q);
-
+            access_memory_and_die_if_qubit_not_found(q);
         }
         else
         {
@@ -690,6 +681,55 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             result.is_resource_stall = (num_resource_states_avail == 0);
         }
         return result;
+    }
+
+    if (GL_IMPL_RZ_PREFETCH && (inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX) && !inst->has_initiated_prefetch)
+    {
+        /*
+            Explanation: if this gate is an RZ or RX gate, then we will prefetch the qubit operand for the next RZ or RX gate
+            in instruction order.
+        */
+
+        QUBIT pf_target{};
+        inst_ptr pf_inst{nullptr};
+        size_t pf_win_depth = std::numeric_limits<size_t>::max();
+        for (const auto& [q, win] : inst_windows_)
+        {
+            if (win.empty())
+                continue;
+            if (q.client_id != c->id)
+                continue;
+
+            // search for the next rz or rx gate in instruction order
+            auto rz_it = std::find_if(win.begin(), win.end(),
+                                        [this] (inst_ptr inst)
+                                        { 
+                                            return (inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX)
+                                                    && !inst->has_pending_prefetch_request;
+                                        });
+            size_t win_depth = std::distance(win.begin(), rz_it);
+            if (rz_it != win.end() && *rz_it != inst)
+            {
+                if (pf_inst == nullptr || win_depth < pf_win_depth)
+                {
+                    pf_target = q;
+                    pf_inst = *rz_it;
+                }
+            }
+        }
+
+        if (pf_inst != nullptr)
+        {
+            // prefetch `pf_target` if it is not in compute:
+            auto pf_patch_it = find_patch_containing_qubit(pf_target);
+            if (pf_patch_it == patches_.end())
+            {
+                access_memory_and_die_if_qubit_not_found(pf_target, true);
+                pf_inst->has_pending_prefetch_request = true;
+            }
+        }
+
+        inst->has_initiated_prefetch = true;
     }
 
     return do_gate(c, inst, qubit_patches);
@@ -1109,6 +1149,26 @@ COMPUTE::find_memory_module_containing_qubit(QUBIT q)
                         [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
 }
 
+void
+COMPUTE::access_memory_and_die_if_qubit_not_found(QUBIT q, bool is_prefetch)
+{
+    auto module_it = find_memory_module_containing_qubit(q);
+    if (module_it == mem_modules_.end())
+    {
+        std::cerr << "compute patches:\n";
+        for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+            std::cerr << "\t" << patches_[i].contents << "\n";
+
+        for (size_t i = 0; i < mem_modules_.size(); i++)
+        {
+            std::cerr << "memory module " << i << "------------------\n";
+            mem_modules_[i]->dump_contents();
+        }
+
+        throw std::runtime_error("qubit " + q.to_string() + " not found in any memory module");
+    }
+    (*module_it)->initiate_memory_access(q, is_prefetch);
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

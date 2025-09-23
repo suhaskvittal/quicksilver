@@ -52,16 +52,23 @@ MEMORY_MODULE::find_uninitialized_qubit()
 ////////////////////////////////////////////////////////////
 
 void
-MEMORY_MODULE::initiate_memory_access(QUBIT qubit)
+MEMORY_MODULE::initiate_memory_access(QUBIT qubit, bool is_prefetch)
 {
     // create a new request:
     // first make sure that the qubit does not already have a request:
     auto req_it = find_request_for_qubit(qubit);
     if (req_it != request_buffer_.end())
+    {
+        s_num_prefetch_promoted_to_demand[qubit.client_id] += (req_it->is_prefetch && !is_prefetch);
+        req_it->is_prefetch &= is_prefetch;
         return;
+    }
+
+    if (is_prefetch)
+        s_num_prefetch_requests[qubit.client_id]++;
 
     // otherwise, create a new request:
-    request_type req{qubit};
+    request_type req{qubit, is_prefetch};
     if (!serve_memory_request(req))
         request_buffer_.push_back(req);
 }
@@ -171,8 +178,12 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     uint64_t mswap_time_ns = convert_cycles_to_ns(MSWAP_MEM_CYCLES, OP_freq_khz);
 
     // perform the memory swap and convert to compute cycles
-    auto [victim_found, victim, access_time_ns] = 
-            GL_CMP->route_memory_access(output_patch_idx_, req.qubit, earliest_start_time_ns, mswap_time_ns);
+    auto [victim_found, victim, access_time_ns] = GL_CMP->route_memory_access(
+                                                                output_patch_idx_,
+                                                                req.qubit,
+                                                                earliest_start_time_ns,
+                                                                mswap_time_ns,
+                                                                req.is_prefetch);
 
     if (!victim_found)
     {

@@ -29,10 +29,9 @@ LTI::LTI(COMPUTE* c)
 ////////////////////////////////////////////////////////////
 
 std::optional<QUBIT>
-LTI::select_victim(QUBIT requested)
+LTI::select_victim(QUBIT requested, bool is_prefetch)
 {
-    const auto& req_win = cmp->get_instruction_window(requested);
-    CLIENT::inst_ptr req_inst_head = req_win.front();
+    timeliness_type req_timeliness = compute_instruction_timeliness(requested);
 
     const auto& clients = cmp->get_clients();
     
@@ -62,14 +61,14 @@ LTI::select_victim(QUBIT requested)
             COMPUTE::inst_ptr q_head = q_win.front();
             timeliness_type q_timeliness = compute_instruction_timeliness(q);
 
-#if defined(LTI_VERBOSE)
-            std::cout << "\tQUBIT " << q << " IS A VALID VICTIM FOR " << requested << ", TIMELINESS = " << q_timeliness << ", DOMINATION( " << *req_inst_head << " , " << *q_head << " ) = " << check_for_domination(req_inst_head, q_head) << "\n";
-#endif
-
-//          if (!check_for_domination(req_inst_head, q_head))
-//              continue;
-            if (q_head->inst_number < req_inst_head->inst_number)
+            if (is_prefetch && q_timeliness < req_timeliness)
                 continue;
+
+#if defined(LTI_VERBOSE)
+            std::cout << "\tQUBIT " << q << " IS A VALID VICTIM FOR " << requested
+                        << ", TIMELINESS = " << q_timeliness 
+                        << "\n";
+#endif
             
             // evict based on timeliness and break ties using instruction recency
             bool evict = !victim.has_value()
@@ -117,55 +116,6 @@ LTI::compute_instruction_timeliness(QUBIT q) const
                         return std::distance(_win.begin(), inst_it);
                     });
     return *std::max_element(timeliness.begin(), timeliness.end());
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-LTI::check_for_domination(CLIENT::inst_ptr winner, CLIENT::inst_ptr loser)
-{
-    if (winner == nullptr)
-        return false;
-    if (loser == nullptr)
-        return true;
-
-    auto fw_it = std::find_if(domination_table.begin(), domination_table.end(), 
-                        [winner, loser](const auto& e) { return e.has_value() && e->winner == winner && e->loser == loser; });
-    auto rv_it = std::find_if(domination_table.begin(), domination_table.end(), 
-                        [winner, loser](const auto& e) { return e.has_value() && e->winner == loser && e->loser == winner; });
-
-    if (fw_it == domination_table.end() && rv_it == domination_table.end())
-    {
-        // create the domination entry in favor of `winner`
-        create_domination_entry(winner, loser);
-        return true;
-    }
-    else
-    {
-        if (fw_it != domination_table.end())
-            (*fw_it)->last_access = dom_count++;
-        else
-            (*rv_it)->last_access = dom_count++;
-
-        return fw_it != domination_table.end();
-    }
-}
-
-void
-LTI::create_domination_entry(CLIENT::inst_ptr winner, CLIENT::inst_ptr loser)
-{
-    // find an empty entry:
-    auto it = std::find_if(domination_table.begin(), domination_table.end(), [] (const auto& e) { return !e.has_value(); });
-
-    if (it == domination_table.end())
-    {
-        // evict via LRU:
-        it = std::min_element(domination_table.begin(), domination_table.end(), 
-                [] (const auto& a, const auto& b) { return a->last_access < b->last_access; });
-    }
-
-    *it = dominator_table_entry_type{winner, loser, dom_count++};
 }
 
 ////////////////////////////////////////////////////////////

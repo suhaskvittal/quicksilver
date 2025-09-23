@@ -115,8 +115,11 @@ public:
     // returns how long it takes to complete the memory access
     // `cmp_cycles_for_mswap` is the number of cycles to perform the memory swap -- there may be extra
     // cycles spent to waiting for routing space
-    memory_route_result_type route_memory_access(size_t mem_patch_idx, QUBIT incoming_qubit, 
-                                                uint64_t route_min_start_time_ns, uint64_t mswap_time_ns);
+    memory_route_result_type route_memory_access(size_t mem_patch_idx,
+                                                QUBIT incoming_qubit, 
+                                                uint64_t route_min_start_time_ns,
+                                                uint64_t mswap_time_ns,
+                                                bool is_prefetch);
 
     void OP_init() override;
 
@@ -162,6 +165,8 @@ private:
     std::vector<PATCH>::iterator find_patch_containing_qubit(QUBIT);
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
+
+    void access_memory_and_die_if_qubit_not_found(QUBIT, bool is_prefetch=false);
 };
 
 ////////////////////////////////////////////////////////////

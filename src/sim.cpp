@@ -78,6 +78,27 @@ print_stats(std::ostream& out)
         print_stat_line(out, "PROD_TRIES", tot_prod_tries);
         print_stat_line(out, "FAILURES", tot_failures);
     }
+
+    // print memory stats:
+    
+    // accumulate any client-level stats:
+    MEMORY_MODULE::client_stats_type num_pf{};
+    MEMORY_MODULE::client_stats_type num_pf_promoted_to_demand{};
+    for (MEMORY_MODULE* m : mem_modules)
+    {
+        for (int i = 0; i < clients.size(); i++)
+        {
+            num_pf[i] += m->s_num_prefetch_requests[i];
+            num_pf_promoted_to_demand[i] += m->s_num_prefetch_promoted_to_demand[i];
+        }
+    }
+
+    std::cout << "MEMORY\n";
+    for (int i = 0; i < clients.size(); i++)
+    {
+        print_stat_line(out, "CLIENT_" + std::to_string(i) + "_NUM_PREFETCH_REQUESTS", num_pf[i]);
+        print_stat_line(out, "CLIENT_" + std::to_string(i) + "_NUM_PREFETCH_PROMOTED_TO_DEMAND", num_pf_promoted_to_demand[i]);
+    }
 }
 
 ////////////////////////////////////////////////////////////

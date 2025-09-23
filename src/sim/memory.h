@@ -11,6 +11,7 @@
 
 #include <deque>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 namespace sim
@@ -60,12 +61,19 @@ public:
     struct request_type
     {
         QUBIT qubit;
+        bool is_prefetch;
     };
 
     using search_result_type = std::tuple<bool, std::vector<bank_type>::iterator, std::vector<QUBIT>::iterator>;
 
     // set by `COMPUTE`
     ssize_t output_patch_idx_;
+
+    // statistics:
+    using client_stats_type = std::unordered_map<int8_t, uint64_t>;
+
+    client_stats_type s_num_prefetch_requests{};
+    client_stats_type s_num_prefetch_promoted_to_demand{};
 
     const size_t num_banks_;
     const size_t capacity_per_bank_;
@@ -78,7 +86,7 @@ public:
     search_result_type find_qubit(QUBIT);
     search_result_type find_uninitialized_qubit();
 
-    void initiate_memory_access(QUBIT);
+    void initiate_memory_access(QUBIT, bool is_prefetch=false);
 
     void dump_contents();
 
