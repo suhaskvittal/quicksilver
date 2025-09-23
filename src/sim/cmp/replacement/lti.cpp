@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <numeric>
 
-//#define LTI_VERBOSE
+#define LTI_VERBOSE
 
 namespace sim
 {
@@ -40,7 +40,7 @@ LTI::select_victim(QUBIT requested, bool is_prefetch)
     timeliness_type       victim_timeliness{-1};
 
 #if defined(LTI_VERBOSE)
-    std::cout << "SELECTING VICTIM FOR " << requested << "\n";
+    std::cout << "SELECTING VICTIM for " << requested << " -- timeliness = " << req_timeliness << "\n";
 #endif
 
     for (const auto& c : clients)
@@ -53,22 +53,25 @@ LTI::select_victim(QUBIT requested, bool is_prefetch)
                 continue;
 
             // exit early if a qubit with an empty instruction window is found (does not have any operations pending)
-            const auto& q_win = cmp->get_instruction_window(q);
-            if (q_win.empty())
+            if (cmp->has_empty_instruction_window(q))
                 return std::make_optional(q);
 
+            const auto& q_win = cmp->get_instruction_window(q);
+
             // make sure that `q_head` is not earlier than `reference_inst`
+            size_t num_uses = cmp->get_num_uses_in_compute(q);
             COMPUTE::inst_ptr q_head = q_win.front();
             timeliness_type q_timeliness = compute_instruction_timeliness(q);
 
-            if (is_prefetch && q_timeliness < req_timeliness)
+#if defined(LTI_VERBOSE)
+            std::cout << "\tQUBIT " << q << " -- timeliness = " << q_timeliness << ", inst number = " << q_head->inst_number << ", num uses = " << num_uses << "\n";
+#endif
+
+            if (num_uses == 0)
                 continue;
 
-#if defined(LTI_VERBOSE)
-            std::cout << "\tQUBIT " << q << " IS A VALID VICTIM FOR " << requested
-                        << ", TIMELINESS = " << q_timeliness 
-                        << "\n";
-#endif
+            if (q_timeliness < req_timeliness)
+                continue;
             
             // evict based on timeliness and break ties using instruction recency
             bool evict = !victim.has_value()
@@ -85,9 +88,9 @@ LTI::select_victim(QUBIT requested, bool is_prefetch)
 
 #if defined(LTI_VERBOSE)
     if (victim.has_value())
-        std::cout << "\tSELECTED VICTIM " << *victim << "\n";
+        std::cout << "SELECTED VICTIM " << *victim << " for " << requested << " -- timeliness = " << victim_timeliness << ", pf timeliness = " << req_timeliness << "\n";
     else
-        std::cout << "\tNO VICTIM FOUND FOR " << requested << "\n";
+        std::cout << "NO VICTIM FOUND for " << requested << " -- timeliness = " << req_timeliness << "\n";
     std::cout << "\n";
 #endif
 

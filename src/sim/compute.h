@@ -70,6 +70,10 @@ public:
     // third: the time taken for the access (ns)
     using memory_route_result_type = std::tuple<bool, QUBIT, uint64_t>;
 
+    // statistics:
+    uint64_t s_evictions_no_uses_{0};
+    uint64_t s_evictions_prefetch_no_uses_{0};
+
     const size_t target_t_fact_level_;
     const size_t num_rows_;
     const size_t num_patches_per_row_;
@@ -129,7 +133,9 @@ public:
     const std::vector<client_ptr>& get_clients() const { return clients_; }
     bool                           is_present_in_compute(QUBIT q) const { return find_patch_containing_qubit_c(q) != patches_.end(); }
     uint64_t                       get_cycle_free(QUBIT q) const { return qubit_available_cycle_.at(q); }
+    bool                           has_empty_instruction_window(QUBIT q) const { return inst_windows_.find(q) == inst_windows_.end() || inst_windows_.at(q).empty(); }
     const std::deque<inst_ptr>&    get_instruction_window(QUBIT q) const { return inst_windows_.at(q); }
+    size_t                         get_num_uses_in_compute(QUBIT q) const { return find_patch_containing_qubit_c(q)->num_uses; }
 
     std::vector<T_FACTORY*> get_t_factories() const { return t_fact_; }
     std::vector<MEMORY_MODULE*> get_mem_modules() const { return mem_modules_; }
@@ -166,7 +172,9 @@ private:
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
 
-    void access_memory_and_die_if_qubit_not_found(QUBIT, bool is_prefetch=false);
+    void access_memory_and_die_if_qubit_not_found(inst_ptr, QUBIT, bool is_prefetch=false);
+
+    void try_rz_directed_prefetch(client_ptr&, inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////

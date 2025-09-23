@@ -319,17 +319,20 @@ main(int argc, char* argv[])
     // start sim loop:
     size_t sim_iter{0};
     bool converged{false};
-    while (!converged)
+//  while (!converged)
+    while (sim_iter == 0)
     {
+        constexpr size_t MIN_QUBITS{4};
+
         // figure out variable sim parameters:
         double target_error_rate_per_cycle = sc_logical_error_rate(cmp_sc_code_distance);
 
         // require a 4 qubit minimum
         size_t cmp_count = ceil(cmp_surface_code_fraction*num_program_qubits);
-        cmp_count = std::max(size_t{4}, cmp_count);
+        cmp_count = std::max(MIN_QUBITS, cmp_count);
 
         size_t cmp_phys_qubits = cmp_count * sc_phys_qubit_count(cmp_sc_code_distance);
-        size_t cmp_patches_per_row = 4;
+        size_t cmp_patches_per_row = MIN_QUBITS;
         size_t cmp_num_rows = ceil(_fpdiv(cmp_count, cmp_patches_per_row));
         double cmp_freq_ghz = sim::compute_freq_khz(cmp_sc_round_ns, cmp_sc_code_distance);
 
@@ -351,7 +354,6 @@ main(int argc, char* argv[])
                                             [] (auto* f) { return f->level_ == 0; });
         size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
                                             [] (auto* f) { return f->level_ == 1; });
-        std::cout << "fact_l1_count = " << fact_l1_count << ", fact_l2_count = " << fact_l2_count << "\n";
 
         // initialize memory:
         std::vector<sim::MEMORY_MODULE*> mem_modules{};
@@ -436,7 +438,8 @@ main(int argc, char* argv[])
         sim::print_stat_line(std::cout, "REQUIRED_CODE_DISTANCE", required_code_distance, false);
         sim::print_stat_line(std::cout, "REQUIRED_ERROR_RATE_PER_CYCLE", acceptable_error_rate_per_cycle, false);
 
-        if (cmp_sc_code_distance == required_code_distance || cmp_sc_code_distance == required_code_distance+1 || (sim_iter >= 3 && required_code_distance <= cmp_sc_code_distance))
+        bool within_distance = (cmp_sc_code_distance <= required_code_distance+1 && cmp_sc_code_distance >= required_code_distance-1);
+        if (within_distance || (sim_iter >= 3 && required_code_distance <= cmp_sc_code_distance))
         {
             converged = true;
         }

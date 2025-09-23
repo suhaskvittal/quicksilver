@@ -30,6 +30,9 @@ struct ROUTING_COMPONENT
 
 struct PATCH
 {
+    bool is_prefetched{false};
+    size_t num_uses{0};
+
     QUBIT contents{-1,-1};
     std::vector<ROUTING_COMPONENT::ptr_type> buses;
 };

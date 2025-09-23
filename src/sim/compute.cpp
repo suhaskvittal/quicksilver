@@ -96,17 +96,23 @@ COMPUTE::route_memory_access(
     uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
     cycle_routing_start = std::max(cycle_routing_start, earliest_start_cycle);
 
-    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(v_bus_it, m_bus_it, cycle_routing_start);
+//  auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(v_bus_it, m_bus_it, cycle_routing_start);
+    uint64_t routing_alloc_cycle = cycle_routing_start;
 
     uint64_t cmp_cycles_for_mswap = convert_ns_to_cycles(mswap_time_ns, OP_freq_khz);
     uint64_t completion_cycle = routing_alloc_cycle + cmp_cycles_for_mswap;
-    update_free_times_along_routing_path(path, completion_cycle, completion_cycle);
+//  update_free_times_along_routing_path(path, completion_cycle, completion_cycle);
 
     // update operands' available cycles
     qubit_available_cycle_[*victim] = completion_cycle;
     qubit_available_cycle_[incoming_qubit] = completion_cycle;
 
+    s_evictions_no_uses_ += (v_patch.num_uses == 0);
+    s_evictions_prefetch_no_uses_ += is_prefetch && (v_patch.num_uses == 0);
+
     // set `v_patch` contents to `incoming_qubit`
+    v_patch.is_prefetched = is_prefetch;
+    v_patch.num_uses = 0;
     v_patch.contents = incoming_qubit;
 
     // update replacement policy:
@@ -142,7 +148,7 @@ COMPUTE::dump_deadlock_info()
     std::cerr << "compute memory contents:\n";
     for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
     {
-        std::cerr << "\tPATCH " << (i-compute_start_idx_) << ", contents = " << patches_[i].contents << "\n";
+        std::cerr << "\tPATCH " << (i-compute_start_idx_) << ", contents = " << patches_[i].contents << ", num uses = " << patches_[i].num_uses << "\n";
     }
 
     for (auto& c : clients_)
@@ -164,7 +170,7 @@ COMPUTE::dump_deadlock_info()
                                     bool at_head = (!w.empty() && w.front() == inst);
                                     return at_head;
                                 });
-                if (!inst->is_scheduled && std::none_of(ready.begin(), ready.end(), [](bool r) { return r; }))
+                if (!inst->is_scheduled && !std::all_of(ready.begin(), ready.end(), [](bool r) { return r; }))
                     continue;
             
                 bool has_memory_stall = std::find_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(), [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_memory_.end();
@@ -427,7 +433,7 @@ COMPUTE::con_init_clients(std::vector<std::string> client_trace_files)
 void
 COMPUTE::client_fetch(client_ptr& c)
 {
-    constexpr size_t INST_READ_LIMIT{64};  // only read 64 instructions at a time to avoid taking too long
+    constexpr size_t INST_READ_LIMIT{8192};
 
     // find a qubit with an empty window:
     std::vector<QUBIT> qubits;
@@ -652,7 +658,7 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             result.is_memory_stall = true;
 
             // find the module that contains the qubit and initiate the memory access
-            access_memory_and_die_if_qubit_not_found(q);
+            access_memory_and_die_if_qubit_not_found(inst, q);
         }
         else
         {
@@ -683,53 +689,9 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         return result;
     }
 
-    if (GL_IMPL_RZ_PREFETCH && (inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX) && !inst->has_initiated_prefetch)
+    if (GL_IMPL_RZ_PREFETCH)
     {
-        /*
-            Explanation: if this gate is an RZ or RX gate, then we will prefetch the qubit operand for the next RZ or RX gate
-            in instruction order.
-        */
-
-        QUBIT pf_target{};
-        inst_ptr pf_inst{nullptr};
-        size_t pf_win_depth = std::numeric_limits<size_t>::max();
-        for (const auto& [q, win] : inst_windows_)
-        {
-            if (win.empty())
-                continue;
-            if (q.client_id != c->id)
-                continue;
-
-            // search for the next rz or rx gate in instruction order
-            auto rz_it = std::find_if(win.begin(), win.end(),
-                                        [this] (inst_ptr inst)
-                                        { 
-                                            return (inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX)
-                                                    && !inst->has_pending_prefetch_request;
-                                        });
-            size_t win_depth = std::distance(win.begin(), rz_it);
-            if (rz_it != win.end() && *rz_it != inst)
-            {
-                if (pf_inst == nullptr || win_depth < pf_win_depth)
-                {
-                    pf_target = q;
-                    pf_inst = *rz_it;
-                }
-            }
-        }
-
-        if (pf_inst != nullptr)
-        {
-            // prefetch `pf_target` if it is not in compute:
-            auto pf_patch_it = find_patch_containing_qubit(pf_target);
-            if (pf_patch_it == patches_.end())
-            {
-                access_memory_and_die_if_qubit_not_found(pf_target, true);
-                pf_inst->has_pending_prefetch_request = true;
-            }
-        }
-
-        inst->has_initiated_prefetch = true;
+        try_rz_directed_prefetch(c, inst);
     }
 
     return do_gate(c, inst, qubit_patches);
@@ -798,6 +760,10 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
         c->s_inst_routing_stall_cycles += routing_stall_cycles;
         c->s_inst_memory_stall_cycles += memory_stall_cycles;
         c->s_inst_resource_stall_cycles += resource_stall_cycles;
+
+        // reset the stats for the instruction:
+        inst->total_isolated_memory_stall_cycles = 0;
+        inst->total_isolated_resource_stall_cycles = 0;
     }
 }
 
@@ -902,11 +868,13 @@ COMPUTE::do_h_or_s_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_
     
     // compute amount of time spent in routing stall:
     uint64_t latency = (cycle_routing_start - current_cycle()) + 2;
-    bus_it->cycle_free = current_cycle() + latency;
+//  bus_it->cycle_free = current_cycle() + latency;
     
     // only 2 cycles are spent actually doing the gate -- any other latency is due to routing
     result.routing_stall_cycles = latency - 2;
     result.cycles_until_done = latency;
+
+    q_patch.num_uses++;
 
     return result;
 }
@@ -944,13 +912,16 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
             // three way max to determine when to start routing
             uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
 
-            auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
-            update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
+//          auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
+//          update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
+            uint64_t routing_alloc_cycle = cycle_routing_start;
 
             // note that `routing_alloc_cycle - current_cycle()` is number of cycles spent waiting for routing space
             f->consume_state();
             result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
             result.cycles_until_done = latency + result.routing_stall_cycles;
+            
+            q_patch.num_uses++;
             return result;
         }
     }
@@ -973,11 +944,16 @@ COMPUTE::do_cx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patc
 
     uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
 
-    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
-    update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
+//  auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
+//  update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
+    uint64_t routing_alloc_cycle = cycle_routing_start;
 
     result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
     result.cycles_until_done = 2 + result.routing_stall_cycles;
+
+    q0_patch.num_uses++;
+    q1_patch.num_uses++;
+
     return result;
 }
 
@@ -1150,7 +1126,7 @@ COMPUTE::find_memory_module_containing_qubit(QUBIT q)
 }
 
 void
-COMPUTE::access_memory_and_die_if_qubit_not_found(QUBIT q, bool is_prefetch)
+COMPUTE::access_memory_and_die_if_qubit_not_found(inst_ptr inst, QUBIT q, bool is_prefetch)
 {
     auto module_it = find_memory_module_containing_qubit(q);
     if (module_it == mem_modules_.end())
@@ -1167,7 +1143,86 @@ COMPUTE::access_memory_and_die_if_qubit_not_found(QUBIT q, bool is_prefetch)
 
         throw std::runtime_error("qubit " + q.to_string() + " not found in any memory module");
     }
-    (*module_it)->initiate_memory_access(q, is_prefetch);
+    (*module_it)->initiate_memory_access(inst, q, is_prefetch);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class ITER> double
+_weighted_window_depth(ITER begin_it, ITER it)
+{
+    return std::transform_reduce(begin_it, it, double{0.0}, std::plus<double>(),
+                                [] (COMPUTE::inst_ptr x) -> double
+                                {
+                                    if (x->type == INSTRUCTION::TYPE::RZ || x->type == INSTRUCTION::TYPE::RX)
+                                        return x->urotseq.size();
+                                    else if (x->type == INSTRUCTION::TYPE::CCX || x->type == INSTRUCTION::TYPE::CCZ)
+                                        return NUM_CCX_UOPS;
+                                    else if (is_software_instruction(x->type))
+                                        return 0.0;
+                                    else
+                                        return 2.0;
+                                });
+}
+
+void
+COMPUTE::try_rz_directed_prefetch(client_ptr& c, inst_ptr inst)
+{
+    /*
+        Explanation: if this gate is an RZ or RX gate, then we will prefetch the qubit operand for the next RZ or RX gate
+        in instruction order.
+    */
+    if (inst->has_initiated_prefetch || (inst->type != INSTRUCTION::TYPE::RZ && inst->type != INSTRUCTION::TYPE::RX))
+        return;
+
+    std::unordered_set<qubit_type> qubits_in_cmp;
+    for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+    {
+        if (patches_[i].contents.client_id == c->id)
+            qubits_in_cmp.insert(patches_[i].contents.qubit_id);
+    }
+
+    QUBIT q{c->id, inst->qubits[0]};
+    const auto& win = inst_windows_[q];
+
+    if (win.empty())
+        throw std::runtime_error("rz_directed_prefetch: no window found for " + q.to_string());
+
+    std::unordered_set<qubit_type> pf_targets;
+    size_t pf_limit{1};
+    for (auto it = win.begin()+1; it != win.end(); it++)
+    {
+        // only care about multi qubit instructions:
+        inst_ptr pf_inst = *it;
+        if (pf_inst->qubits.size() == 1)
+            continue;
+
+        // only care about instructions that are not scheduled:
+        if (pf_inst->is_scheduled)
+            continue;
+            
+        // only care about instructions that have not initiated a prefetch:
+        if (pf_inst->has_pending_prefetch_request)
+            continue;
+
+        for (qubit_type qid : pf_inst->qubits)
+        {
+            if (qubits_in_cmp.find(qid) == qubits_in_cmp.end())
+                pf_targets.insert(qid);
+        }
+
+        pf_inst->has_initiated_prefetch = true;
+
+        pf_limit--;
+        if (!pf_limit)
+            break;
+    }
+
+    if (pf_targets.empty())
+        return;
+
+    inst->has_initiated_prefetch = true;
 }
 
 ////////////////////////////////////////////////////////////
@@ -1186,7 +1241,6 @@ update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_type>& p
             path[i]->cycle_free = cmp_cycle_free_bulk;
     }
 }
-
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

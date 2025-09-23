@@ -55,7 +55,7 @@ template <class T> void
 print_stat_line(std::ostream& out, std::string name, T value, bool indent=true)
 {
     if (indent)
-        name = "\t" + name;
+        name = "   " + name;
     out << std::setw(52) << std::left << name << " : " << std::setw(12) << std::right << value << "\n";
 }
 

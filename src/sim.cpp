@@ -58,6 +58,9 @@ print_stats(std::ostream& out)
         print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
     }
 
+    print_stat_line(out, "EVICTIONS_NO_USES", GL_CMP->s_evictions_no_uses_, false);
+    print_stat_line(out, "EVICTIONS_PREFETCH_NO_USES", GL_CMP->s_evictions_prefetch_no_uses_, false);
+
     // print factory stats:
     std::unordered_map<size_t, std::vector<T_FACTORY*>> factory_level_map;
     for (auto* f : t_factories)

@@ -52,7 +52,7 @@ MEMORY_MODULE::find_uninitialized_qubit()
 ////////////////////////////////////////////////////////////
 
 void
-MEMORY_MODULE::initiate_memory_access(QUBIT qubit, bool is_prefetch)
+MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT qubit, bool is_prefetch)
 {
     // create a new request:
     // first make sure that the qubit does not already have a request:
@@ -68,7 +68,7 @@ MEMORY_MODULE::initiate_memory_access(QUBIT qubit, bool is_prefetch)
         s_num_prefetch_requests[qubit.client_id]++;
 
     // otherwise, create a new request:
-    request_type req{qubit, is_prefetch};
+    request_type req{inst, qubit, is_prefetch};
     if (!serve_memory_request(req))
         request_buffer_.push_back(req);
 }

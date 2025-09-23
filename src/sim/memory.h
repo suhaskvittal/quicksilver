@@ -49,6 +49,8 @@ class MEMORY_MODULE : public OPERABLE<MEMORY_EVENT_TYPE, MEMORY_EVENT_INFO>
 public:
     using typename OPERABLE<MEMORY_EVENT_TYPE, MEMORY_EVENT_INFO>::event_type;
 
+    using inst_ptr = CLIENT::inst_ptr;
+
     struct bank_type
     {
         std::vector<QUBIT> contents;
@@ -60,6 +62,7 @@ public:
 
     struct request_type
     {
+        inst_ptr inst;
         QUBIT qubit;
         bool is_prefetch;
     };
@@ -86,7 +89,7 @@ public:
     search_result_type find_qubit(QUBIT);
     search_result_type find_uninitialized_qubit();
 
-    void initiate_memory_access(QUBIT, bool is_prefetch=false);
+    void initiate_memory_access(inst_ptr, QUBIT, bool is_prefetch=false);
 
     void dump_contents();
 
