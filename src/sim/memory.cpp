@@ -77,6 +77,17 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT qubit, bool is_prefet
 ////////////////////////////////////////////////////////////
 
 void
+MEMORY_MODULE::serve_mswap(inst_ptr inst, QUBIT requested, QUBIT victim)
+{
+    request_type req{inst, requested, false};
+    if (!serve_memory_request(req, std::make_optional(victim)))
+        throw std::runtime_error("mswap: failed to serve memory request for qubit " + requested.to_string());
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
 MEMORY_MODULE::dump_contents()
 {
     for (size_t i = 0; i < banks_.size(); i++)
@@ -143,7 +154,7 @@ MEMORY_MODULE::OP_handle_event(event_type event)
 ////////////////////////////////////////////////////////////
 
 bool
-MEMORY_MODULE::serve_memory_request(const request_type& req)
+MEMORY_MODULE::serve_memory_request(const request_type& req, std::optional<QUBIT> preselected_victim)
 {
     constexpr uint64_t MSWAP_MEM_CYCLES = 3;  // note that these are memory cycles
 
@@ -156,14 +167,6 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
         throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
 
     [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
-
-    if (b_it->cycle_free > current_cycle())
-    {
-#if defined(MEMORY_VERBOSE)
-        std::cout << "\tbank " << bank_idx << " is not free yet -- cycle_free = " << b_it->cycle_free << "\n";
-#endif
-        return false;
-    }
 
     // first determine how long it will take to rotate the qubit to the head of the bank
     uint64_t left_rotation_cycles = std::distance(b_it->contents.begin(), q_it);
@@ -183,7 +186,8 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
                                                                 req.qubit,
                                                                 earliest_start_time_ns,
                                                                 mswap_time_ns,
-                                                                req.is_prefetch);
+                                                                req.is_prefetch,
+                                                                preselected_victim);
 
     if (!victim_found)
     {

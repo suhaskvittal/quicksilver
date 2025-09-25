@@ -13,6 +13,7 @@
 #include <unordered_set>
 
 //#define COMPUTE_VERBOSE
+#define DISABLE_MEMORY_ROUTING_STALL
 
 namespace sim
 {
@@ -76,11 +77,15 @@ COMPUTE::route_memory_access(
     QUBIT incoming_qubit,
     uint64_t route_min_start_time_ns,
     uint64_t mswap_time_ns,
-    bool is_prefetch)
+    bool is_prefetch,
+    std::optional<QUBIT> victim)
 {
-    std::optional<QUBIT> victim = repl_->select_victim(incoming_qubit, is_prefetch);
     if (!victim.has_value())
-        return {false, QUBIT{-1,-1}, 0};
+    {
+        victim = repl_->select_victim(incoming_qubit, is_prefetch);
+        if (!victim.has_value())
+            return {false, QUBIT{-1,-1}, 0};
+    }
 
     auto v_patch_it = find_patch_containing_qubit(*victim);
     if (v_patch_it == patches_.end())
@@ -96,16 +101,28 @@ COMPUTE::route_memory_access(
     uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
     cycle_routing_start = std::max(cycle_routing_start, earliest_start_cycle);
 
-//  auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(v_bus_it, m_bus_it, cycle_routing_start);
+#if defined(DISABLE_MEMORY_ROUTING_STALL)
     uint64_t routing_alloc_cycle = cycle_routing_start;
+#else
+    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(v_bus_it, m_bus_it, cycle_routing_start);
+#endif
 
     uint64_t cmp_cycles_for_mswap = convert_ns_to_cycles(mswap_time_ns, OP_freq_khz);
     uint64_t completion_cycle = routing_alloc_cycle + cmp_cycles_for_mswap;
-//  update_free_times_along_routing_path(path, completion_cycle, completion_cycle);
+#if !defined(DISABLE_MEMORY_ROUTING_STALL)
+    update_free_times_along_routing_path(path, completion_cycle, completion_cycle);
+#endif
 
     // update operands' available cycles
     qubit_available_cycle_[*victim] = completion_cycle;
     qubit_available_cycle_[incoming_qubit] = completion_cycle;
+
+    // need to track this if simulator-directed memory accesses are disabled (accesses done by MSWAP and MPREFETCH instead)
+    if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
+    {
+        qubits_unavailable_to_due_memory_access_.insert(incoming_qubit);
+        qubits_unavailable_to_due_memory_access_.insert(*victim);
+    }
 
     s_evictions_no_uses_ += (v_patch.num_uses == 0);
     s_evictions_prefetch_no_uses_ += is_prefetch && (v_patch.num_uses == 0);
@@ -538,9 +555,54 @@ COMPUTE::client_schedule(client_ptr& c)
                         });
         auto max_it = std::max_element(avail_cycles.begin(), avail_cycles.end());
         if (*max_it > current_cycle())
+        {
             OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::INST_EXECUTE, *max_it - current_cycle(), COMPUTE_EVENT_INFO{c->id, inst});
+
+            if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
+            {
+                // we want to count the time between the latest memory stall to the latest non-memory stall
+                // -- the isolated stall time is the difference between these two times
+                QUBIT latest_mem_stall_q{-1, -1};
+                QUBIT latest_no_mem_stall_q{-1, -1};
+
+                for (qubit_type qid : inst->qubits)
+                {
+                    QUBIT q{c->id, qid};
+                    uint64_t cycle_avail = qubit_available_cycle_[q];
+                    if (cycle_avail < current_cycle())
+                        continue;
+
+                    if (qubits_unavailable_to_due_memory_access_.count(q))
+                    {
+                        if (latest_mem_stall_q.qubit_id < 0 || cycle_avail > qubit_available_cycle_[latest_mem_stall_q])
+                            latest_mem_stall_q = q;
+                    }
+                    else
+                    {
+                        if (latest_no_mem_stall_q.qubit_id < 0 || cycle_avail > qubit_available_cycle_[latest_no_mem_stall_q])
+                            latest_no_mem_stall_q = q;
+                    }
+                }
+
+                if (latest_mem_stall_q.qubit_id >= 0 && latest_no_mem_stall_q.qubit_id >= 0)
+                {
+                    uint64_t mem_stall_end = qubit_available_cycle_[latest_mem_stall_q];
+                    uint64_t non_mem_stall_end = qubit_available_cycle_[latest_no_mem_stall_q];
+
+                    if (mem_stall_end > non_mem_stall_end)
+                        inst->total_isolated_memory_stall_cycles += mem_stall_end - non_mem_stall_end;
+                }
+                else if (latest_mem_stall_q.qubit_id >= 0)
+                {
+                    inst->total_isolated_memory_stall_cycles += qubit_available_cycle_[latest_mem_stall_q] - current_cycle();
+                }
+                // don't care about other cases -- these have no memory stalls
+            }
+        }
         else // save a little time and execute right now:
+        {
             client_execute(c, inst);
+        }
     }
 }
 
@@ -550,7 +612,20 @@ COMPUTE::client_schedule(client_ptr& c)
 void
 COMPUTE::client_execute(client_ptr& c, inst_ptr inst)
 {
-    auto result = execute_instruction(c, inst);
+    // check if this is an MSWAP instruction -- cannot fail
+    exec_result_type result;
+    if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
+    {
+        if (!GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
+            throw std::runtime_error("MSWAP and MPREFETCH instructions should only be added when simulator-directed memory accesses are disabled (add -dsma flag)");
+        do_mswap_or_mprefetch(c, inst);
+        // cannot fail, so just return a dummy result that shows the instruction is done immediately
+        result.cycles_until_done = 0;
+    }
+    else
+    {
+        result = execute_instruction(c, inst);
+    }
     process_execution_result(c, inst, result);
 }
 
@@ -583,11 +658,15 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
     {
         uint64_t unrolled_inst_done_before = c->s_unrolled_inst_done;
 
-        c->s_inst_done++;
-        if (inst->num_uops > 0)
-            c->s_unrolled_inst_done += inst->num_uops;
-        else
-            c->s_unrolled_inst_done++;
+        // do not increment instruction done count for directive-like instructions (i.e., mswap)
+        if (inst->type != INSTRUCTION::TYPE::MSWAP)
+        {
+            c->s_inst_done++;
+            if (inst->num_uops > 0)
+                c->s_unrolled_inst_done += inst->num_uops;
+            else
+                c->s_unrolled_inst_done++;
+        }
 
         // remove the instruction from all windows it is in
         for (qubit_type qid : inst->qubits)
@@ -609,8 +688,8 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
 
         // print progress if flag is set:
         bool pp = (c->s_unrolled_inst_done % GL_PRINT_PROGRESS_FREQ) 
-                    <= (unrolled_inst_done_before % GL_PRINT_PROGRESS_FREQ);
-        if (GL_PRINT_PROGRESS && pp)
+                    < (unrolled_inst_done_before % GL_PRINT_PROGRESS_FREQ);
+        if (GL_PRINT_PROGRESS && (pp || GL_PRINT_PROGRESS_FREQ == 1))
         {
             double t_min = (static_cast<double>(current_cycle()) / OP_freq_khz) * 1e-3 / 60.0;
             double urot_inst_rate = static_cast<double>(c->s_unrolled_inst_done) / t_min * 1e-3;
@@ -658,7 +737,8 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
             result.is_memory_stall = true;
 
             // find the module that contains the qubit and initiate the memory access
-            access_memory_and_die_if_qubit_not_found(inst, q);
+            if (!GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
+                access_memory_and_die_if_qubit_not_found(inst, q);
         }
         else
         {
@@ -748,6 +828,12 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
         {
             QUBIT q{c->id, qid};
             qubit_available_cycle_[q] = current_cycle() + result.cycles_until_done;
+
+            if (inst->type != INSTRUCTION::TYPE::MSWAP && inst->type != INSTRUCTION::TYPE::MPREFETCH)
+            {
+                if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS && qubits_unavailable_to_due_memory_access_.count(q))
+                    qubits_unavailable_to_due_memory_access_.erase(q);
+            }
         }
 
         // update stall related stats:
@@ -912,14 +998,17 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
             // three way max to determine when to start routing
             uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
 
-//          auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
-//          update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
-            uint64_t routing_alloc_cycle = cycle_routing_start;
+            auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
+            update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
 
             // note that `routing_alloc_cycle - current_cycle()` is number of cycles spent waiting for routing space
             f->consume_state();
             result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
             result.cycles_until_done = latency + result.routing_stall_cycles;
+
+            // update t gate count and total t error
+            c->s_t_gate_count++;
+            c->s_total_t_error += f->output_error_prob_;
             
             q_patch.num_uses++;
             return result;
@@ -944,9 +1033,8 @@ COMPUTE::do_cx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patc
 
     uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
 
-//  auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
-//  update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
-    uint64_t routing_alloc_cycle = cycle_routing_start;
+    auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
+    update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
 
     result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
     result.cycles_until_done = 2 + result.routing_stall_cycles;
@@ -1035,6 +1123,35 @@ COMPUTE::do_ccx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_pat
     }
 
     return do_gate(c, inst->curr_uop, qubit_patches);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
+{
+    if (GL_ELIDE_MSWAP_INSTRUCTIONS || (inst->type == INSTRUCTION::TYPE::MPREFETCH && GL_ELIDE_MPREFETCH_INSTRUCTIONS))
+        return;
+
+    // update gate counts
+    if (inst->type == INSTRUCTION::TYPE::MSWAP)
+        c->s_mswap_count++;
+    else
+        c->s_mprefetch_count++;
+
+    // check if the operands are in memory
+    qubit_type q_requested = inst->qubits[0];
+    qubit_type q_victim = inst->qubits[1];
+
+    QUBIT requested{c->id, q_requested};
+    QUBIT victim{c->id, q_victim};
+    auto module_it = find_memory_module_containing_qubit(requested);
+    if (module_it == mem_modules_.end())
+        throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() + " is not in any memory module");
+
+    // this is a demand access -- must be served immediately
+    (*module_it)->serve_mswap(inst, requested, victim);
 }
 
 ////////////////////////////////////////////////////////////
@@ -1252,6 +1369,15 @@ is_software_instruction(INSTRUCTION::TYPE type)
         || type == INSTRUCTION::TYPE::Y
         || type == INSTRUCTION::TYPE::Z
         || type == INSTRUCTION::TYPE::SWAP;
+}
+
+bool
+is_t_like_instruction(INSTRUCTION::TYPE type)
+{
+    return type == INSTRUCTION::TYPE::T
+        || type == INSTRUCTION::TYPE::TDG
+        || type == INSTRUCTION::TYPE::TX
+        || type == INSTRUCTION::TYPE::TXDG;
 }
 
 ////////////////////////////////////////////////////////////

@@ -58,6 +58,12 @@ struct CLIENT
     uint64_t s_inst_resource_stall_cycles{0};
     uint64_t s_inst_memory_stall_cycles{0};
 
+    uint64_t s_mswap_count{0};
+    uint64_t s_mprefetch_count{0};
+
+    uint64_t s_t_gate_count{0};
+    double   s_total_t_error{0};
+
     // functions and constructor:
     CLIENT(std::string trace_file, int8_t id);
     ~CLIENT();

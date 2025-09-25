@@ -90,6 +90,7 @@ public:
     search_result_type find_uninitialized_qubit();
 
     void initiate_memory_access(inst_ptr, QUBIT, bool is_prefetch=false);
+    void serve_mswap(inst_ptr, QUBIT requested, QUBIT victim);
 
     void dump_contents();
 
@@ -97,7 +98,7 @@ public:
 protected:
     void OP_handle_event(event_type) override;
 private:
-    bool serve_memory_request(const request_type&);
+    bool serve_memory_request(const request_type&, std::optional<QUBIT> preselected_victim=std::nullopt);
 
     std::vector<request_type>::iterator find_request_for_qubit(QUBIT);
     std::vector<request_type>::iterator find_request_for_bank(size_t, std::vector<request_type>::iterator);

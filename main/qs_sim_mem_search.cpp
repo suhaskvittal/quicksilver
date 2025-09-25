@@ -87,12 +87,30 @@ sc_distance_for_target_logical_error_rate(double e)
         return d_ce;
 }
 
-size_t
-mem_bb_distance_for_given_sc_distance(size_t d)
+double
+mem_bb_logical_error_rate(size_t d)
 {
-    // round d to the nearest multiple of 6
-    double dby6 = static_cast<double>(d) / 6.0;
-    return static_cast<size_t>(round(ceil(dby6) * 6));
+    if (d == 6)
+        return 7e-5;
+    else if (d == 12)
+        return 2e-7;
+    else if (d == 18)
+        return 2e-12;
+    else  // (d = 24)
+        return 2e-17;  // don't actually know this one
+}
+
+size_t
+mem_bb_distance_for_target_logical_error_rate(double e)
+{
+    if (e >= 7e-5)
+        return 6;
+    else if (e >= 2e-7)
+        return 12;
+    else if (e >= 2e-12)
+        return 18;
+    else  // (e = 2e-17)
+        return 24;
 }
 
 ////////////////////////////////////////////////////////////
@@ -238,6 +256,197 @@ fact_create_factory_config_for_target_logical_error_rate(double e, size_t max_ph
 // want a 99% success rate for the application
 const double TARGET_APP_SUCCESS_RATE{0.99};
 
+struct ITERATION_CONFIG
+{
+    // target error rates are used to determine code distance and factory config -- probably the only thing that is modified between iterations
+    double cmp_target_error_rate_per_cycle;
+    double mem_bb_target_error_rate_per_cycle;
+    double fact_target_error_rate_per_gate;
+
+    // simulation setup:
+    size_t      num_program_qubits;
+    std::string trace;
+    int64_t     inst_sim;
+    int64_t     inst_assume_total;
+
+    // compute setup:
+    int64_t                          cmp_sc_count;
+    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl;
+    int64_t                          cmp_sc_round_ns;
+
+    // memory setup:
+    size_t   mem_bb_num_modules;
+    size_t   mem_bb_qubits_per_bank;
+    int64_t  mem_bb_round_ns;
+
+    // factory setup:
+    int64_t fact_phys_qubits_per_program_qubit;
+
+    // output of an iteration:
+    double application_success_rate;
+};
+
+ITERATION_CONFIG
+sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
+{
+    constexpr size_t MIN_QUBITS{4};
+
+    size_t num_program_qubits = conf.num_program_qubits;
+    std::string trace = conf.trace;
+    int64_t     inst_sim = conf.inst_sim;
+    int64_t     inst_assume_total = conf.inst_assume_total;
+
+    int64_t                          cmp_sc_count = conf.cmp_sc_count;
+    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = conf.cmp_repl;
+    uint64_t                         cmp_sc_round_ns = conf.cmp_sc_round_ns;
+
+    size_t mem_bb_num_modules = conf.mem_bb_num_modules;
+    size_t mem_bb_qubits_per_bank = conf.mem_bb_qubits_per_bank;
+    uint64_t mem_bb_round_ns = conf.mem_bb_round_ns;
+
+    int64_t fact_phys_qubits_per_program_qubit = conf.fact_phys_qubits_per_program_qubit;
+
+    // 1. determine number of surface code qubits
+    size_t cmp_sc_code_distance = sc_distance_for_target_logical_error_rate(conf.cmp_target_error_rate_per_cycle);
+    double cmp_sc_freq_ghz = sim::compute_freq_khz(cmp_sc_round_ns, cmp_sc_code_distance);
+    size_t cmp_sc_phys_qubits = cmp_sc_count * sc_phys_qubit_count(cmp_sc_code_distance);
+
+    size_t cmp_sc_num_patches_per_row = 4;
+    size_t cmp_sc_num_rows = ceil(_fpdiv(cmp_sc_count, cmp_sc_num_patches_per_row));
+
+    // 2. determine memory config:
+    size_t mem_bb_banks_per_module = (num_program_qubits > cmp_sc_count) 
+                                    ? ceil(_fpdiv(num_program_qubits - cmp_sc_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
+                                    : 0;
+    size_t mem_bb_code_distance = mem_bb_distance_for_target_logical_error_rate(conf.mem_bb_target_error_rate_per_cycle);
+    double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_round_ns, mem_bb_code_distance);
+    size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
+    
+    // 2.1. create memory modules:
+    std::vector<sim::MEMORY_MODULE*> mem_modules;
+    for (size_t i = 0; i < mem_bb_num_modules; i++)
+    {
+        auto* m = new sim::MEMORY_MODULE(mem_bb_freq_ghz, mem_bb_banks_per_module, mem_bb_qubits_per_bank);
+        mem_modules.push_back(m);
+    }
+
+    // 3. determine factory config:
+    size_t fact_max_phys_qubits = num_program_qubits * fact_phys_qubits_per_program_qubit;
+    std::vector<sim::T_FACTORY*> t_factories;
+    size_t fact_phys_qubits;
+    std::tie(t_factories, fact_phys_qubits) = fact_create_factory_config_for_target_logical_error_rate(
+                                                    conf.fact_target_error_rate_per_gate,
+                                                    fact_max_phys_qubits,
+                                                    cmp_sc_round_ns);
+    size_t fact_l1_count = std::count_if(t_factories.begin(), t_factories.end(),
+                                        [] (auto* f) { return f->level_ == 0; });
+    size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
+                                        [] (auto* f) { return f->level_ == 1; });
+
+    // 4. initialize `GL_CMP`
+    sim::GL_CMP = new sim::COMPUTE(cmp_sc_freq_ghz, {trace}, cmp_sc_num_rows, cmp_sc_num_patches_per_row, t_factories, mem_modules, cmp_repl);
+
+    // 5. run simulation:
+    std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";
+    sim::print_stat_line(std::cout, "CMP_CODE_DISTANCE", cmp_sc_code_distance, false);
+    sim::print_stat_line(std::cout, "CMP_COMPUTE_PATCHES", cmp_sc_num_patches_per_row*cmp_sc_num_rows, false);
+    sim::print_stat_line(std::cout, "FACT_L1_COUNT", fact_l1_count, false);
+    sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
+    sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
+    sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
+
+    // reset global variables
+    sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
+    sim::GL_CURRENT_TIME_NS = 0;
+
+    // 5.1. initialize each component:
+    sim::GL_CMP->OP_init();
+    for (auto* m : mem_modules)
+        m->OP_init();
+    for (auto* f : t_factories)
+        f->OP_init();
+
+    // 5.2. loop until `inst_sim` is reached
+    bool done;
+    do
+    {
+        // arbitrate events:
+        sim::T_FACTORY* earliest_fact = sim::arbitrate_event_selection_from_vector(t_factories);
+        sim::MEMORY_MODULE* earliest_mem = sim::arbitrate_event_selection_from_vector(mem_modules);
+
+        bool deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
+
+        if (deadlock)
+        {
+            sim::GL_CMP->dump_deadlock_info();
+            throw std::runtime_error("deadlock detected");
+        }
+
+        // check if we are done:
+        const auto& clients = sim::GL_CMP->get_clients();
+        done = std::all_of(clients.begin(), clients.end(),
+                            [inst_sim] (const auto& c) { return c->s_unrolled_inst_done >= inst_sim; });
+    }
+    while (!done);
+
+    // 6. compute application success rate and update target error rates
+    double inst_sim_ratio = _fpdiv(inst_assume_total, inst_sim);
+    // 6.1. compute error:
+    double cmp_cycles = static_cast<double>(sim::GL_CMP->current_cycle());
+    cmp_cycles *= inst_sim_ratio;  // scale up `cmp_cycles`
+    double cmp_error_rate_per_cycle_one_qubit = sc_logical_error_rate(cmp_sc_code_distance);
+    double cmp_error_rate_per_cycle_all_qubits = cmp_error_rate_per_cycle_one_qubit * cmp_sc_count;
+    double cmp_total_error = cmp_error_rate_per_cycle_all_qubits * cmp_cycles;
+
+    // 6.2. memory error:
+    double mem_cycles = static_cast<double>(mem_modules[0]->current_cycle());
+    mem_cycles *= inst_sim_ratio;  // scale up `mem_cycles`
+    double mem_error_rate_per_cycle_one_block = mem_bb_logical_error_rate(mem_bb_code_distance);
+    double mem_error_rate_per_cycle_all_blocks = mem_error_rate_per_cycle_one_block * mem_bb_num_modules * mem_bb_banks_per_module;
+    double mem_total_error = mem_error_rate_per_cycle_all_blocks * mem_cycles;
+
+    // 6.3. factory error:
+    const auto& client = sim::GL_CMP->get_clients()[0];
+    double total_t_gates = static_cast<double>(client->s_t_gate_count) * inst_sim_ratio;
+    double fact_total_error = client->s_total_t_error * inst_sim_ratio;
+
+    // 6.4. application success rate:
+    double application_success_rate = 1.0 - cmp_total_error - mem_total_error - fact_total_error;
+
+    // 6.5. update configuration
+    conf.cmp_target_error_rate_per_cycle = (1.0 - TARGET_APP_SUCCESS_RATE) / (cmp_cycles * cmp_sc_count);
+    conf.mem_bb_target_error_rate_per_cycle = (1.0 - TARGET_APP_SUCCESS_RATE) / (mem_cycles * mem_bb_num_modules * mem_bb_banks_per_module);
+    conf.fact_target_error_rate_per_gate = (1.0 - TARGET_APP_SUCCESS_RATE) / total_t_gates;
+
+    // 7. print stats:
+    sim::print_stats(std::cout);
+    sim::print_stat_line(std::cout, "SCALED_CMP_CYCLES", cmp_cycles, false);
+    sim::print_stat_line(std::cout, "L1_FACTORY_COUNT", fact_l1_count, false);
+    sim::print_stat_line(std::cout, "L2_FACTORY_COUNT", fact_l2_count, false);
+    sim::print_stat_line(std::cout, "COMPUTE_TOTAL_PHYSICAL_QUBITS", cmp_sc_phys_qubits, false);
+    sim::print_stat_line(std::cout, "FACTORY_TOTAL_PHYSICAL_QUBITS", fact_phys_qubits, false);
+    sim::print_stat_line(std::cout, "MEMORY_TOTAL_PHYSICAL_QUBITS", mem_bb_phys_qubits, false);
+    sim::print_stat_line(std::cout, "SIMULATED_CODE_DISTANCE", cmp_sc_code_distance, false);
+    sim::print_stat_line(std::cout, "COMPUTE_TOTAL_ERROR", cmp_total_error, false);
+    sim::print_stat_line(std::cout, "MEMORY_TOTAL_ERROR", mem_total_error, false);
+    sim::print_stat_line(std::cout, "FACTORY_TOTAL_ERROR", fact_total_error, false);
+    sim::print_stat_line(std::cout, "APPLICATION_SUCCESS_RATE", application_success_rate, false);
+
+    std::cout << "NEXT_ITERATION\n";
+    sim::print_stat_line(std::cout, "CMP_TARGET_ERROR_RATE_PER_CYCLE", conf.cmp_target_error_rate_per_cycle);
+    sim::print_stat_line(std::cout, "MEM_BB_TARGET_ERROR_RATE_PER_CYCLE", conf.mem_bb_target_error_rate_per_cycle);
+    sim::print_stat_line(std::cout, "FACT_TARGET_ERROR_RATE_PER_GATE", conf.fact_target_error_rate_per_gate);
+
+    // 8. dealloc memory:
+    delete sim::GL_CMP;
+    for (auto* m : mem_modules)
+        delete m;
+    for (auto* f : t_factories)
+        delete f;
+
+    return conf;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -247,18 +456,13 @@ main(int argc, char* argv[])
     std::string trace;
 
     int64_t inst_sim;
-    int64_t inst_sim_assume_total;
+    int64_t inst_assume_total;
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
-    double cmp_surface_code_fraction;
+    int64_t cmp_sc_count;
     int64_t cmp_repl_id;
 
-    // factory budget: this is a bit complicated. We do the following to ensure a fair analysis:
-    //   (1) N = number of program qubits
-    //   (2) P = number of physical qubits required to implement N surface code qubits. Note that not all program qubits will be implemented
-    //          using the compute budget.
-    //   (3) We give magic state factories `fact_prog_fraction * P` physical qubits.
-    double fact_prog_fraction;
+    int64_t fact_phys_qubits_per_program_qubit;
 
     // memory budget can be allocated absolutely (`mem_num_modules`) or as a proportion of the total number of program qubits (`mem_fraction_budget`)
     int64_t mem_bb_num_modules;
@@ -275,27 +479,25 @@ main(int argc, char* argv[])
     ARGPARSE()
         .required("trace", "path to trace file", trace)
         .required("inst-sim", "number of instructions to simulate", inst_sim)
-        .required("inst-sim-assume-total", "number of instructions assumed to be in the larger program", inst_sim_assume_total)
+        .required("inst-assume-total", "number of instructions assumed to be in the larger program", inst_assume_total)
         // simulator verbosity:
         .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
         // setup:
         .optional("-rzpf", "--rz-prefetch", "enable rz directed prefetch", sim::GL_IMPL_RZ_PREFETCH, false)
+        .optional("-dsma", "--disable-simulator-directed-memory-access", "disable simulator directed memory access", sim::GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS, false)
+        .optional("-emswap", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
         // configuration:
-        .optional("", "--cmp-surface-code-fraction", "fraction of program qubits to allocate to surface codes", cmp_surface_code_fraction, 0.1)
+        .optional("", "--cmp-sc-count", "number of surface codes to allocate to compute", cmp_sc_count, 4)
         .optional("-crepl", "--cmp-repl-policy", "replacement policy for compute", cmp_repl_id, static_cast<int>(sim::COMPUTE::REPLACEMENT_POLICY::LTI))
-        .optional("", "--fact-prog-fraction", "fraction of program qubits to allocate to factories", fact_prog_fraction, 0.6)
+        .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", fact_phys_qubits_per_program_qubit, 50)
         .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
         .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
         .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
         .optional("", "--mem-bb-round-ns", "round time for memory banks", mem_bb_round_ns, 1800)
-        .optional("", "--initial-cmp-sc-code-distance", "initial surface code distance", cmp_sc_code_distance, 19)
         .parse(argc, argv);
 
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
-
-    // bb code distance is a function of the sc code distance
     sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = static_cast<sim::COMPUTE::REPLACEMENT_POLICY>(cmp_repl_id);
-    mem_bb_code_distance = mem_bb_distance_for_given_sc_distance(cmp_sc_code_distance);
 
     if (sim::GL_IMPL_RZ_PREFETCH)
         std::cout << "*** enabling rz directed prefetch ***\n";
@@ -317,146 +519,34 @@ main(int argc, char* argv[])
     }
 
     // start sim loop:
+    ITERATION_CONFIG conf;
+
+    // initialize config:
+    conf.cmp_target_error_rate_per_cycle = 1e-12;
+    conf.mem_bb_target_error_rate_per_cycle = 1e-12;
+    conf.fact_target_error_rate_per_gate = 1e-12;
+
+    conf.num_program_qubits = num_program_qubits;
+    conf.trace = trace;
+    conf.inst_sim = inst_sim;
+    conf.inst_assume_total = inst_assume_total;
+
+    conf.cmp_sc_count = cmp_sc_count;
+    conf.cmp_repl = cmp_repl;
+    conf.cmp_sc_round_ns = cmp_sc_round_ns;
+
+    conf.mem_bb_num_modules = mem_bb_num_modules;
+    conf.mem_bb_qubits_per_bank = mem_bb_qubits_per_bank;
+    conf.mem_bb_round_ns = mem_bb_round_ns;
+
+    conf.fact_phys_qubits_per_program_qubit = fact_phys_qubits_per_program_qubit;
+
     size_t sim_iter{0};
     bool converged{false};
 //  while (!converged)
-    while (sim_iter == 0)
+    while (sim_iter <= 1)
     {
-        constexpr size_t MIN_QUBITS{4};
-
-        // figure out variable sim parameters:
-        double target_error_rate_per_cycle = sc_logical_error_rate(cmp_sc_code_distance);
-
-        // require a 4 qubit minimum
-        size_t cmp_count = ceil(cmp_surface_code_fraction*num_program_qubits);
-        cmp_count = std::max(MIN_QUBITS, cmp_count);
-
-        size_t cmp_phys_qubits = cmp_count * sc_phys_qubit_count(cmp_sc_code_distance);
-        size_t cmp_patches_per_row = MIN_QUBITS;
-        size_t cmp_num_rows = ceil(_fpdiv(cmp_count, cmp_patches_per_row));
-        double cmp_freq_ghz = sim::compute_freq_khz(cmp_sc_round_ns, cmp_sc_code_distance);
-
-        size_t mem_bb_banks_per_module = (num_program_qubits > cmp_count) 
-                                        ? ceil(_fpdiv(num_program_qubits - cmp_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
-                                        : 0;
-        double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_round_ns, mem_bb_code_distance);
-
-        size_t fact_max_phys_qubits = ceil(num_program_qubits * sc_phys_qubit_count(cmp_sc_code_distance) * fact_prog_fraction);
-
-        // initialize factories:
-        std::vector<sim::T_FACTORY*> t_factories;
-        size_t fact_phys_qubits;
-        std::tie(t_factories, fact_phys_qubits) = fact_create_factory_config_for_target_logical_error_rate(
-                                                        target_error_rate_per_cycle,
-                                                        fact_max_phys_qubits,
-                                                        cmp_sc_round_ns);
-        size_t fact_l1_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                            [] (auto* f) { return f->level_ == 0; });
-        size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                            [] (auto* f) { return f->level_ == 1; });
-
-        // initialize memory:
-        std::vector<sim::MEMORY_MODULE*> mem_modules{};
-        for (size_t i = 0; i < mem_bb_num_modules; i++)
-        {
-            auto* m = new sim::MEMORY_MODULE(mem_bb_freq_ghz, mem_bb_banks_per_module, mem_bb_qubits_per_bank);
-            mem_modules.push_back(m);
-        }
-        size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
-
-        // initialize compute
-        sim::GL_CMP = new sim::COMPUTE(cmp_freq_ghz, {trace}, cmp_num_rows, cmp_patches_per_row, t_factories, mem_modules, cmp_repl);
-
-        // run simulation until EOF
-        std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";
-        sim::print_stat_line(std::cout, "CMP_CODE_DISTANCE", cmp_sc_code_distance, false);
-        sim::print_stat_line(std::cout, "CMP_COMPUTE_PATCHES", cmp_patches_per_row*cmp_num_rows, false);
-        sim::print_stat_line(std::cout, "FACT_L1_COUNT", fact_l1_count, false);
-        sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
-        sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
-        sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
-
-        // run initialization:
-        sim::GL_CMP->OP_init();
-        for (auto* m : mem_modules)
-            m->OP_init();
-        for (auto* f : t_factories)
-            f->OP_init();
-
-
-        sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
-        bool done;
-        do
-        {
-            // arbitrate events:
-            sim::T_FACTORY* earliest_fact = sim::arbitrate_event_selection_from_vector(t_factories);
-            sim::MEMORY_MODULE* earliest_mem = sim::arbitrate_event_selection_from_vector(mem_modules);
-
-            bool deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
-
-            if (deadlock)
-            {
-                sim::GL_CMP->dump_deadlock_info();
-                throw std::runtime_error("deadlock detected");
-            }
-
-            // check if we are done:
-            const auto& clients = sim::GL_CMP->get_clients();
-            done = std::all_of(clients.begin(), clients.end(),
-                                [inst_sim] (const auto& c) { return c->s_unrolled_inst_done >= inst_sim; });
-        }
-        while (!done);
-
-        // now that the simulation is done -- analyze the stats to determine if we have converged or not
-        // for simplicity, assume that the bottleneck is the amount of compute cycles -- this is the case for
-        // our setup, since we have set up the magic state factories to spit out magic states at a rate lower
-        // than the logical error rate
-        
-        // compute required error rate that would have achieved the application success rate anyways.
-        double cmp_cycles = static_cast<double>(sim::GL_CMP->current_cycle());
-
-        // scale cycles by `inst_sim_assume_total/inst_sim`
-        double inst_sim_ratio = static_cast<double>(inst_sim_assume_total) / static_cast<double>(inst_sim);
-        cmp_cycles *= inst_sim_ratio;
-
-        double log_1_minus_acceptable_error_rate_per_cycle = (1.0/cmp_cycles) * log(TARGET_APP_SUCCESS_RATE);
-        double acceptable_error_rate_per_cycle = 1.0 - exp(log_1_minus_acceptable_error_rate_per_cycle);
-        size_t required_code_distance = sc_distance_for_target_logical_error_rate(acceptable_error_rate_per_cycle);
-
-        sim::print_stats(std::cout);
-        sim::print_stat_line(std::cout, "INST_SIM_RATIO", inst_sim_ratio, false);
-        sim::print_stat_line(std::cout, "SCALED_CMP_CYCLES", cmp_cycles, false);
-        sim::print_stat_line(std::cout, "L1_FACTORY_COUNT", fact_l1_count, false);
-        sim::print_stat_line(std::cout, "L2_FACTORY_COUNT", fact_l2_count, false);
-        sim::print_stat_line(std::cout, "COMPUTE_TOTAL_PHYSICAL_QUBITS", cmp_phys_qubits, false);
-        sim::print_stat_line(std::cout, "FACTORY_TOTAL_PHYSICAL_QUBITS", fact_phys_qubits, false);
-        sim::print_stat_line(std::cout, "MEMORY_TOTAL_PHYSICAL_QUBITS", mem_bb_phys_qubits, false);
-
-        sim::print_stat_line(std::cout, "SIMULATED_CODE_DISTANCE", cmp_sc_code_distance, false);
-        sim::print_stat_line(std::cout, "SIMULATED_ERROR_RATE_PER_CYCLE", target_error_rate_per_cycle, false);
-
-        sim::print_stat_line(std::cout, "REQUIRED_CODE_DISTANCE", required_code_distance, false);
-        sim::print_stat_line(std::cout, "REQUIRED_ERROR_RATE_PER_CYCLE", acceptable_error_rate_per_cycle, false);
-
-        bool within_distance = (cmp_sc_code_distance <= required_code_distance+1 && cmp_sc_code_distance >= required_code_distance-1);
-        if (within_distance || (sim_iter >= 3 && required_code_distance <= cmp_sc_code_distance))
-        {
-            converged = true;
-        }
-        else 
-        {
-            // need to adjust code distances:
-            cmp_sc_code_distance = required_code_distance;
-            mem_bb_code_distance = mem_bb_distance_for_given_sc_distance(cmp_sc_code_distance);
-        }
-
-        // deallocate memory:
-        delete sim::GL_CMP;
-        for (auto* f : t_factories)
-            delete f;
-        for (auto* m : mem_modules)
-            delete m;
-
+        conf = sim_iteration(conf, sim_iter);
         sim_iter++;
     }
 

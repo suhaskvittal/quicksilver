@@ -98,6 +98,20 @@ target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
 ###################################################
 ###################################################
 
+# compiler for adding memory instructions:
+
+add_executable(qs_mem_compile main/qs_mem_compile.cpp
+                src/argparse.cpp
+                src/instruction.cpp
+                src/generic_io.cpp
+                src/memory/compiler.cpp)
+target_compile_options(qs_mem_compile PRIVATE ${COMPILE_OPTIONS})
+target_include_directories(qs_mem_compile PRIVATE "src")
+target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB)
+
+###################################################
+###################################################
+
 # iterative simulator for memory evaluations:
 add_executable(qs_sim_mem main/qs_sim_mem_search.cpp)
 target_link_libraries(qs_sim_mem PRIVATE qssl)

@@ -42,6 +42,10 @@ extern std::uniform_real_distribution<double> FP_RAND;
 extern bool    GL_PRINT_PROGRESS;
 extern int64_t GL_PRINT_PROGRESS_FREQ;
 
+extern bool    GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS;
+extern bool    GL_ELIDE_MSWAP_INSTRUCTIONS;
+extern bool    GL_ELIDE_MPREFETCH_INSTRUCTIONS;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

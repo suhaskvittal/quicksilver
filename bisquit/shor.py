@@ -45,9 +45,13 @@ if RSA_MODE == 16:
     A_INV = 9880
 
 NUM_BITS = RSA_MODE
+QFT_DENOM = calculate_aqft_max_denom(NUM_BITS)
 
 #################################################################
 #################################################################
+
+QFT_CACHE = {} # maps qft for given register to qasm string
+IQFT_CACHE = {}
 
 def fourier_adder(ctrl: list[str], qr: str, a: int) -> str:
     '''
@@ -81,8 +85,14 @@ def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
     out = ''
 
     ccfadd_a = fourier_adder([c1, c2], qr, a)
-    iqft_qr = iqft(qr, NUM_BITS)
-    qft_qr = qft(qr, NUM_BITS)
+
+    if qr not in QFT_CACHE:
+        QFT_CACHE[qr] = qft(qr, NUM_BITS, QFT_DENOM)
+    if qr not in IQFT_CACHE:
+        IQFT_CACHE[qr] = iqft(qr, NUM_BITS, QFT_DENOM)
+
+    iqft_qr = IQFT_CACHE[qr]
+    qft_qr = QFT_CACHE[qr]
 
     out += ccfadd_a
     out += fourier_adder([], qr, N)
@@ -99,19 +109,22 @@ def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
     return out
 
 def cmul(c: str, qx: str, qr: str, anc: str, a: int) -> str:
+    print(f'\t\t\tcmul {c}, {qx}, {qr}, {anc}, {a}')
+
     out = ''
-    out += qft(qr, NUM_BITS)
+    out += qft(qr, NUM_BITS, QFT_DENOM)
     for i in range(NUM_BITS):
         a <<= 1
         out += mod_adder(c, f'{qx}[{i}]', qr, anc, a)
-    out += iqft(qr, NUM_BITS)
+    out += iqft(qr, NUM_BITS, QFT_DENOM)
     return out
 
 def cua(c: str, qx: str, qr: str, anc: str, a: int, a_inv: int) -> str:
+    print(f'\tcua {c}, {qx}, {qr}, {anc}, {a}, {a_inv}')
+
     out = ''
     out += cmul(c, qx, qr, anc, a)
-    for i in range(NUM_BITS):
-        out += f'cswap {c}, {qx}[{i}], {qr}[{i}];\n'
+    out += f'cswap {c}, {qx}, {qr};\n'
     out += cmul(c, qx, qr, anc, a_inv)
     return out
 
@@ -124,7 +137,7 @@ if __name__ == '__main__':
     output_file = f'bisquit/qasm/shor_rsa{NUM_BITS}.qasm'
 
     # only do some iterations so the file isn't too large -- eventually loops will be added, but until then...
-    iter_inc_freq = 32
+    iter_inc_freq = MAX_ITERATION//4
     # iid selection:
     iter_list = []
     for i in range(0, MAX_ITERATION, iter_inc_freq):
@@ -146,6 +159,7 @@ if __name__ == '__main__':
         ostrm.write(f'x q;\n') # vector op
 
         for i in range(0, MAX_ITERATION):
+            print(f'iteration {i}')
             a = (a*a) % N
             a_inv = (a_inv*a_inv) % N
             # remove top `2*NUM_BITS-ii` bits of rot
@@ -153,12 +167,13 @@ if __name__ == '__main__':
             _rot = rot & ~mask
 
             if i in iter_list:
+                print('\t', 'writing iteration', i)
                 ostrm.write(f'// iteration {i}\n\n')
                 iter_text = cua('c', 'q', 'anc_blk', 'anc_mod_adder', a, a_inv)
                 ostrm.write(iter_text)
                 if _rot != 0:
                     ostrm.write(f'rz(fpa{2*NUM_BITS}{create_fpa_string(_rot, NUM_BITS)}) c;\n')
-                
+    print('qft denom: ', QFT_DENOM) 
 
 #################################################################
 #################################################################

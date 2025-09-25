@@ -30,6 +30,7 @@ constexpr std::string_view BASIS_GATES[] =
 
     // memory instruction:
     "mswap",
+    "mprefetch",
 
     "nil"
 };
@@ -75,7 +76,10 @@ struct INSTRUCTION
         MZ, MX,
 
         // memory instruction:
-        MSWAP,  // executes a swap if arguments are both in memory/compute, otherwise switches them
+        MSWAP,      // programmer-directed memory access 
+                    //          -- "mswap q0, q1" means move q0 to compute and q1 to memory (q0 is requested, q1 is victim)
+                    //          -- throws error in simulation if q0 is not in memory or q1 is not in compute
+        MPREFETCH,  // programmer-directed prefetch (same semantics as `MSWAP`)
 
         NIL
     };

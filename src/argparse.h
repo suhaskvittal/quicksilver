@@ -111,7 +111,7 @@ ARGPARSE::required(std::string_view name, std::string_view description, T& ref)
                                     argparse_get_type_info<T>()});
 
     usage_strm << " <" << name << ">";
-    options_strm << std::setw(48) << std::left << name
+    options_strm << std::setw(72) << std::left << name
                 << std::setw(80) << std::left << description 
                 << std::setw(8) << std::left << "string"
                 << std::setw(24) << std::left << "required" << "\n";
@@ -150,7 +150,7 @@ ARGPARSE::optional(std::string_view flag_name,
     else if constexpr (std::is_same<T, bool>::value)
         type_string = "bool";
 
-    options_strm << std::setw(48) << std::left << name_string
+    options_strm << std::setw(72) << std::left << name_string
                 << std::setw(80) << std::left << description 
                 << std::setw(8) << std::left << type_string
                 << std::setw(24) << std::left << "optional, default: " << default_value

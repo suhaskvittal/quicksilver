@@ -16,6 +16,7 @@
 #include <deque>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <random>
@@ -82,6 +83,8 @@ private:
 
     // track when qubits become available:
     std::unordered_map<QUBIT, uint64_t> qubit_available_cycle_;
+    // this is set after a memory access is routed -- clear after an instruction is scheduled for completion
+    std::unordered_set<QUBIT>           qubits_unavailable_to_due_memory_access_;
     
     // track instruction windows for each qubit to manage dependencies:
     std::unordered_map<QUBIT, inst_window_type> inst_windows_;
@@ -123,7 +126,8 @@ public:
                                                 QUBIT incoming_qubit, 
                                                 uint64_t route_min_start_time_ns,
                                                 uint64_t mswap_time_ns,
-                                                bool is_prefetch);
+                                                bool is_prefetch,
+                                                std::optional<QUBIT> preselected_victim);
 
     void OP_init() override;
 
@@ -165,6 +169,8 @@ private:
     exec_result_type do_rz_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     exec_result_type do_ccx_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     
+    void do_mswap_or_mprefetch(client_ptr&, inst_ptr);
+    
     // retries the execution of instructions in the given buffer provided the appropriate resources are available
     void retry_instructions(RETRY_TYPE, COMPUTE_EVENT_INFO);
 
@@ -185,6 +191,7 @@ void update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_typ
                                             uint64_t cmp_cycle_free_endpoints);
 
 bool is_software_instruction(INSTRUCTION::TYPE);
+bool is_t_like_instruction(INSTRUCTION::TYPE);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

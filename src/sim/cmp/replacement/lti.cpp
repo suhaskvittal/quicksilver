@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <numeric>
 
-#define LTI_VERBOSE
+//#define LTI_VERBOSE
 
 namespace sim
 {

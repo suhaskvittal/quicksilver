@@ -51,20 +51,11 @@ gate cp(X) a, b
 
 gate ccp(X) a, b, c
 {
-    cx          a, c;
-    rz(-X/4)    c;
-    cx          b, c;
-    rz(X/4)     c;
-    cx          a, c;
-    rz(-X/4)    c;
-    cx          b, c;
-
-    rz(X/4)     b;
-    rz(X/4)     c;
-    cx          a, b;
-    rz(-X/4)    b;
-    cx          a, b;
-    rz(X/4)     a;
+    cp(X/2)     a, b;
+    ccx         a, b, c;
+    rz(-X/2)    c;
+    ccx         a, b, c;
+    rz(X/2)     c;
 }
 
 //////////////////////////////////////

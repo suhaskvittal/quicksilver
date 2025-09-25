@@ -25,6 +25,9 @@ std::chrono::steady_clock::time_point GL_SIM_WALL_START;
 
 bool GL_PRINT_PROGRESS{false};
 int64_t GL_PRINT_PROGRESS_FREQ{-1};
+bool GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS{false};
+bool GL_ELIDE_MSWAP_INSTRUCTIONS{false};
+bool GL_ELIDE_MPREFETCH_INSTRUCTIONS{false};
 
 bool GL_IMPL_RZ_PREFETCH{false};
 
@@ -41,9 +44,14 @@ print_stats(std::ostream& out)
     out << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
     double execution_time = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e-3 / 60.0;
 
-    print_stat_line(out, "TOTAL_CYCLES", GL_CMP->current_cycle(), false);
-    print_stat_line(out, "COMPUTE_SPEED (kHz)", GL_CMP->OP_freq_khz, false);
     print_stat_line(out, "EXECUTION_TIME (min)", execution_time, false);
+    print_stat_line(out, "COMPUTE_TOTAL_CYCLES", GL_CMP->current_cycle(), false);
+    print_stat_line(out, "COMPUTE_SPEED (kHz)", GL_CMP->OP_freq_khz, false);
+    for (size_t i = 0; i < mem_modules.size(); i++)
+    {
+        print_stat_line(out, "MEMORY_MODULE_" + std::to_string(i) + "_TOTAL_CYCLES", mem_modules[i]->current_cycle(), false);
+        print_stat_line(out, "MEMORY_MODULE_" + std::to_string(i) + "_SPEED (kHz)", mem_modules[i]->OP_freq_khz, false);
+    }
     
     const auto& clients = GL_CMP->get_clients();
     for (size_t i = 0; i < clients.size(); i++)
@@ -56,6 +64,10 @@ print_stats(std::ostream& out)
         print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);
         print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
         print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
+        print_stat_line(out, "MEMORY_SWAPS", c->s_mswap_count);
+        print_stat_line(out, "MEMORY_PREFETCHES", c->s_mprefetch_count);
+        print_stat_line(out, "T_GATE_COUNT", c->s_t_gate_count);
+        print_stat_line(out, "T_TOTAL_ERROR", c->s_total_t_error);
     }
 
     print_stat_line(out, "EVICTIONS_NO_USES", GL_CMP->s_evictions_no_uses_, false);
