@@ -23,7 +23,10 @@ namespace sim
 enum class MEMORY_EVENT_TYPE
 {
     MEMORY_ACCESS_COMPLETED,
-    COMPUTE_COMPLETED_INST
+    COMPUTE_COMPLETED_INST,
+    
+    // only when `is_remote_module_` is true
+    REMOTE_EPR_PAIR_GENERATED 
 };
 
 struct MEMORY_EVENT_INFO
@@ -65,6 +68,8 @@ public:
         inst_ptr inst;
         QUBIT qubit;
         bool is_prefetch;
+
+        std::optional<QUBIT> victim{std::nullopt};  // may not be known if requests are made by the simulator
     };
 
     using search_result_type = std::tuple<bool, std::vector<bank_type>::iterator, std::vector<QUBIT>::iterator>;
@@ -75,30 +80,44 @@ public:
     // statistics:
     using client_stats_type = std::unordered_map<int8_t, uint64_t>;
 
-    client_stats_type s_num_prefetch_requests{};
-    client_stats_type s_num_prefetch_promoted_to_demand{};
+    client_stats_type s_num_prefetch_requests_{};
+    client_stats_type s_num_prefetch_promoted_to_demand_{};
+    uint64_t s_memory_requests_{0};
+    uint64_t s_memory_prefetch_requests_{0};
+    uint64_t s_total_epr_buffer_occupancy_post_request_{0};
 
     const size_t num_banks_;
     const size_t capacity_per_bank_;
-private:
+    const bool   is_remote_module_;
+    const size_t   epr_buffer_capacity_;
+    const uint64_t mean_epr_generation_cycle_time_;
+protected:
     std::vector<bank_type> banks_;
     std::vector<request_type> request_buffer_;
+
+    size_t epr_buffer_occu_{0};
 public:
-    MEMORY_MODULE(double freq_khz, size_t num_banks, size_t capacity_per_bank);
+    MEMORY_MODULE(double freq_khz, 
+                    size_t num_banks, 
+                    size_t capacity_per_bank,
+                    bool is_remote_module=false,
+                    size_t epr_buffer_capacity=4,
+                    uint64_t mean_epr_generation_cycle_time=10);
 
     search_result_type find_qubit(QUBIT);
     search_result_type find_uninitialized_qubit();
 
     void initiate_memory_access(inst_ptr, QUBIT, bool is_prefetch=false);
-    void serve_mswap(inst_ptr, QUBIT requested, QUBIT victim);
+    // returns true if the request was immediately served, false otherwise
+    bool serve_mswap(inst_ptr, QUBIT requested, QUBIT victim);
 
     void dump_contents();
 
-    void OP_init() override {}
+    void OP_init() override;
 protected:
     void OP_handle_event(event_type) override;
-private:
-    bool serve_memory_request(const request_type&, std::optional<QUBIT> preselected_victim=std::nullopt);
+
+    virtual bool serve_memory_request(const request_type&);
 
     std::vector<request_type>::iterator find_request_for_qubit(QUBIT);
     std::vector<request_type>::iterator find_request_for_bank(size_t, std::vector<request_type>::iterator);

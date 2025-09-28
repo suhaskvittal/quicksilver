@@ -34,6 +34,15 @@ bool GL_IMPL_RZ_PREFETCH{false};
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+template <class T, class U> double
+_fpdiv(T a, U b)
+{
+    return static_cast<double>(a) / static_cast<double>(b);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 print_stats(std::ostream& out)
 {
@@ -42,28 +51,21 @@ print_stats(std::ostream& out)
     
     // print stats for each client:
     out << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
-    double execution_time = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e-3 / 60.0;
+    double execution_time_ms = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e3;
+    double execution_time_min = execution_time_ms / (1e3 * 60.0);
 
-    print_stat_line(out, "EXECUTION_TIME (min)", execution_time, false);
-    print_stat_line(out, "COMPUTE_TOTAL_CYCLES", GL_CMP->current_cycle(), false);
-    print_stat_line(out, "COMPUTE_SPEED (kHz)", GL_CMP->OP_freq_khz, false);
-    for (size_t i = 0; i < mem_modules.size(); i++)
-    {
-        print_stat_line(out, "MEMORY_MODULE_" + std::to_string(i) + "_TOTAL_CYCLES", mem_modules[i]->current_cycle(), false);
-        print_stat_line(out, "MEMORY_MODULE_" + std::to_string(i) + "_SPEED (kHz)", mem_modules[i]->OP_freq_khz, false);
-    }
-    
     const auto& clients = GL_CMP->get_clients();
     for (size_t i = 0; i < clients.size(); i++)
     {
         const auto& c = clients[i];
-        std::cout << "CLIENT_" << i << "\n";
+        out << "CLIENT_" << i << "\n";
 
+        print_stat_line(out, "TIME_PER_UNROLLED_INST (ms/inst)", execution_time_ms / c->s_unrolled_inst_done);
         print_stat_line(out, "VIRTUAL_INST_DONE", c->s_inst_done);
         print_stat_line(out, "UNROLLED_INST_DONE", c->s_unrolled_inst_done);
-        print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);
-        print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
-        print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
+//      print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);
+//      print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
+//      print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
         print_stat_line(out, "MEMORY_SWAPS", c->s_mswap_count);
         print_stat_line(out, "MEMORY_PREFETCHES", c->s_mprefetch_count);
         print_stat_line(out, "T_GATE_COUNT", c->s_t_gate_count);
@@ -80,7 +82,7 @@ print_stats(std::ostream& out)
 
     for (size_t i = 0; i < factory_level_map.size(); i++)
     {
-        std::cout << "FACTORY_L" << i << "\n";
+        out << "FACTORY_L" << i << "\n";
 
         uint64_t tot_prod_tries{0},
                  tot_failures{0};
@@ -97,23 +99,18 @@ print_stats(std::ostream& out)
     // print memory stats:
     
     // accumulate any client-level stats:
-    MEMORY_MODULE::client_stats_type num_pf{};
-    MEMORY_MODULE::client_stats_type num_pf_promoted_to_demand{};
-    for (MEMORY_MODULE* m : mem_modules)
-    {
-        for (int i = 0; i < clients.size(); i++)
-        {
-            num_pf[i] += m->s_num_prefetch_requests[i];
-            num_pf_promoted_to_demand[i] += m->s_num_prefetch_promoted_to_demand[i];
-        }
-    }
+    uint64_t total_memory_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_memory_requests_; });
+    uint64_t total_memory_prefetch_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_memory_prefetch_requests_; });
+    uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request_; });
+    double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
 
-    std::cout << "MEMORY\n";
-    for (int i = 0; i < clients.size(); i++)
-    {
-        print_stat_line(out, "CLIENT_" + std::to_string(i) + "_NUM_PREFETCH_REQUESTS", num_pf[i]);
-        print_stat_line(out, "CLIENT_" + std::to_string(i) + "_NUM_PREFETCH_PROMOTED_TO_DEMAND", num_pf_promoted_to_demand[i]);
-    }
+    out << "MEMORY\n";
+    print_stat_line(out, "ALL_REQUESTS", total_memory_requests);
+    print_stat_line(out, "PREFETCH_REQUESTS", total_memory_prefetch_requests);
+    print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
 }
 
 ////////////////////////////////////////////////////////////

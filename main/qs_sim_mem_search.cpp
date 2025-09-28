@@ -278,6 +278,9 @@ struct ITERATION_CONFIG
     size_t   mem_bb_num_modules;
     size_t   mem_bb_qubits_per_bank;
     int64_t  mem_bb_round_ns;
+    bool     mem_is_remote;
+    int64_t  mem_epr_buffer_capacity;
+    int64_t  mem_mean_epr_generation_time_ns;
 
     // factory setup:
     int64_t fact_phys_qubits_per_program_qubit;
@@ -303,6 +306,9 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     size_t mem_bb_num_modules = conf.mem_bb_num_modules;
     size_t mem_bb_qubits_per_bank = conf.mem_bb_qubits_per_bank;
     uint64_t mem_bb_round_ns = conf.mem_bb_round_ns;
+    bool     mem_is_remote = conf.mem_is_remote;
+    int64_t  mem_epr_buffer_capacity = conf.mem_epr_buffer_capacity;
+    int64_t  mem_mean_epr_generation_time_ns = conf.mem_mean_epr_generation_time_ns;
 
     int64_t fact_phys_qubits_per_program_qubit = conf.fact_phys_qubits_per_program_qubit;
 
@@ -321,12 +327,14 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     size_t mem_bb_code_distance = mem_bb_distance_for_target_logical_error_rate(conf.mem_bb_target_error_rate_per_cycle);
     double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_round_ns, mem_bb_code_distance);
     size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
+    uint64_t mem_mean_epr_generation_cycle_time = sim::convert_ns_to_cycles(mem_mean_epr_generation_time_ns, mem_bb_freq_ghz);
     
     // 2.1. create memory modules:
     std::vector<sim::MEMORY_MODULE*> mem_modules;
     for (size_t i = 0; i < mem_bb_num_modules; i++)
     {
-        auto* m = new sim::MEMORY_MODULE(mem_bb_freq_ghz, mem_bb_banks_per_module, mem_bb_qubits_per_bank);
+        auto* m = new sim::MEMORY_MODULE(mem_bb_freq_ghz, mem_bb_banks_per_module, mem_bb_qubits_per_bank, 
+                                        mem_is_remote, mem_epr_buffer_capacity, mem_mean_epr_generation_cycle_time);
         mem_modules.push_back(m);
     }
 
@@ -354,6 +362,8 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
     sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
     sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
+    if (mem_is_remote)
+        sim::print_stat_line(std::cout, "MEM_BB_MEAN_EPR_GENERATION_CYCLE_TIME", mem_mean_epr_generation_cycle_time, false);
 
     // reset global variables
     sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
@@ -461,20 +471,17 @@ main(int argc, char* argv[])
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
     int64_t cmp_sc_count;
     int64_t cmp_repl_id;
+    int64_t cmp_sc_round_ns;
 
     int64_t fact_phys_qubits_per_program_qubit;
 
     // memory budget can be allocated absolutely (`mem_num_modules`) or as a proportion of the total number of program qubits (`mem_fraction_budget`)
     int64_t mem_bb_num_modules;
     int64_t mem_bb_qubits_per_bank;
-
-    // other fixed sim parameters:
-    int64_t cmp_sc_round_ns;
     int64_t mem_bb_round_ns;
-
-    // initial sim parameters:
-    int64_t cmp_sc_code_distance;
-    int64_t mem_bb_code_distance;
+    bool    mem_is_remote;
+    int64_t mem_epr_buffer_capacity;
+    double  mem_epr_generation_frequency_khz;
 
     ARGPARSE()
         .required("trace", "path to trace file", trace)
@@ -483,24 +490,27 @@ main(int argc, char* argv[])
         // simulator verbosity:
         .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
         // setup:
-        .optional("-rzpf", "--rz-prefetch", "enable rz directed prefetch", sim::GL_IMPL_RZ_PREFETCH, false)
         .optional("-dsma", "--disable-simulator-directed-memory-access", "disable simulator directed memory access", sim::GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS, false)
-        .optional("-emswap", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
+        .optional("-ems", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
         // configuration:
         .optional("", "--cmp-sc-count", "number of surface codes to allocate to compute", cmp_sc_count, 4)
         .optional("-crepl", "--cmp-repl-policy", "replacement policy for compute", cmp_repl_id, static_cast<int>(sim::COMPUTE::REPLACEMENT_POLICY::LTI))
+        .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
+
         .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", fact_phys_qubits_per_program_qubit, 50)
+
         .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
         .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
-        .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
         .optional("", "--mem-bb-round-ns", "round time for memory banks", mem_bb_round_ns, 1800)
+        .optional("", "--mem-is-remote", "enable remote memory", mem_is_remote, false)
+        .optional("", "--mem-epr-buffer-capacity", "remote memory epr buffer capacity", mem_epr_buffer_capacity, 4)
+        .optional("", "--mem-epr-generation-frequency", "remote memory epr generation frequency (in kHz)", mem_epr_generation_frequency_khz, 1024)
         .parse(argc, argv);
 
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
     sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = static_cast<sim::COMPUTE::REPLACEMENT_POLICY>(cmp_repl_id);
 
-    if (sim::GL_IMPL_RZ_PREFETCH)
-        std::cout << "*** enabling rz directed prefetch ***\n";
+    uint64_t mem_mean_epr_generation_time_ns = (1.0/mem_epr_generation_frequency_khz) * 1e6;
 
     // read trace to identify number of program qubits:
     uint32_t num_program_qubits{};
@@ -538,6 +548,9 @@ main(int argc, char* argv[])
     conf.mem_bb_num_modules = mem_bb_num_modules;
     conf.mem_bb_qubits_per_bank = mem_bb_qubits_per_bank;
     conf.mem_bb_round_ns = mem_bb_round_ns;
+    conf.mem_is_remote = mem_is_remote;
+    conf.mem_epr_buffer_capacity = mem_epr_buffer_capacity;
+    conf.mem_mean_epr_generation_time_ns = mem_mean_epr_generation_time_ns;
 
     conf.fact_phys_qubits_per_program_qubit = fact_phys_qubits_per_program_qubit;
 

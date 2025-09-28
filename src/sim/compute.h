@@ -120,14 +120,12 @@ public:
             REPLACEMENT_POLICY=REPLACEMENT_POLICY::LTI);
 
     // returns how long it takes to complete the memory access
-    // `cmp_cycles_for_mswap` is the number of cycles to perform the memory swap -- there may be extra
-    // cycles spent to waiting for routing space
+    // `extra_mem_access_latency_post_routing_ns` is used to set qubit availability times for the qubits involved in the memory access
     memory_route_result_type route_memory_access(size_t mem_patch_idx,
                                                 QUBIT incoming_qubit, 
-                                                uint64_t route_min_start_time_ns,
-                                                uint64_t mswap_time_ns,
                                                 bool is_prefetch,
-                                                std::optional<QUBIT> preselected_victim);
+                                                std::optional<QUBIT> preselected_victim,
+                                                uint64_t extra_mem_access_latency_post_routing_ns);
 
     void OP_init() override;
 
@@ -169,7 +167,7 @@ private:
     exec_result_type do_rz_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     exec_result_type do_ccx_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     
-    void do_mswap_or_mprefetch(client_ptr&, inst_ptr);
+    exec_result_type do_mswap_or_mprefetch(client_ptr&, inst_ptr);
     
     // retries the execution of instructions in the given buffer provided the appropriate resources are available
     void retry_instructions(RETRY_TYPE, COMPUTE_EVENT_INFO);
