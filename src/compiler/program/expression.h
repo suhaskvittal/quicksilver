@@ -3,10 +3,10 @@
     date:   23 August 2025
 */
 
-#ifndef PROGRAM_EXPRESSION_h
-#define PROGRAM_EXPRESSION_h
+#ifndef COMPILER_PROGRAM_EXPRESSION_h
+#define COMPILER_PROGRAM_EXPRESSION_h
 
-#include "program.h"
+#include "compiler/program.h"
 
 #include <cstdint>
 

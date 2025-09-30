@@ -3,10 +3,9 @@
     date:   22 August 2025
 */
 
-#include "program.h"
-#include "program/expression.h"
-
-#include "oq2/lexer_wrapper.h"
+#include "compiler/program.h"
+#include "compiler/program/expression.h"
+#include "compiler/program/oq2/lexer_wrapper.h"
 #include "parser.tab.h"
 
 #include <cstdio>

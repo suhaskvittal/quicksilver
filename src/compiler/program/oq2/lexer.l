@@ -7,7 +7,7 @@
 
 %{
 
-#include "oq2/lexer_wrapper.h"
+#include "compiler/program/oq2/lexer_wrapper.h"
 #include "parser.tab.h"
 
 #include <cmath>

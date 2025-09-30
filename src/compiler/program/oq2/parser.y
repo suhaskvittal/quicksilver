@@ -11,7 +11,7 @@
 %code requires
 {
 
-#include "program.h"
+#include "compiler/program.h"
 
 #include <cstdint>
 #include <string>
@@ -31,7 +31,7 @@ class OQ2_LEXER;
 %code
 {
 
-#include "oq2/lexer_wrapper.h"
+#include "compiler/program/oq2/lexer_wrapper.h"
 #define yylex oq2lx.yylex
 
 }

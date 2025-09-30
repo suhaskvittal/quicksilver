@@ -448,11 +448,15 @@ COMPUTE::client_fetch(client_ptr& c)
 {
     constexpr size_t INST_READ_LIMIT{8192};
 
+    uint64_t total_inflight_instructions = std::transform_reduce(inst_windows_.begin(), inst_windows_.end(), 0, std::plus<>(),
+                                                                [](const auto& pair) { return pair.second.size(); });
+    if (total_inflight_instructions >= 2*INST_READ_LIMIT)
+        return;
+
     // find a qubit with an empty window:
     std::vector<QUBIT> qubits;
     for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
         qubits.push_back(QUBIT{c->id, qid});
-
     auto q_it = std::find_if(qubits.begin(), qubits.end(),
                             [this] (const auto& q) { return this->inst_windows_[q].empty(); });
     

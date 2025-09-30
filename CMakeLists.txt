@@ -31,10 +31,10 @@ find_package(ZLIB REQUIRED)
 
 # compile bison/flex files:
 flex_target(OQ2Lexer 
-            src/oq2/lexer.l 
+            src/compiler/program/oq2/lexer.l 
             ${CMAKE_CURRENT_BINARY_DIR}/lexer.cpp)
 bison_target(OQ2Parser 
-            src/oq2/parser.y 
+            src/compiler/program/oq2/parser.y 
             ${CMAKE_CURRENT_BINARY_DIR}/parser.cpp 
             DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/parser.tab.h)
 
@@ -49,8 +49,8 @@ set(BINARY_GEN_FILES
     ${BISON_OQ2Parser_OUTPUTS} 
     ${FLEX_OQ2Lexer_OUTPUTS}
     src/instruction.cpp
-    src/program.cpp
-    src/program/expression.cpp)
+    src/compiler/program.cpp
+    src/compiler/program/expression.cpp)
 
 set(SIM_FILES
     src/argparse.cpp
@@ -66,6 +66,12 @@ set(SIM_FILES
     src/sim/factory.cpp
     src/sim/memory.cpp
     src/sim/routing.cpp)
+
+set(MEMOPT_FILES
+    src/compiler/memopt.cpp
+    src/compiler/memopt/impl.cpp
+    src/compiler/memopt/impl/viszlai.cpp
+    src/compiler/memopt/impl/cost_aware.cpp)
 
 ###################################################
 ###################################################
@@ -103,9 +109,9 @@ target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
 
 add_executable(qs_mem_compile main/qs_mem_compile.cpp
                 src/argparse.cpp
-                src/instruction.cpp
                 src/generic_io.cpp
-                src/memory/compiler.cpp)
+                src/instruction.cpp
+                ${MEMOPT_FILES})
 target_compile_options(qs_mem_compile PRIVATE ${COMPILE_OPTIONS})
 target_include_directories(qs_mem_compile PRIVATE "src")
 target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB)
@@ -114,8 +120,7 @@ target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB)
 ###################################################
 
 # iterative simulator for memory evaluations:
-add_executable(qs_sim_mem main/qs_sim_mem_search.cpp
-                            src/memory/compiler.cpp)
+add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${MEMOPT_FILES})
 target_link_libraries(qs_sim_mem PRIVATE qssl)
 target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
 target_include_directories(qs_sim_mem PRIVATE "src")

@@ -3,8 +3,8 @@
     date:   21 August 2025
 */
 
-#ifndef PROGRAM_h
-#define PROGRAM_h
+#ifndef COMPILER_PROGRAM_h
+#define COMPILER_PROGRAM_h
 
 #include "instruction.h"
 
@@ -264,4 +264,4 @@ PROGRAM_INFO::iterate_through_instructions_by_layer(const CALLBACK& callback) co
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-#endif
+#endif  // COMPILER_PROGRAM_h

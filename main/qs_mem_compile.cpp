@@ -6,12 +6,12 @@
 #include "argparse.h"
 #include "generic_io.h"
 #include "instruction.h"
-#include "memory/compiler.h"
+#include "compiler/memopt.h"
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-constexpr int64_t EMIT_IMPL_ID_VISZLAI = static_cast<int64_t>(MEMORY_COMPILER::EMIT_MEMORY_INST_IMPL::VISZLAI);
+constexpr int64_t EMIT_IMPL_ID_VISZLAI = static_cast<int64_t>(MEMOPT::EMIT_IMPL_ID::VISZLAI);
 
 int
 main(int argc, char** argv)
@@ -32,7 +32,7 @@ main(int argc, char** argv)
         .optional("-e", "--emit-impl", "emit implementation", emit_impl_id, EMIT_IMPL_ID_VISZLAI)
         .parse(argc, argv);
 
-    MEMORY_COMPILER::EMIT_MEMORY_INST_IMPL emit_impl = static_cast<MEMORY_COMPILER::EMIT_MEMORY_INST_IMPL>(emit_impl_id);
+    MEMOPT::EMIT_IMPL_ID emit_impl = static_cast<MEMOPT::EMIT_IMPL_ID>(emit_impl_id);
 
     // read the file:
     generic_strm_type istrm, ostrm;
@@ -40,7 +40,7 @@ main(int argc, char** argv)
     generic_strm_open(istrm, input_trace_file, "rb");
     generic_strm_open(ostrm, output_trace_file, "wb");
 
-    MEMORY_COMPILER compiler(cmp_count, emit_impl, print_progress_freq);
+    MEMOPT compiler(cmp_count, emit_impl, print_progress_freq);
     compiler.run(istrm, ostrm, inst_limit);
 
     generic_strm_close(istrm);
@@ -48,7 +48,7 @@ main(int argc, char** argv)
 
     double mean_lifetime = static_cast<double>(compiler.s_total_lifetime_in_working_set) / static_cast<double>(compiler.s_num_lifetimes_recorded);
 
-    std::cout << "[ MEMORY_COMPILER ] done -- inst completed: " << compiler.s_inst_done
+    std::cout << "done -- inst completed: " << compiler.s_inst_done
                 << ", memory instructions added: " << compiler.s_memory_instructions_added
                 << ", memory prefetches added: " << compiler.s_memory_prefetches_added 
                 << ", unused bandwidth: " << compiler.s_unused_bandwidth

@@ -14,7 +14,7 @@
 */
 
 #include "argparse.h"
-#include "memory/compiler.h"
+#include "compiler/memopt.h"
 #include "sim.h"
 
 #include <zlib.h>
@@ -545,7 +545,7 @@ main(int argc, char* argv[])
 
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
-        MEMORY_COMPILER mc(cmp_sc_count, MEMORY_COMPILER::EMIT_MEMORY_INST_IMPL::SCORE_BASED, sim::GL_PRINT_PROGRESS_FREQ);
+        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
         mc.run(istrm, ostrm, inst_sim);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);

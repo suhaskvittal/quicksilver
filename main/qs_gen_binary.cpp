@@ -10,9 +10,9 @@
 #include <fstream>
 #include <string>
 
-#include "oq2/lexer_wrapper.h"
+#include "compiler/program/oq2/lexer_wrapper.h"
 #include "parser.tab.h"
-#include "program.h"
+#include "compiler/program.h"
 
 #include <zlib.h>
 

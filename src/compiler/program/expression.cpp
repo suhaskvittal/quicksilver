@@ -3,7 +3,7 @@
     date:   23 August 2025
     */
 
-#include "expression.h"
+#include "compiler/program/expression.h"
 
 #include <iostream>
 
