@@ -21,7 +21,7 @@ void generic_strm_open(generic_strm_type& strm, std::string file_path, std::stri
 void generic_strm_read(generic_strm_type& strm, void* buf, size_t size);
 void generic_strm_write(generic_strm_type& strm, void* buf, size_t size);
 void generic_strm_close(generic_strm_type& strm);
-bool generic_strm_eof(generic_strm_type& strm);
+bool generic_strm_eof(const generic_strm_type& strm);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

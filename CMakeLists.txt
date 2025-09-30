@@ -54,6 +54,7 @@ set(BINARY_GEN_FILES
 
 set(SIM_FILES
     src/argparse.cpp
+    src/generic_io.cpp
     src/instruction.cpp
     src/sim.cpp
     src/sim/client.cpp
@@ -113,9 +114,12 @@ target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB)
 ###################################################
 
 # iterative simulator for memory evaluations:
-add_executable(qs_sim_mem main/qs_sim_mem_search.cpp)
+add_executable(qs_sim_mem main/qs_sim_mem_search.cpp
+                            src/memory/compiler.cpp)
 target_link_libraries(qs_sim_mem PRIVATE qssl)
 target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
+target_include_directories(qs_sim_mem PRIVATE "src")
+target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB)
 
 ###################################################
 ###################################################

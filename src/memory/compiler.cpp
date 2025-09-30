@@ -12,9 +12,9 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_COMPILER::MEMORY_COMPILER(size_t cmp_count, bool enable_rotation_directed_prefetch, uint64_t print_progress_freq)
+MEMORY_COMPILER::MEMORY_COMPILER(size_t cmp_count, EMIT_MEMORY_INST_IMPL emit_impl, uint64_t print_progress_freq)
     :cmp_count_(cmp_count),
-    using_rotation_directed_prefetch_(enable_rotation_directed_prefetch),
+    emit_impl_(emit_impl),
     print_progress_freq_(print_progress_freq),
     qubits_in_cmp_(cmp_count),
     qubit_use_count_(cmp_count, 0)
@@ -33,6 +33,7 @@ MEMORY_COMPILER::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_
     s_inst_done = 0;
     s_memory_instructions_added = 0;
     s_memory_prefetches_added = 0;
+    s_unused_bandwidth = 0;
 
     // set number of qubits (first 4 bytes of input stream):
     generic_strm_read(istrm, &num_qubits_, sizeof(num_qubits_));
@@ -50,11 +51,15 @@ MEMORY_COMPILER::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_
         for (size_t i = 0; i < pending_inst_buffer_.size(); i++)
         {
             inst_ptr inst = pending_inst_buffer_[i];
+            bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
+                                    || inst->type == INSTRUCTION::TYPE::Y
+                                    || inst->type == INSTRUCTION::TYPE::Z
+                                    || inst->type == INSTRUCTION::TYPE::SWAP;
             bool is_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
                                         [this, inst] (qubit_type q) { return this->inst_windows_[q].front() == inst; });
             bool all_qubits_are_avail = std::all_of(inst->qubits.begin(), inst->qubits.end(),
                                                     [this] (qubit_type q) { return std::find(qubits_in_cmp_.begin(), qubits_in_cmp_.end(), q) != qubits_in_cmp_.end(); });
-            if (is_ready && all_qubits_are_avail)
+            if (is_ready && (all_qubits_are_avail || is_software_inst))
             {
                 // update qubit usages:
                 for (qubit_type q : inst->qubits)
@@ -76,6 +81,11 @@ MEMORY_COMPILER::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_
                     if (inst_windows_[q].front() != inst)
                         throw std::runtime_error("instruction at head of window is not the same as the one being completed");
                     inst_windows_[q].pop_front();
+                }
+
+                if (!is_software_inst)
+                {
+                    std::cout << num_inst_completed << " : "<< *inst << "\n";
                 }
 
                 num_inst_completed++;
@@ -120,6 +130,8 @@ MEMORY_COMPILER::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_
             // there are no ready instructions, so we need to emit memory instructions to make progress
             emit_memory_instructions();
         }
+
+        s_timestep++;
     }
 
     // drain the rest of the outgoing buffer:
@@ -172,18 +184,138 @@ MEMORY_COMPILER::drain_outgoing_buffer(generic_strm_type& ostrm, std::vector<ins
 void
 MEMORY_COMPILER::emit_memory_instructions()
 {
+    size_t remaining_bandwidth;
+    switch (emit_impl_)
+    {
+    case EMIT_MEMORY_INST_IMPL::VISZLAI:
+        remaining_bandwidth = emit_viszlai();
+        break;
+    
+    case EMIT_MEMORY_INST_IMPL::SCORE_BASED:
+        remaining_bandwidth = emit_score_based();
+        break;
+
+    default:
+        throw std::runtime_error("invalid emit implementation");
+    }
+
+    s_unused_bandwidth += remaining_bandwidth;
+    s_emission_calls++;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+MEMORY_COMPILER::emit_viszlai()
+{
+    // iterate and do:
+    //    1. get all ready instructions at a given time step (layer)
+    //    2. complete them greedily and move onto the next layer
+
+    std::vector<qubit_type> new_working_set;
+    std::unordered_set<inst_ptr> visited;
+
+    auto inst_sel_iter = [&new_working_set, &visited, this] (inst_ptr inst)
+    {
+        if (visited.count(inst))
+            return;
+        visited.insert(inst);
+
+        if (inst->qubits.size() > this->cmp_count_ - new_working_set.size())
+            return;
+
+        bool ready = inst->qubits.size() == 1 
+                     || std::all_of(inst->qubits.begin(), inst->qubits.end(),
+                                [this, inst] (qubit_type q) { return this->inst_windows_[q].front() == inst; });
+        if (ready)
+            new_working_set.insert(new_working_set.end(), inst->qubits.begin(), inst->qubits.end());
+    };
+
+    // first pass: check if any qubits in `qubits_in_cmp_` have a ready instruction at the head of the window:
+    for (qubit_type q : qubits_in_cmp_)
+    {
+        const auto& win = inst_windows_[q];
+        if (win.empty())
+            continue;
+        inst_sel_iter(win.front());
+    }
+
+    // second pass: check if any qubits in `inst_windows_` have a ready instruction at the head of the window:
+    for (const auto& [q, win] : inst_windows_)
+    {
+        if (win.empty())
+            continue;
+        inst_sel_iter(win.front());
+    }
+
+    std::vector<double> qubit_scores(num_qubits_, 0.0);
+    size_t remaining_bandwidth = cmp_count_ - new_working_set.size();
+    transform_working_set_into(new_working_set, qubit_scores);
+
+    return remaining_bandwidth;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+MEMORY_COMPILER::emit_score_based()
+{
     // score each qubit based on how many times it is used in the pending buffer:
     // these determine two things:
     //    1. which qubits we should prioritize instructions for
     //    2. which qubits we cannot evict
     std::vector<double> qubit_scores(num_qubits_, 0.0);
 
-    size_t num_inst_to_read = std::min(pending_inst_buffer_.size(), cmp_count_);
+    std::vector<size_t> io_cost(num_qubits_, 1);
+    std::vector<size_t> qubit_depths(num_qubits_, 0);
+    // initialize cost of qubits in the working set to 0
+    for (qubit_type q : qubits_in_cmp_)
+        io_cost[q] = 0;
+
+    std::vector<double> inst_scores;
+
+    size_t num_inst_to_read = std::min(pending_inst_buffer_.size(), size_t{2048});
     for (size_t i = 0; i < num_inst_to_read; i++)
     {
         inst_ptr inst = pending_inst_buffer_[i];
+        
+        if (inst->type == INSTRUCTION::TYPE::X 
+            || inst->type == INSTRUCTION::TYPE::Y 
+            || inst->type == INSTRUCTION::TYPE::Z 
+            || inst->type == INSTRUCTION::TYPE::SWAP)
+        {
+            continue;
+        }
+
+        // count number of qubits that are not in the working set:
+        size_t c{0};
         for (qubit_type q : inst->qubits)
-            qubit_scores[q] += pow(2.0, -static_cast<double>(i));
+            c += io_cost[q];
+
+        double inst_score = 1.0 / static_cast<double>(c+1);
+
+        for (qubit_type q : inst->qubits)
+        {
+            if (q == 2)
+                std::cout << "inst: " << inst->to_string() << " score: " << inst_score << "\n";
+            qubit_scores[q] += inst_score;
+            io_cost[q] = c;
+        }
+
+        inst_scores.push_back(inst_score);
+    }
+
+    if (s_emission_calls % 1 == 0)
+    {
+        std::cout << "scores:\n";
+        for (size_t i = 0; i < num_qubits_; i++)
+        {
+            if (qubit_scores[i] > 1.0)
+                std::cout << "\t" << i << " : "<< qubit_scores[i] << "\n";
+        }
+        std::cout << "\n";
     }
 
     // create new working set based on scores:
@@ -201,8 +333,15 @@ MEMORY_COMPILER::emit_memory_instructions()
             if (inst_windows_[i].empty())
                 continue;
 
+            inst_ptr inst = inst_windows_[i].front();
+
+            size_t num_need_to_add = std::count_if(inst->qubits.begin(), inst->qubits.end(),
+                                                    [&new_working_set] (qubit_type q)
+                                                    {
+                                                        return std::find(new_working_set.begin(), new_working_set.end(), q) == new_working_set.end();
+                                                    });
             // make sure that this qubit's instruction at the head of the window fits in the working set:
-            bool inst_at_head_fits = inst_windows_[i].front()->qubits.size() <= (cmp_count_ - new_working_set.size());
+            bool inst_at_head_fits = num_need_to_add <= (cmp_count_ - new_working_set.size());
             if (!inst_at_head_fits)
                 continue;
 
@@ -216,6 +355,7 @@ MEMORY_COMPILER::emit_memory_instructions()
         // get the ready instruction for this qubit:
         inst_ptr inst = inst_windows_[q_best].front();
         // add all qubits of this instruction to the working set:
+        std::cout << q_best << " is chosen, installing qubits  on behalf of: " << inst->to_string() << "\n";
         for (qubit_type q : inst->qubits)
         {
             if (visited.count(q))
@@ -225,9 +365,34 @@ MEMORY_COMPILER::emit_memory_instructions()
         }
     }
 
+    if (s_emission_calls % 1 == 0)
+    {
+        std::cout << "old working set:\t";
+        for (qubit_type q : qubits_in_cmp_)
+            std::cout << " " << q;
+        std::cout << "\n";
+    }
+
+    transform_working_set_into(new_working_set, qubit_scores);
     size_t remaining_bandwidth = cmp_count_ - new_working_set.size();
 
-    // need to convert `qubits_in_cmp_` to `new_working_set`:
+    if (s_emission_calls % 1 == 0)
+    {
+        std::cout << "new working set:\t";
+        for (qubit_type q : qubits_in_cmp_)
+            std::cout << " " << q;
+        std::cout << "\n";
+    }
+
+    return remaining_bandwidth;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_COMPILER::transform_working_set_into(const std::vector<qubit_type>& new_working_set, const std::vector<double>& qubit_scores)
+{
     for (qubit_type q : new_working_set)
     {
         auto it = std::find(qubits_in_cmp_.begin(), qubits_in_cmp_.end(), q);
@@ -245,25 +410,18 @@ MEMORY_COMPILER::emit_memory_instructions()
             // first, check if the `victim` has even been used once:
             // if not, there is a useless mswap/mprefetch instruction mapping to this qubit:
             if (qubit_use_count_[evict_idx] == 0)
-                remove_useless_memory_instructions_to_qubit(victim);
+                remove_last_memory_instruction_to_qubit(victim);
 
             outgoing_inst_buffer_.push_back(mswap);
 
             // update the qubit in the working set:
             qubits_in_cmp_[evict_idx] = q;
             qubit_use_count_[evict_idx] = 0;
-        }
-    }
 
-    if (using_rotation_directed_prefetch_)
-    {
-        // check if any qubits in the working set have a rotation at the head of their window:
-        for (size_t i = 0; i < new_working_set.size() && remaining_bandwidth > 0; i++)
-        {
-            qubit_type q = new_working_set[i];
-            inst_ptr inst = inst_windows_[q].front();
-            if (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ)
-                remaining_bandwidth -= do_rotation_directed_prefetch(inst, remaining_bandwidth, qubit_scores);
+            // update stats for lifetime:
+            qubit_timestep_entered_working_set_[q] = s_timestep; 
+            s_total_lifetime_in_working_set += s_timestep - qubit_timestep_entered_working_set_[victim];
+            s_num_lifetimes_recorded++;
         }
     }
 }
@@ -292,7 +450,7 @@ MEMORY_COMPILER::compute_victim_index(qubit_type q, const std::vector<double>& q
 ////////////////////////////////////////////////////////////
 
 void
-MEMORY_COMPILER::remove_useless_memory_instructions_to_qubit(qubit_type q)
+MEMORY_COMPILER::remove_last_memory_instruction_to_qubit(qubit_type q)
 {
     auto it = std::find_if(pending_inst_buffer_.rbegin(), pending_inst_buffer_.rend(),
                             [q] (inst_ptr inst) 
@@ -305,64 +463,6 @@ MEMORY_COMPILER::remove_useless_memory_instructions_to_qubit(qubit_type q)
         delete (*it);
         pending_inst_buffer_.erase(it.base() - 1);
     }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t
-MEMORY_COMPILER::do_rotation_directed_prefetch(inst_ptr inst, size_t pf_bandwidth, const std::vector<double>& qubit_scores)
-{
-    qubit_type q = inst->qubits[0];
-    const auto& win = inst_windows_[q];
-
-    // accumulate prefetch targets from `win`
-    size_t max_inst_to_prefetch = std::min(win.size(), size_t{8});
-    std::vector<qubit_type> pf_targets;
-    for (size_t i = 1; i < max_inst_to_prefetch; i++)
-    {
-        inst_ptr pf_inst = win[i];
-        
-        // try and prefetch operands of `pf_inst` that are not `q`
-        for (qubit_type pf_target : pf_inst->qubits)
-        {
-            if (pf_target == q)
-                continue;
-            if (std::find(qubits_in_cmp_.begin(), qubits_in_cmp_.end(), pf_target) != qubits_in_cmp_.end())
-                continue;
-
-            pf_targets.push_back(pf_target);
-        }
-    }
-
-    size_t prefetches = 0;
-    std::sort(pf_targets.begin(), pf_targets.end(), 
-            [&qubit_scores] (qubit_type a, qubit_type b) { return qubit_scores[a] > qubit_scores[b]; });
-
-    // prefetch the targets in order of their scores:
-    for (size_t i = 0; i < pf_targets.size() && prefetches < pf_bandwidth; i++)
-    {
-        qubit_type pf_target = pf_targets[i];
-        // find victim:
-        ssize_t evict_idx = compute_victim_index(pf_target, qubit_scores, {q});
-        if (evict_idx < 0)
-            throw std::runtime_error("no qubit to evict");
-
-        // emit mprefetch instruction:
-        qubit_type victim = qubits_in_cmp_[evict_idx];
-        inst_ptr mprefetch = new INSTRUCTION(INSTRUCTION::TYPE::MPREFETCH, {pf_target, victim});
-        if (qubit_use_count_[evict_idx] == 0)
-            remove_useless_memory_instructions_to_qubit(victim);
-        outgoing_inst_buffer_.push_back(mprefetch);
-
-        // update the qubit in the working set:
-        qubits_in_cmp_[evict_idx] = pf_target;
-        qubit_use_count_[evict_idx] = 0;
-
-        prefetches++;
-    }
-
-    return prefetches;
 }
 
 ////////////////////////////////////////////////////////////

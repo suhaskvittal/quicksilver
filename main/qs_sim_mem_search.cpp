@@ -14,6 +14,7 @@
 */
 
 #include "argparse.h"
+#include "memory/compiler.h"
 #include "sim.h"
 
 #include <zlib.h>
@@ -467,6 +468,8 @@ main(int argc, char* argv[])
 
     int64_t inst_sim;
     int64_t inst_assume_total;
+
+    bool jit;
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
     int64_t cmp_sc_count;
@@ -489,6 +492,8 @@ main(int argc, char* argv[])
         .required("inst-assume-total", "number of instructions assumed to be in the larger program", inst_assume_total)
         // simulator verbosity:
         .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
+        // just in time compilation (limited qubit count):
+        .optional("-jit", "--just-in-time-compilation", "enable just in time compilation for limited qubit count", jit, false)
         // setup:
         .optional("-dsma", "--disable-simulator-directed-memory-access", "disable simulator directed memory access", sim::GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS, false)
         .optional("-ems", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
@@ -511,22 +516,52 @@ main(int argc, char* argv[])
     sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = static_cast<sim::COMPUTE::REPLACEMENT_POLICY>(cmp_repl_id);
 
     uint64_t mem_mean_epr_generation_time_ns = (1.0/mem_epr_generation_frequency_khz) * 1e6;
+    
+    // if `jit`, then `trace` is just the base version -- we need to create a new trace with the specified `cmp_sc_count`
+    if (jit)
+    {
+        // Create new trace filename with instruction count
+        std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1);
+        std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
+        
+        std::string new_trace;
+        auto it = trace_filename.find(".gz");
+        if (it == std::string::npos)
+            it = trace_filename.find(".bin");
+        if (it == std::string::npos)
+            throw std::runtime_error("trace file must be .gz or .bin");
+
+        std::string base_name = trace_filename.substr(0, it);
+        std::string file_ext = trace_filename.substr(it);
+        
+        std::string cmp_sc_count_str = std::to_string(cmp_sc_count);
+        std::string inst_str = std::to_string(inst_sim/1'000'000) + "M";
+        new_trace = trace_dir + base_name + "_c" + cmp_sc_count_str + "_" + inst_str + file_ext;
+
+        std::cout << "****** (jit) running memory compiler for " << trace << " -> " << new_trace << " *******\n";
+
+        // do mem compile for the new trace:
+        generic_strm_type istrm, ostrm;
+
+        generic_strm_open(istrm, trace, "rb");
+        generic_strm_open(ostrm, new_trace, "wb");
+        MEMORY_COMPILER mc(cmp_sc_count, MEMORY_COMPILER::EMIT_MEMORY_INST_IMPL::SCORE_BASED, sim::GL_PRINT_PROGRESS_FREQ);
+        mc.run(istrm, ostrm, inst_sim);
+        generic_strm_close(istrm);
+        generic_strm_close(ostrm);
+
+        std::cout << "****** (jit) memory compiler done *******\n";
+
+        // Update trace to use the new filename
+        trace = new_trace;
+    }
 
     // read trace to identify number of program qubits:
     uint32_t num_program_qubits{};
-    bool is_gz = trace.find(".gz") != std::string::npos;
-    if (is_gz)
-    {
-        gzFile gzstrm = gzopen(trace.c_str(), "rb");
-        gzread(gzstrm, &num_program_qubits, 4);
-        gzclose(gzstrm);
-    }
-    else
-    {
-        FILE* strm = fopen(trace.c_str(), "rb");
-        fread(&num_program_qubits, 4, 1, strm);
-        fclose(strm);
-    }
+    generic_strm_type istrm;
+    generic_strm_open(istrm, trace, "rb");
+    generic_strm_read(istrm, &num_program_qubits, 4);
+    generic_strm_close(istrm);
 
     // start sim loop:
     ITERATION_CONFIG conf;

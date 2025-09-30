@@ -51,7 +51,7 @@ generic_strm_close(generic_strm_type& strm)
 }
 
 bool
-generic_strm_eof(generic_strm_type& strm)
+generic_strm_eof(const generic_strm_type& strm)
 {
     if (strm.index() == 0)
         return feof(std::get<FILE*>(strm));

@@ -7,6 +7,7 @@
 #define SIM_CLIENT_h
 
 #include "instruction.h"
+#include "generic_io.h"
 
 #include <iosfwd>
 #include <string>
@@ -38,13 +39,12 @@ std::ostream& operator<<(std::ostream&, const QUBIT&);
 struct CLIENT
 {
     using inst_ptr = INSTRUCTION*;
-    using generic_io_type = std::variant<FILE*, gzFile>;
 
     constexpr static size_t GEN_IO_BIN_IDX{0},
                             GEN_IO_GZ_IDX{1};
 
     const std::string trace_file;
-    generic_io_type   trace_istrm;
+    generic_strm_type trace_istrm;
     bool              has_hit_eof_once{false};
 
     const int8_t id;

@@ -62,16 +62,7 @@ CLIENT::read_instruction_from_trace()
         open_file();
     }
 
-    if (trace_istrm.index() == GEN_IO_BIN_IDX)
-    {
-        FILE* istrm = std::get<FILE*>(trace_istrm);
-        enc.read_write([istrm] (void* buf, size_t size) { return fread(buf, 1, size, istrm); });
-    }
-    else
-    {
-        gzFile istrm = std::get<gzFile>(trace_istrm);
-        enc.read_write([istrm] (void* buf, size_t size) { return gzread(istrm, buf, size); });
-    }
+    enc.read_write([this] (void* buf, size_t size) { return generic_strm_read(this->trace_istrm, buf, size); });
 
     inst_ptr inst{new INSTRUCTION(std::move(enc))};
     inst->inst_number = s_inst_read++;
@@ -84,37 +75,22 @@ CLIENT::read_instruction_from_trace()
 bool
 CLIENT::eof() const
 {
-    if (trace_istrm.index() == GEN_IO_BIN_IDX)
-        return feof(std::get<FILE*>(trace_istrm));
-    else
-        return gzeof(std::get<gzFile>(trace_istrm));
+    return generic_strm_eof(trace_istrm);
 }
 
 size_t
 CLIENT::open_file()
 {
-    bool is_gz = trace_file.find(".gz") != std::string::npos;
     uint32_t n{0};
-    if (is_gz)
-    {
-        trace_istrm = gzopen(trace_file.c_str(), "rb");
-        gzread(std::get<gzFile>(trace_istrm), &n, 4);
-    }
-    else
-    {
-        trace_istrm = fopen(trace_file.c_str(), "rb");
-        fread(&n, 4, 1, std::get<FILE*>(trace_istrm));
-    }
+    generic_strm_open(trace_istrm, trace_file, "rb");
+    generic_strm_read(trace_istrm, &n, 4);
     return static_cast<size_t>(n);
 }
 
 void
 CLIENT::close_file()
 {
-    if (trace_istrm.index() == GEN_IO_BIN_IDX)
-        fclose(std::get<FILE*>(trace_istrm));
-    else
-        gzclose(std::get<gzFile>(trace_istrm));
+    generic_strm_close(trace_istrm);
 }
 
 ////////////////////////////////////////////////////////////
