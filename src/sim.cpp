@@ -51,16 +51,18 @@ print_stats(std::ostream& out)
     
     // print stats for each client:
     out << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
-    double execution_time_ms = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e3;
-    double execution_time_min = execution_time_ms / (1e3 * 60.0);
+    double execution_time_us = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e3;
+    double execution_time_s = execution_time_us / 1e6;
 
     const auto& clients = GL_CMP->get_clients();
     for (size_t i = 0; i < clients.size(); i++)
     {
         const auto& c = clients[i];
         out << "CLIENT_" << i << "\n";
+        double kilo_inst_per_s = (c->s_unrolled_inst_done / execution_time_s) * 1e-3;
 
-        print_stat_line(out, "TIME_PER_UNROLLED_INST (ms/inst)", execution_time_ms / c->s_unrolled_inst_done);
+//      print_stat_line(out, "TIME_PER_UNROLLED_INST (us/inst)", execution_time_us / c->s_unrolled_inst_done);
+        print_stat_line(out, "KIPS", kilo_inst_per_s);
         print_stat_line(out, "VIRTUAL_INST_DONE", c->s_inst_done);
         print_stat_line(out, "UNROLLED_INST_DONE", c->s_unrolled_inst_done);
 //      print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);

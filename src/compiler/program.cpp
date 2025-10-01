@@ -146,10 +146,11 @@ PROGRAM_INFO::stats_type::generate_calculated_stats()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::PROGRAM_INFO(FILE* ostrm, ssize_t urot_precision)
-    :ostrm_(ostrm),
+PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p, ssize_t urot_precision)
+    :ostrm_p_(ostrm_p),
     urot_precision_(urot_precision)
-{}
+{
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -185,9 +186,12 @@ _copy_data_from_file_to_file(FILE* istrm, const WRITE_FUNC& write_func)
 PROGRAM_INFO::stats_type
 PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, size_t urot_precision)
 {
-    FILE* tmpstrm = tmpfile();
+    generic_strm_type ostrm;
+    generic_strm_open(ostrm, output_file, "wb");
+    // make space for the 4-bytes for number of qubits:
+    generic_strm_seek(ostrm, 4, SEEK_SET);
 
-    PROGRAM_INFO prog(tmpstrm, urot_precision);
+    PROGRAM_INFO prog(&ostrm, urot_precision);
 
     // get the dirname of `input_file`
     std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
@@ -206,28 +210,10 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     // need to get last set of stats and merge:
     prog.flush_and_clear_instructions();
 
-    // rewind `tmpstrm` to start of file (now will use it for reading)
-    rewind(tmpstrm);
-
-    // create final output file:
-    bool is_gz = output_file.find(".gz") != std::string::npos;
-    if (is_gz)
-    {
-        gzFile ostrm = gzopen(output_file.c_str(), "w9");
-        gzwrite(ostrm, &num_qubits, sizeof(num_qubits));
-        _copy_data_from_file_to_file(tmpstrm, [ostrm] (void* buf, size_t size) { return gzwrite(ostrm, buf, size); });
-        gzclose(ostrm);
-    }
-    else
-    {
-        FILE* ostrm = fopen(output_file.c_str(), "wb");
-        fwrite(&num_qubits, sizeof(num_qubits), 1, ostrm);
-        _copy_data_from_file_to_file(tmpstrm, [ostrm] (void* buf, size_t size) { return fwrite(buf, 1, size, ostrm); });
-        fclose(ostrm);
-    }
-
-    // delete tmp file:
-    fclose(tmpstrm);
+    // rewind `ostrm` to start of file (now will use it for reading)
+    generic_strm_seek(ostrm, 0, SEEK_SET);
+    generic_strm_write(ostrm, &num_qubits, sizeof(num_qubits));
+    generic_strm_close(ostrm);
 
     return prog.final_stats_;
 }
@@ -401,7 +387,7 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
         }
 
         // check if `instructions_` is too large: if so, flush to output file:
-        if (instructions_.size() >= MAX_INST_BEFORE_FLUSH && ostrm_ != nullptr)
+        if (instructions_.size() >= MAX_INST_BEFORE_FLUSH && ostrm_p_ != nullptr)
             flush_and_clear_instructions();
     }
     else
@@ -549,7 +535,7 @@ PROGRAM_INFO::flush_and_clear_instructions()
         }
 
         auto enc = inst.serialize();
-        enc.read_write([this] (void* buf, size_t size) { return fwrite(buf, 1, size, this->ostrm_); });
+        enc.read_write([this] (void* buf, size_t size) { return generic_strm_write(*this->ostrm_p_, buf, size); });
     }
 
     // clear instructions:
@@ -883,7 +869,7 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
     // determine the CLI arguments for gridsynth:
     constexpr size_t ROTW = PROGRAM_INFO::fpa_type::NUM_BITS;
     size_t precision = urot_precision == PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION
-                        ? ROTW - rotation.join_word_and_bit_idx(rotation.msb()) + 8
+                        ? ROTW - rotation.join_word_and_bit_idx(rotation.msb()) + 5
                         : urot_precision;
 
     cli_strm << "gridsynth -b " << precision << " -p \"" << fpa::to_string(rotation, true) << "\"";

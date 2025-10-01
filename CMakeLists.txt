@@ -48,6 +48,7 @@ message(STATUS "BISON_OQ2Parser_OUTPUTS: ${BISON_OQ2Parser_OUTPUTS}")
 set(BINARY_GEN_FILES
     ${BISON_OQ2Parser_OUTPUTS} 
     ${FLEX_OQ2Lexer_OUTPUTS}
+    src/generic_io.cpp
     src/instruction.cpp
     src/compiler/program.cpp
     src/compiler/program/expression.cpp)

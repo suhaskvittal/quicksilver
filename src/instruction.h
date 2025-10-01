@@ -37,7 +37,7 @@ constexpr std::string_view BASIS_GATES[] =
 
 struct INSTRUCTION
 {
-    constexpr static size_t FPA_PRECISION = 2048;
+    constexpr static size_t FPA_PRECISION = 64;
 
     using fpa_type = FPA_TYPE<FPA_PRECISION>;
 
@@ -145,20 +145,26 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 template <class RW_FUNC> void
 INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
 {
+    constexpr gate_id_type RZ_GATE_ID = static_cast<gate_id_type>(INSTRUCTION::TYPE::RZ);
+    constexpr gate_id_type RX_GATE_ID = static_cast<gate_id_type>(INSTRUCTION::TYPE::RX);
+
     rwf((void*)&type_id, sizeof(type_id));
     rwf((void*)qubits, 3*sizeof(qubit_type));
 
-    // fixed point angle:
-    rwf((void*)&fpa_word_count, sizeof(fpa_word_count));
-    rwf((void*)angle, fpa_word_count * sizeof(fpa_type::word_type));
-
-    // unrolled rotation sequence:
-    rwf((void*)&urotseq_size, sizeof(urotseq_size));
-    if (urotseq_size > 0)
+    if (type_id == RZ_GATE_ID || type_id == RX_GATE_ID)
     {
-        if (urotseq == nullptr)
-            urotseq = new gate_id_type[urotseq_size];
-        rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
+        // fixed point angle:
+        rwf((void*)&fpa_word_count, sizeof(fpa_word_count));
+        rwf((void*)angle, fpa_word_count * sizeof(fpa_type::word_type));
+
+        // unrolled rotation sequence:
+        rwf((void*)&urotseq_size, sizeof(urotseq_size));
+        if (urotseq_size > 0)
+        {
+            if (urotseq == nullptr)
+                urotseq = new gate_id_type[urotseq_size];
+            rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
+        }
     }
 }
 

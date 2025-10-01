@@ -6,6 +6,7 @@
 #ifndef COMPILER_PROGRAM_h
 #define COMPILER_PROGRAM_h
 
+#include "generic_io.h"
 #include "instruction.h"
 
 #include <cstdio>
@@ -153,11 +154,11 @@ private:
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
 
-    FILE* ostrm_{nullptr};
+    generic_strm_type* ostrm_p_{nullptr};
 
     uint64_t inst_read_{0};
 public:
-    PROGRAM_INFO(FILE* ostrm=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
+    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
     static PROGRAM_INFO from_file(std::string, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 

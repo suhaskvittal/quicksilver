@@ -23,6 +23,8 @@ void generic_strm_write(generic_strm_type& strm, void* buf, size_t size);
 void generic_strm_close(generic_strm_type& strm);
 bool generic_strm_eof(const generic_strm_type& strm);
 
+void generic_strm_seek(generic_strm_type& strm, size_t offset, int whence);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

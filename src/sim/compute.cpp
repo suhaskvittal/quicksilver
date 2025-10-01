@@ -692,17 +692,12 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
         if (GL_PRINT_PROGRESS && (pp || GL_PRINT_PROGRESS_FREQ == 1))
         {
             double t_min = (static_cast<double>(current_cycle()) / OP_freq_khz) * 1e-3 / 60.0;
-            double urot_inst_rate = static_cast<double>(c->s_unrolled_inst_done) / t_min * 1e-3;
-            double mips = c->s_unrolled_inst_done / sim_walltime_s() * 1e-6;
-            double sim_ratio = (t_min * 60) / sim_walltime_s();
+            double kips = static_cast<double>(c->s_unrolled_inst_done) / (t_min*60) * 1e-3;
             std::cout << "CLIENT " << static_cast<int>(c->id)
                         << " @ " << c->s_unrolled_inst_done << " unrolled instructions done (virtual instructions done = " << c->s_inst_done << ")\n"
                         << "\tcompute cycle = " << current_cycle() << "\n"
                         << "\tsimulated execution time = " << t_min << " minutes\n"
-                        << "\tinstruction rate = " << urot_inst_rate << " kiloinstructions/minute\n"
-                        << "\tsimulator wall time = " << sim_walltime() << "\n"
-                        << "\tsimulator speed = " << mips << " MIPS\n"
-                        << "\tsim speed to walltime ratio = " << sim_ratio << " seconds simulated / seconds walltime\n"
+                        << "\tinstruction rate = " << kips << " kiloinstructions/s (KIPS)\n"
                         << "\n";
         }
 
