@@ -12,3 +12,6 @@ venv/*
 
 bisquit/qasm/*
 bisquit/hamlib/*
+
+commands.out
+nohup.out
