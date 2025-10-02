@@ -28,6 +28,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(FLEX REQUIRED)
 find_package(BISON REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(LibLZMA REQUIRED)
 
 # compile bison/flex files:
 flex_target(OQ2Lexer 
@@ -83,7 +84,7 @@ add_library(qssl SHARED ${SIM_FILES})
 target_include_directories(qssl PUBLIC "src")
 target_compile_options(qssl PUBLIC ${COMPILE_OPTIONS})
 target_compile_definitions(qssl PUBLIC -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-target_link_libraries(qssl PUBLIC ZLIB::ZLIB)
+target_link_libraries(qssl PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
@@ -101,7 +102,7 @@ target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DI
 target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
 
-target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB)
+target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
@@ -115,7 +116,7 @@ add_executable(qs_mem_compile main/qs_mem_compile.cpp
                 ${MEMOPT_FILES})
 target_compile_options(qs_mem_compile PRIVATE ${COMPILE_OPTIONS})
 target_include_directories(qs_mem_compile PRIVATE "src")
-target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB)
+target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
@@ -125,7 +126,7 @@ add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${MEMOPT_FILES})
 target_link_libraries(qs_sim_mem PRIVATE qssl)
 target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
 target_include_directories(qs_sim_mem PRIVATE "src")
-target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB)
+target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################

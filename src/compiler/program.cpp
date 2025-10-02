@@ -13,8 +13,8 @@
 #include <initializer_list>
 #include <iomanip>
 #include <iostream>
-
-#include <zlib.h>
+#include <sstream>
+#include <thread>
 
 // `DROP_MEASUREMENT_GATES` is necessary for many QASMBench workloads, since they
 // have invalid measurement syntax
@@ -173,14 +173,18 @@ PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class WRITE_FUNC> void
-_copy_data_from_file_to_file(FILE* istrm, const WRITE_FUNC& write_func)
+void
+th_uncompress(generic_strm_type* file_istrm_p, std::iostream* lex_iostrm_p)
 {
-    char buf[1024];
+    char buf[4096];
 
-    int bytes_read;
-    while ((bytes_read=fread(buf, sizeof(char), sizeof(buf), istrm)) > 0)
-        write_func(buf, bytes_read);
+    while (!generic_strm_eof(*file_istrm_p))
+    {
+        size_t bytes_read = generic_strm_read(*file_istrm_p, buf, sizeof(buf));
+        lex_iostrm_p->write(buf, bytes_read);
+    }
+
+    generic_strm_close(*file_istrm_p);
 }
 
 PROGRAM_INFO::stats_type
@@ -200,10 +204,28 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     std::cout << "[ PROGRAM_INFO ] reading file: " << input_file << ", new relative path: " << dirname << "\n";
 #endif
 
-    std::ifstream istrm(input_file);
-    OQ2_LEXER lexer(istrm);
-    yy::parser parser(lexer, prog, dirname);
-    int retcode = parser();
+    if (input_file.find(".gz") != std::string::npos || input_file.find(".xz") != std::string::npos)
+    {
+        generic_strm_type istrm;
+        generic_strm_open(istrm, input_file, "rb");
+
+        std::stringstream decompressed_strm{};
+
+        // create a thread to decompress data from `istrm` and write to `decompressed_strm`
+        std::thread decompress_thread(th_uncompress, &istrm, &decompressed_strm);
+
+        OQ2_LEXER lexer(decompressed_strm);
+        yy::parser parser(lexer, prog, dirname);
+        int retcode = parser();
+        decompress_thread.join();
+    }
+    else
+    {
+        std::ifstream istrm(input_file);
+        OQ2_LEXER lexer(istrm);
+        yy::parser parser(lexer, prog, dirname);
+        int retcode = parser();
+    }
 
     uint32_t num_qubits = prog.get_num_qubits();
 

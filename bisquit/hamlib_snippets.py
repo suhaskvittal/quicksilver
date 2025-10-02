@@ -1,9 +1,6 @@
 import numpy as np
-import networkx as nx
-import openfermion as of
 import h5py
 import re
-from qiskit.quantum_info import SparsePauliOp
 
 #################################################################
 #################################################################
@@ -92,8 +89,10 @@ def read_pauli_string_text(text: str):
     pattern = r'\+\s*(?![^()]*\))'
     terms = re.split(pattern, text)
     
-    num_qubits = 0
-    for term in terms:
+    for (i,term) in enumerate(terms):
+        max_qubit = 0
+        if i % 1_000_000 == 0:
+            print(f'\tprocessing term {i} of {len(terms)}')
         term = term.strip()
         if not term:  # Skip empty terms
             continue
@@ -136,13 +135,10 @@ def read_pauli_string_text(text: str):
                     operator = part[0]  # X, Y, or Z
                     qubit = int(part[1:])  # qubit index
                     label.append((operator, qubit))
-                    num_qubits = max(num_qubits, qubit+1)
+                    max_qubit = max(max_qubit, qubit)
             
-            # Add the term (empty label represents identity operator)
-            labels.append(label)
-            coeffs.append(coeff)
-    
-    return labels, coeffs, num_qubits
+        # Add the term (empty label represents identity operator)
+        yield (label, coeff, max_qubit)
 
 #################################################################
 #################################################################
@@ -214,8 +210,8 @@ def read_pauli_strings_hdf5(fname_hdf5: str, key: str):
     """
 
     with h5py.File(fname_hdf5, 'r', libver='latest') as f:
-        labels, coeffs, num_qubits = read_pauli_string_text(f[key][()].decode("utf-8"))
-    return labels, coeffs, num_qubits
+        for label, coeff, max_qubit in read_pauli_string_text(f[key][()].decode("utf-8")):
+            yield (label, coeff, max_qubit)
 
 #################################################################
 #################################################################

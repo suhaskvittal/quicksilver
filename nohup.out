@@ -1,0 +1,207 @@
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+/usr/bin/bash: line 1: ./build/qs_sim_mem_search: No such file or directory
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761651 Aborted                 ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 1.0 > out/QB_L_bwt_n177_c100.0_f100.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761653 Aborted                 ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 1.2 > out/QB_L_bwt_n177_c100.0_f120.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761615 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 0.6 > out/QB_L_bwt_n177_c10.0_f60.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761617 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 1.0 > out/QB_L_bwt_n177_c10.0_f100.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761621 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 1.2 > out/QB_L_bwt_n177_c10.0_f120.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761626 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 0.6 > out/QB_L_bwt_n177_c20.0_f60.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761629 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 1.0 > out/QB_L_bwt_n177_c20.0_f100.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761632 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 1.2 > out/QB_L_bwt_n177_c20.0_f120.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761637 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 0.6 > out/QB_L_bwt_n177_c50.0_f60.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761640 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 1.0 > out/QB_L_bwt_n177_c50.0_f100.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761643 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 1.2 > out/QB_L_bwt_n177_c50.0_f120.0.out
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  Not enough space to allocate all magic state pins: 5 > 4
+/usr/bin/bash: line 1: 2761648 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 0.6 > out/QB_L_bwt_n177_c100.0_f60.0.out
+Terminated
+Terminated
+Terminated
+Terminated
+/usr/bin/bash: line 1: 2786414 Aborted                 ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 1.0 &> out/QB_L_bwt_n177_c100.0_f100.0.out
+/usr/bin/bash: line 1: 2786417 Aborted                 ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 1.2 &> out/QB_L_bwt_n177_c100.0_f120.0.out
+/usr/bin/bash: line 1: 2786379 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 0.6 &> out/QB_L_bwt_n177_c10.0_f60.0.out
+/usr/bin/bash: line 1: 2786381 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 1.0 &> out/QB_L_bwt_n177_c10.0_f100.0.out
+/usr/bin/bash: line 1: 2786385 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 1.2 &> out/QB_L_bwt_n177_c10.0_f120.0.out
+/usr/bin/bash: line 1: 2786390 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 0.6 &> out/QB_L_bwt_n177_c20.0_f60.0.out
+/usr/bin/bash: line 1: 2786392 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 1.0 &> out/QB_L_bwt_n177_c20.0_f100.0.out
+/usr/bin/bash: line 1: 2786396 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 1.2 &> out/QB_L_bwt_n177_c20.0_f120.0.out
+/usr/bin/bash: line 1: 2786401 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 0.6 &> out/QB_L_bwt_n177_c50.0_f60.0.out
+/usr/bin/bash: line 1: 2786404 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 1.0 &> out/QB_L_bwt_n177_c50.0_f100.0.out
+/usr/bin/bash: line 1: 2786406 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 1.2 &> out/QB_L_bwt_n177_c50.0_f120.0.out
+/usr/bin/bash: line 1: 2786412 Aborted                 (core dumped) ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 0.6 &> out/QB_L_bwt_n177_c100.0_f60.0.out
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+Terminated
+parallel: SIGHUP received. No new jobs will be started.
+parallel: Waiting for these 5 jobs to finish. Send SIGTERM to stop now.
+parallel: ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.5 --fact_prog_fraction 0.1 &> out/QB_L_bwt_n177_c50.0_f10.0.out
+parallel: ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 1.0 --fact_prog_fraction 0.1 &> out/QB_L_bwt_n177_c100.0_f10.0.out
+parallel: ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.05 --fact_prog_fraction 0.1 &> out/QB_L_bwt_n177_c5.0_f10.0.out
+parallel: ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.2 --fact_prog_fraction 0.1 &> out/QB_L_bwt_n177_c20.0_f10.0.out
+parallel: ./build/qs_sim_mem benchmarks/bin/QB_L_bwt_n177.gz --cmp_surface_code_fraction 0.1 --fact_prog_fraction 0.1 &> out/QB_L_bwt_n177_c10.0_f10.0.out
