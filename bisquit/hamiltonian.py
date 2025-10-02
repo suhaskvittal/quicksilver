@@ -45,10 +45,9 @@ def trotter_step(ctrl: str, qr: str, terms: list[str], coeffs: list[float], time
 def ipea(ctrl: str, qr: str, terms: list[str], coeffs: list[float]) -> str:
     out = ''
     ustep = trotter_step(ctrl, qr, terms, coeffs, TROTTER_TIME_DIVISION)
-    U = ''.join(ustep for _ in range(TROTTER_TIME_DIVISION))
 
     out += f'h {ctrl};\n'
-    out += U
+    out += ustep
     out += f'h {ctrl};\n'
     return out
 
@@ -66,7 +65,7 @@ BENCHMARK_LIST = [
 
 if __name__ == '__main__':
     output_file_name, input_file, key = BENCHMARK_LIST[4]
-    output_path = f'bisquit/qasm/{output_file_name}.qasm'
+    output_path = f'bisquit/qasm/{output_file_name}_td_{TROTTER_TIME_DIVISION}.qasm'
 
     labels, coeffs, num_qubits = read_pauli_strings_hdf5(f'bisquit/hamlib/{input_file}', key)
 

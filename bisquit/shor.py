@@ -136,12 +136,13 @@ def cua(c: str, qx: str, qr: str, anc: str, a: int, a_inv: int) -> str:
 #################################################################
 
 MAX_ITERATION = 2*NUM_BITS
+ITER_COUNT = 4
 
 if __name__ == '__main__':
-    output_file = f'bisquit/qasm/shor_rsa{NUM_BITS}.qasm'
+    output_file = f'bisquit/qasm/shor_rsa{NUM_BITS}_iter_{ITER_COUNT}.qasm'
 
     # only do some iterations so the file isn't too large -- eventually loops will be added, but until then...
-    iter_inc_freq = MAX_ITERATION//4
+    iter_inc_freq = MAX_ITERATION//ITER_COUNT
     # iid selection:
     iter_list = []
     for i in range(0, MAX_ITERATION, iter_inc_freq):
