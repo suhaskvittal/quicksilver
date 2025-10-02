@@ -5,10 +5,10 @@ Release/
 Debug/
 
 benchmarks/bin/*
-benchmarks/bin_no_mem/*
 benchmarks/stats/*
 
 venv/
 venv/*
 
 bisquit/qasm/*
+bisquit/hamlib/*

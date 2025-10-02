@@ -19,31 +19,33 @@ def trotter_step(ctrl: str, qr: str, terms: list[str], coeffs: list[float], time
         t = terms[i]
         c = coeffs[i]/time_division
         
-        active_qubits = [q for q in range(len(t)) if t[q] != 'I']
+        if len(t) == 0:
+            continue
+        
         # do basis transformations:
-        for q in active_qubits:
-            if t[q] == 'X':
+        for (p,q) in t:
+            if p == 'X':
                 out += f'h {qr}[{q}];\n'
-            elif t[q] == 'Y':
+            elif p == 'Y':
                 out += f'sxdg {qr}[{q}];\n'
         # now do two qubit ladder -- do from all qubits to final qubit (can be implemented with one multi-target CX)
-        lq = active_qubits[-1]
-        for q in active_qubits[:-1]:
+        _, lq = t[-1]
+        for (_,q) in t[:-1]:
             out += f'cx {qr}[{q}], {qr}[{lq}];\n'
         # do RZ from control to final qubit here: 
         out += f'crz({c}) {ctrl}, {qr}[{lq}];\n'
         # undo any basis transformations:
-        for q in active_qubits:
-            if t[q] == 'X':
+        for (p,q) in t:
+            if p == 'X':
                 out += f'h {qr}[{q}];\n'
-            elif t[q] == 'Y':
+            elif p == 'Y':
                 out += f'sxdg {qr}[{q}];\n'
     return out
 
 def ipea(ctrl: str, qr: str, terms: list[str], coeffs: list[float]) -> str:
     out = ''
-    trotter_step(ctrl, qr, terms_coeffs, TROTTER_TIME_DIVISION, previous_bits)
-    U = ''.join(trotter_step(ctrl, qr, terms_coeffs, TROTTER_TIME_DIVISION, previous_bits) for _ in range(time_division))
+    ustep = trotter_step(ctrl, qr, terms, coeffs, TROTTER_TIME_DIVISION)
+    U = ''.join(ustep for _ in range(TROTTER_TIME_DIVISION))
 
     out += f'h {ctrl};\n'
     out += U
@@ -54,7 +56,7 @@ def ipea(ctrl: str, qr: str, terms: list[str], coeffs: list[float]) -> str:
 #################################################################
 
 BENCHMARK_LIST = [
-    ('fermi_hubbard_432', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-6_Ly-6_Lz-6_U-0_enc-bk')
+    ('fermi_hubbard_432', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-6_Ly-6_Lz-6_U-0_enc-bk'),
     ('fermi_hubbard_2000', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-10_Ly-10_Lz-10_U-12_enc-bk'),
     ('v_c2h4o_ethylene_oxide_240', 'all-vib-c2h4o_ethylene_oxide.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16'),
     ('v_hc3h2cn_288', 'all-vib-hc3h2cn.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16'),
@@ -63,6 +65,17 @@ BENCHMARK_LIST = [
     
 
 if __name__ == '__main__':
-    pass
+    output_file_name, input_file, key = BENCHMARK_LIST[4]
+    output_path = f'bisquit/qasm/{output_file_name}.qasm'
+
+    labels, coeffs, num_qubits = read_pauli_strings_hdf5(f'bisquit/hamlib/{input_file}', key)
+
+    with open(output_path, 'w') as f:
+        f.write(f'OPENQASM 2.0;\n')
+        f.write(f'include "qelib1.inc";\n')
+        f.write(f'qreg q[{num_qubits}];\n')
+        f.write(f'qreg ctrl;\n')
+        f.write(ipea('ctrl', 'q', labels, coeffs))
+
 #################################################################
 #################################################################
