@@ -53,11 +53,11 @@ QFT_DENOM = calculate_aqft_max_denom(NUM_BITS)
 QFT_CACHE = {} # maps qft for given register to qasm string
 IQFT_CACHE = {}
 
-def fourier_adder(ctrl: list[str], qr: str, a: int) -> str:
+def fourier_adder(ctrl: list[str], qr: str, a: int, inv=False) -> str:
     '''
         Performs |qr> --> |a + qr>
     '''
-    out = ''
+    out_array = []
     for i in range(NUM_BITS):
 #        rot_angle = [ f'pi/{j}' for j in range(NUM_BITS-1) if bit_is_set(a,j) ]
 #        angle_string = ' + '.join(rot_angle)
@@ -71,11 +71,14 @@ def fourier_adder(ctrl: list[str], qr: str, a: int) -> str:
         angle_string = f'fpa{2*NUM_BITS}{angle_string}'   # note that we need to reverse the string because the LSB of `a` corresponds to `pi` (we want MSB to correspond to `pi`)
 
         if len(ctrl) == 0:
-            out += f'p({angle_string}) {qr}[{i}];\n'
+            out_array.append(f'p({angle_string}) {qr}[{i}];')
         elif len(ctrl) == 1:
-            out += f'cp({angle_string}) {ctrl[0]}, {qr}[{i}];\n'
+            out_array.append(f'cp({angle_string}) {ctrl[0]}, {qr}[{i}];')
         else:
-            out += f'ccp({angle_string}) {ctrl[0]}, {ctrl[1]}, {qr}[{i}];\n'
+            out_array.append(f'ccp({angle_string}) {ctrl[0]}, {ctrl[1]}, {qr}[{i}];')
+    if inv:
+        out_array.reverse()
+    out = '\n'.join(out_array)
     return out
 
 def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
@@ -85,6 +88,7 @@ def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
     out = ''
 
     ccfadd_a = fourier_adder([c1, c2], qr, a)
+    ccfadd_a_inv = fourier_adder([c1, c2], qr, a, inv=True)
 
     if qr not in QFT_CACHE:
         QFT_CACHE[qr] = qft(qr, NUM_BITS, QFT_DENOM)
@@ -95,12 +99,12 @@ def mod_adder(c1: str, c2: str, qr: str, anc: str, a: int) -> str:
     qft_qr = QFT_CACHE[qr]
 
     out += ccfadd_a
-    out += fourier_adder([], qr, N)
+    out += fourier_adder([], qr, N, inv=True)
     out += iqft_qr
     out += f'cx {qr}[{NUM_BITS-1}], {anc};\n'
     out += qft_qr
     out += fourier_adder([anc], qr, N)
-    out += ccfadd_a
+    out += ccfadd_a_inv
     out += iqft_qr
     out += f'x {qr}[{NUM_BITS-1}];\ncx {qr}[{NUM_BITS-1}], {anc};\nx {qr}[{NUM_BITS-1}];\n'
     out += qft_qr
