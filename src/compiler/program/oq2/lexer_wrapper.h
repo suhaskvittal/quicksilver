@@ -12,6 +12,8 @@
 #include <FlexLexer.h>
 #endif
 
+#include "generic_io.h"
+
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -20,10 +22,23 @@
 
 class OQ2_LEXER : public yyFlexLexer
 {
+private:
+    generic_strm_type* real_strm_p;
 public:
-    OQ2_LEXER(std::istream& _yyin) : yyFlexLexer(_yyin, std::cout) {}
+    // `_yyin` is unused.
+    OQ2_LEXER(std::istream& _yyin, generic_strm_type* _real_strm_p) 
+        :yyFlexLexer(_yyin, std::cout),
+        real_strm_p(_real_strm_p)
+    {}
 
     int yylex(yy::parser::value_type* yylval);
+
+    // override input:
+    int
+    LexerInput(char* buf, int size) override
+    {
+        return generic_strm_read(*real_strm_p, buf, size);
+    }
 };
 
 #endif

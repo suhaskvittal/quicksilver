@@ -22,9 +22,11 @@
 class LZMA_FILE
 {
 private:
+    constexpr static size_t LZMA_BUF_SIZE{4096};
+
     lzma_stream  lzma_strm;
     FILE*        file_istrm;
-    char         buf[4096];
+    char         lzma_buf[LZMA_BUF_SIZE];
 
     bool is_open{true};
 public: 

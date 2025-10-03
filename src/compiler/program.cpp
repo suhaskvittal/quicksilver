@@ -160,10 +160,15 @@ PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
 {
     PROGRAM_INFO prog{nullptr, urot_precision};
 
-    std::ifstream istrm(input_file);
-    OQ2_LEXER lexer(istrm);
+    generic_strm_type istrm;
+    generic_strm_open(istrm, input_file, "rb");
+
+    std::istringstream _tmp{};
+    OQ2_LEXER lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, "");
     int retcode = parser();
+
+    generic_strm_close(istrm);
 
     prog.final_stats_ = prog.analyze_program();
 
@@ -172,20 +177,6 @@ PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-void
-th_uncompress(generic_strm_type* file_istrm_p, std::iostream* lex_iostrm_p)
-{
-    char buf[4096];
-
-    while (!generic_strm_eof(*file_istrm_p))
-    {
-        size_t bytes_read = generic_strm_read(*file_istrm_p, buf, sizeof(buf));
-        lex_iostrm_p->write(buf, bytes_read);
-    }
-
-    generic_strm_close(*file_istrm_p);
-}
 
 PROGRAM_INFO::stats_type
 PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, size_t urot_precision)
@@ -204,28 +195,15 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     std::cout << "[ PROGRAM_INFO ] reading file: " << input_file << ", new relative path: " << dirname << "\n";
 #endif
 
-    if (input_file.find(".gz") != std::string::npos || input_file.find(".xz") != std::string::npos)
-    {
-        generic_strm_type istrm;
-        generic_strm_open(istrm, input_file, "rb");
+    generic_strm_type istrm;
+    generic_strm_open(istrm, input_file, "rb");
 
-        std::stringstream decompressed_strm{};
+    std::istringstream _tmp{};
+    OQ2_LEXER lexer(_tmp, &istrm);
+    yy::parser parser(lexer, prog, dirname);
+    int retcode = parser();
 
-        // create a thread to decompress data from `istrm` and write to `decompressed_strm`
-        std::thread decompress_thread(th_uncompress, &istrm, &decompressed_strm);
-
-        OQ2_LEXER lexer(decompressed_strm);
-        yy::parser parser(lexer, prog, dirname);
-        int retcode = parser();
-        decompress_thread.join();
-    }
-    else
-    {
-        std::ifstream istrm(input_file);
-        OQ2_LEXER lexer(istrm);
-        yy::parser parser(lexer, prog, dirname);
-        int retcode = parser();
-    }
+    generic_strm_close(istrm);
 
     uint32_t num_qubits = prog.get_num_qubits();
 
@@ -789,43 +767,6 @@ _urotseq_to_string(ITERABLE iterable)
 }
 
 void
-_replace_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq, 
-                        std::initializer_list<INSTRUCTION::TYPE> subseq, 
-                        INSTRUCTION::TYPE replacement)
-{
-#if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "\t\turotseq: " << _urotseq_to_string(urotseq)
-                    << ", replace: " << _urotseq_to_string(subseq)
-                    << " -> " << BASIS_GATES[static_cast<size_t>(replacement)] << "\n";
-#endif
-
-    size_t width = subseq.size();
-    std::deque<INSTRUCTION::TYPE> buf;
-    for (size_t i = 0; i < urotseq.size(); i++)
-    {
-        if (buf.size() == width)
-            buf.pop_front();
-        buf.push_back(urotseq[i]);
-
-        bool match = buf.size() == width && std::equal(buf.begin(), buf.end(), subseq.begin());
-        if (match)
-        {
-            // set `i-width+1` to `replacement
-            urotseq[i-width+1] = replacement;
-            // delete `i-width+2` through `i`
-            for (size_t j = i-width+2; j <= i; j++)
-                urotseq[j] = INSTRUCTION::TYPE::NIL;
-            buf.clear();
-        }
-    }
-
-    // finally, remove any `NIL` gates:
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(),
-                        [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
-    urotseq.erase(it, urotseq.end());
-}
-
-void
 _flip_h_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq)
 {
     // find the largest such subsequence sandwiched by `H` and replace those gates with the X/Z rotation alternative
@@ -878,11 +819,143 @@ _flip_h_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq)
     *h_max_end = INSTRUCTION::TYPE::NIL;
     auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
     urotseq.erase(it, urotseq.end());
-
-#if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "\t\turotseq: " << _urotseq_to_string(urotseq) << "\n";
-#endif
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+enum class BASIS_TYPE { X, Z, NONE };
+
+BASIS_TYPE
+_get_basis_type(INSTRUCTION::TYPE g)
+{
+    if (g == X || g == SX || g == SXDG || g == TX || g == TXDG)
+        return BASIS_TYPE::X;
+    else if (g == Z || g == S || g == SDG || g == T || g == TDG)
+        return BASIS_TYPE::Z;
+    else
+        return BASIS_TYPE::NONE;
+}
+
+uint8_t
+_get_rotation_value(INSTRUCTION::TYPE g)
+{
+    // the output is r, where g is some rotation of r*pi/4
+    switch (g)
+    {
+    case X:
+    case Z:
+        return 4;
+    case S:
+    case SX:
+        return 2;
+    case SDG:
+    case SXDG:
+        return 6;
+    case T:
+    case TX:
+        return 1;
+    case TDG:
+    case TXDG:
+        return 7;
+    default:
+        throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
+    }
+}
+
+// returns the iterator after the last modified element
+std::vector<INSTRUCTION::TYPE>::iterator
+_get_consolidated_gate(BASIS_TYPE basis, uint8_t rotation_sum, std::vector<INSTRUCTION::TYPE>::iterator replace_it)
+{
+    bool is_z = basis == BASIS_TYPE::Z;
+    if (rotation_sum == 0)
+        return replace_it;  // kill the entire subsequence
+    else if (rotation_sum == 1 || rotation_sum == 5)
+        *replace_it = is_z ? T : TX;
+    else if (rotation_sum == 2)
+        *replace_it = is_z ? S : SX;
+    else if (rotation_sum == 4)
+        *replace_it = is_z ? Z : X;
+    else if (rotation_sum == 6)
+        *replace_it = is_z ? SDG : SXDG;
+    else if (rotation_sum == 3 || rotation_sum == 7)
+        *replace_it = is_z ? TDG : TXDG;
+    replace_it++;
+
+    // if 3 or 7, add an extra pi rotation
+    if (rotation_sum == 3 || rotation_sum == 7)
+    {
+        *replace_it = is_z ? Z : X;
+        replace_it++;
+    }
+
+    return replace_it;
+}
+
+size_t
+_consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
+{
+    size_t num_consolidations{0};
+
+    // generate a subsequence, stop until we hit an H gate or gate in a different basis:
+    BASIS_TYPE current_basis{BASIS_TYPE::NONE};
+    uint8_t current_rotation_sum{0};
+    auto seq_begin = urotseq.begin();
+    for (auto it = urotseq.begin(); it != urotseq.end(); it++)
+    {
+        auto g = *it;
+        if (current_basis != BASIS_TYPE::NONE)
+        {
+            if (_get_basis_type(g) != current_basis)
+            {
+                // replace the sequence with the appropriate gate:
+                auto seq_kill_begin = _get_consolidated_gate(current_basis, current_rotation_sum, seq_begin);
+                // set all gates from `seq_kill_begin` to `it` to `NIL` -- we will remove these later:
+                std::fill(seq_kill_begin, it, INSTRUCTION::TYPE::NIL);
+                num_consolidations++;
+                
+                // set basis type to none since we can now start a new subsequence
+                current_basis = BASIS_TYPE::NONE;
+                current_rotation_sum = 0;
+            }
+            else
+            {
+                current_rotation_sum += _get_rotation_value(g);
+                current_rotation_sum &= 7;  // mod 8
+            }
+        }
+
+        // this is not an else since we may set `current_basis` to `BASIS_TYPE::NONE` in the above if statement
+        if (current_basis == BASIS_TYPE::NONE)
+        {
+            if (g == H)
+                continue;  // nothing to be done
+
+            current_basis = _get_basis_type(g);
+            if (current_basis == BASIS_TYPE::NONE)
+                throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
+            current_rotation_sum = _get_rotation_value(g);
+            seq_begin = it;
+        }
+    }
+
+    // if we are still in a subsequence, finish it off:
+    if (current_basis != BASIS_TYPE::NONE)
+    {
+        auto seq_kill_begin = _get_consolidated_gate(current_basis, current_rotation_sum, seq_begin);
+        std::fill(seq_kill_begin, urotseq.end(), INSTRUCTION::TYPE::NIL);
+        num_consolidations++;
+    }
+
+    // remove all `NIL` gates:
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    urotseq.erase(it, urotseq.end());
+
+    return num_consolidations;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 std::vector<INSTRUCTION::TYPE>
 _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
@@ -890,8 +963,9 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
     std::stringstream cli_strm;
     // determine the CLI arguments for gridsynth:
     constexpr size_t ROTW = PROGRAM_INFO::fpa_type::NUM_BITS;
+    size_t msb = std::min(rotation.join_word_and_bit_idx(rotation.msb()), rotation.join_word_and_bit_idx(fpa::negate(rotation).msb()));
     size_t precision = urot_precision == PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION
-                        ? ROTW - rotation.join_word_and_bit_idx(rotation.msb()) + 5
+                        ? ROTW - msb + 5
                         : urot_precision;
 
     cli_strm << "gridsynth -b " << precision << " -p \"" << fpa::to_string(rotation, true) << "\"";
@@ -936,41 +1010,46 @@ _gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
     pclose(gs);
 
     // now we need to coalesce gates inplace:
-
     [[maybe_unused]] size_t urotseq_original_size = out.size();
-
-    // first, convert all SS -> Z
-    _replace_subsequence(out, {S, S}, Z);
-    // then, convert all SZ and ZS -> SDG
-    _replace_subsequence(out, {S, Z}, SDG);
-    _replace_subsequence(out, {Z, S}, SDG);
-    // then, convert all T*SDG and SDG*T -> TDG
-    _replace_subsequence(out, {T, SDG}, TDG);
-    _replace_subsequence(out, {SDG, T}, TDG);
-    // then, convert all H*S*H -> S and H*SDG*H -> SXDG
-    _replace_subsequence(out, {H, S, H}, S);
-    _replace_subsequence(out, {H, SDG, H}, SXDG);
-    // then, convert all H*TX*H -> TX and H*TXDG*H -> TXDG
-    _replace_subsequence(out, {H, T, H}, TX);
-    _replace_subsequence(out, {H, TDG, H}, TXDG);
-
-    // finally, flip any subsequences sandwiched by `H` gates:
-    size_t h_count = std::count(out.begin(), out.end(), H);
-    while (h_count > 1)
+    
+    size_t progress{0};
+    do
     {
-        _flip_h_subsequence(out);
-        h_count -= 2;
-    }
+        size_t size_before = out.size();
+#if defined(PROGRAM_INFO_VERBOSE)
+        std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
+#endif
+        // flip any subsequences sandwiched by `H` gates:
+        size_t h_count = std::count(out.begin(), out.end(), H);
+        while (h_count > 1)
+        {
+            _flip_h_subsequence(out);
+            h_count -= 2;
+        }
+        _consolidate_and_reduce_subsequences(out);
+        size_t size_after = out.size();
+        progress = size_before - size_after;
+    } 
+    while (progress > 0);
+
     [[maybe_unused]] size_t urotseq_reduced_size = out.size();
 
 #if defined(PROGRAM_INFO_VERBOSE)
+    std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
     std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
 #elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
     std::cout << "\tgs gate count (post opt) = " << urotseq_reduced_size << "\n";
 #endif
 
     if (urotseq_reduced_size == 0)
-        throw std::runtime_error("gridsynth returned an empty urotseq, original size: " + std::to_string(urotseq_original_size));
+    {
+        std::cerr << "[alert] gridsynth returned an empty urotseq, original size: " 
+                    << std::to_string(urotseq_original_size) 
+                    << ", precision: " << precision
+                    << ", angle: "
+                    << fpa::to_string(rotation) 
+                    << ", hex string: " << rotation.to_hex_string() << "\n";
+    }
 
     return out;
 }

@@ -15,7 +15,9 @@ LZMA_FILE::LZMA_FILE(FILE* _file_istrm)
     :file_istrm(_file_istrm)
 {
     lzma_strm = LZMA_STREAM_INIT;
-    lzma_stream_decoder(&lzma_strm, std::numeric_limits<uint64_t>::max(), LZMA_CONCATENATED);
+    lzma_ret r =lzma_stream_decoder(&lzma_strm, std::numeric_limits<uint64_t>::max(), LZMA_CONCATENATED);
+    if (r != LZMA_OK)
+        throw std::runtime_error("lzma_stream_decoder failed: error code " + std::to_string(r));
     read_chunk_from_file();
 }
 
@@ -31,11 +33,11 @@ LZMA_FILE::read(void* buf, size_t size)
     lzma_strm.next_out = (uint8_t*)buf;
     lzma_strm.avail_out = size;
 
-    while (lzma_strm.avail_out > 0)
+    while (lzma_strm.avail_out > 0 && !eof())
     {
         if (lzma_strm.avail_in == 0 && !feof(file_istrm))
             read_chunk_from_file();
-        lzma_ret r = lzma_code(&lzma_strm, eof() ? LZMA_FINISH : LZMA_RUN);
+        lzma_ret r = lzma_code(&lzma_strm, feof(file_istrm) ? LZMA_FINISH : LZMA_RUN);
         if (r != LZMA_OK)
         {
             if (r == LZMA_STREAM_END)
@@ -44,6 +46,8 @@ LZMA_FILE::read(void* buf, size_t size)
                 throw std::runtime_error("lzma_code failed: error code " + std::to_string(r));
         }
     }
+    
+    return size - lzma_strm.avail_out;
 }
 
 bool
@@ -63,8 +67,8 @@ LZMA_FILE::close()
 void
 LZMA_FILE::read_chunk_from_file()
 {
-    size_t bytes_read = fread(buf, 1, sizeof(buf), file_istrm);
-    lzma_strm.next_in = (uint8_t*)buf;
+    size_t bytes_read = fread(lzma_buf, 1, LZMA_BUF_SIZE, file_istrm);
+    lzma_strm.next_in = (uint8_t*)lzma_buf;
     lzma_strm.avail_in = bytes_read;
 }
 
