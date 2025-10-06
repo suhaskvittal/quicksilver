@@ -186,7 +186,7 @@ scalar_mul(FPA_TYPE<W> x, int64_t y)
 ////////////////////////////////////////////////////////////
 
 template <size_t W> std::string
-to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
+to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
 {
     // number of tolerated bits before we return the floating point representation
     // we will use an expression as sums of pi if either `x` or `-x` has
@@ -198,12 +198,16 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
     size_t cnt = x.popcount();
     size_t cnt_neg = nx.popcount();
 
+    bool use_precise_format = (fmt == STRING_FORMAT::PRETTY && (cnt <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || cnt_neg <= MAX_POPCOUNT_BEFORE_FLOAT_CONV))
+                                || fmt == STRING_FORMAT::GRIDSYNTH
+                                || ((fmt == STRING_FORMAT::FORCE_DECIMAL || fmt == STRING_FORMAT::GRIDSYNTH_CPP) && cnt == 1);
+
     std::stringstream ss;
     if (cnt == 0)
     {
         ss << "0";
     }
-    else if (cnt <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || cnt_neg <= MAX_POPCOUNT_BEFORE_FLOAT_CONV || use_gridsynth_format)
+    else if (use_precise_format)
     {
         bool use_negative = cnt_neg < cnt;
         FPA_TYPE<W> y = use_negative ? negate(x) : x;
@@ -213,7 +217,7 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
             if (y.test(i))
             {
                 // add operand in front of term
-                if (use_gridsynth_format)
+                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
                 {
                     if (!first)
                         ss << " + ";
@@ -227,7 +231,7 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
                 }
 
                 // need parentheses for gridsynth format:
-                if (use_gridsynth_format)
+                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
                 {
                     ss << "(";
                     if (use_negative)
@@ -246,7 +250,7 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
                         ss << "/2^" << exp;
                 }
 
-                if (use_gridsynth_format)
+                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
                     ss << ")";
 
                 first = false;
@@ -256,9 +260,16 @@ to_string(const FPA_TYPE<W>& x, bool use_gridsynth_format)
     else
     {
         if (cnt < cnt_neg)
+        {
             ss << std::setprecision(5) << convert_fpa_to_float(x);
+        }
         else
-            ss << "-" << std::setprecision(5) << convert_fpa_to_float(nx);
+        {
+            if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
+                ss << "-(" << std::setprecision(5) << convert_fpa_to_float(nx) << ")";
+            else
+                ss << "-" << std::setprecision(5) << convert_fpa_to_float(nx);
+        }
     }
     return ss.str();
 }

@@ -32,7 +32,9 @@ template <size_t W> FPA_TYPE<W> add(FPA_TYPE<W>, FPA_TYPE<W>);
 template <size_t W> FPA_TYPE<W> sub(FPA_TYPE<W>, FPA_TYPE<W>);
 template <size_t W> FPA_TYPE<W> scalar_mul(FPA_TYPE<W>, int64_t);
 
-template <size_t W> std::string to_string(const FPA_TYPE<W>&, bool use_gridsynth_format=false);
+enum class STRING_FORMAT { PRETTY, GRIDSYNTH, FORCE_DECIMAL, GRIDSYNTH_CPP };
+
+template <size_t W> std::string to_string(const FPA_TYPE<W>&, STRING_FORMAT=STRING_FORMAT::PRETTY);
 
 } // namespace fpa
 

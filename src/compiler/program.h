@@ -157,6 +157,9 @@ private:
     generic_strm_type* ostrm_p_{nullptr};
 
     uint64_t inst_read_{0};
+    uint64_t rotation_count_{0};
+
+    bool has_qubit_count_been_written_{false};
 public:
     PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
 
@@ -187,8 +190,8 @@ private:
     /*
         This is a private member function so that we can update a "cache" of rotation sequences.
     */
+    std::vector<INSTRUCTION::TYPE> gs_cli_call(fpa_type, ssize_t urot_precision);
     std::vector<INSTRUCTION::TYPE> unroll_rotation(fpa_type);
-
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
     /*
         Templated function for perform some operations every layer. The callback is called

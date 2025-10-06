@@ -30,6 +30,17 @@ find_package(BISON REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(LibLZMA REQUIRED)
 
+# need `GMP_DIR` and `MPFR_DIR` to be set for GMP and MPFR
+if (APPLE)
+    set(GMP_INCLUDE_DIR /opt/homebrew/opt/gmp/include)
+    set(MPFR_INCLUDE_DIR /opt/homebrew/opt/mpfr/include)
+    set(GMP_LIBRARIES /opt/homebrew/opt/gmp/lib/libgmp.dylib)
+    set(MPFR_LIBRARIES /opt/homebrew/opt/mpfr/lib/libmpfr.dylib)
+else()
+    find_package(GMP REQUIRED)
+    find_package(MPFR REQUIRED)
+endif()
+
 # compile bison/flex files:
 flex_target(OQ2Lexer 
             src/compiler/program/oq2/lexer.l 
@@ -98,11 +109,10 @@ if (UNIX AND APPLE)
     target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
 endif()
 
-target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR} "deps/nwqec/include" ${GMP_INCLUDE_DIR} ${MPFR_INCLUDE_DIR})
 target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
 target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-
-target_link_libraries(qs_gen_binary PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
+target_link_libraries(qs_gen_binary PRIVATE ${GMP_LIBRARIES} ${MPFR_LIBRARIES} ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
