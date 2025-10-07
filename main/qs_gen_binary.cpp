@@ -64,6 +64,8 @@ int main(int argc, char* argv[])
     prog::rotation_manager_init(num_threads);
 
     auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
+
+    std::cout << "DONE\n";
     if (stats_output_file.empty())
     {
         print_stats(std::cout, stats);
@@ -73,6 +75,8 @@ int main(int argc, char* argv[])
         std::ofstream stats_out(stats_output_file);
         print_stats(stats_out, stats);
     }
+
+    prog::rotation_manager_end();
 
     return 0;
 }

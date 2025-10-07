@@ -6,6 +6,7 @@ Debug/
 
 benchmarks/bin/*
 benchmarks/stats/*
+benchmarks.tar.gz
 
 venv/
 venv/*

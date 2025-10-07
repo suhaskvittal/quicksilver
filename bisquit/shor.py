@@ -176,8 +176,8 @@ if __name__ == '__main__':
                 ostrm.write(f'// iteration {i}\n\n')
                 iter_text = cua('c', 'q', 'anc_blk', 'anc_mod_adder', a, a_inv)
                 ostrm.write(iter_text)
-                if _rot != 0:
-                    ostrm.write(f'rz(fpa{2*NUM_BITS}{create_fpa_string(_rot, NUM_BITS)}) c;\n')
+#               if _rot != 0:
+#                   ostrm.write(f'rz(fpa{2*NUM_BITS}{create_fpa_string(_rot, NUM_BITS)}) c;\n')
     print('qft denom: ', QFT_DENOM) 
 
 #################################################################

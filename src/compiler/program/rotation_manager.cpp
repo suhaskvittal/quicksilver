@@ -24,7 +24,7 @@ namespace prog
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-#define ANGLE_USE_CFLOAT
+//#define ANGLE_USE_CFLOAT
 
 #if defined(ANGLE_USE_CFLOAT)
 using ANGLE_TYPE = COMPARABLE_FLOAT;
@@ -70,6 +70,8 @@ static std::condition_variable                                  RM_VALUE_READY;
 
 static std::unordered_map<std::thread::id, size_t> THREAD_ID_TO_INDEX;
 
+static std::atomic<bool> RM_SIG_DONE{false};
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -81,12 +83,26 @@ rotation_manager_init(size_t num_threads)
     {
         std::thread th{ [] ()
         {
-            while (true)
+            while (!RM_SIG_DONE.load())
                 rm_thread_iteration();
         }};
         THREAD_ID_TO_INDEX[th.get_id()] = i;
         th.detach();
     }
+}
+
+void
+rotation_manager_end()
+{
+    std::unique_lock<std::mutex> sched_lock(RM_SCHED_LOCK);
+    RM_SIG_DONE.store(true);
+    std::cout << "main thread set RM_SIG_DONE to true\n";
+    // wake up all threads waiting on `RM_PENDING_UPDATED`:
+    RM_PENDING_UPDATED.notify_all();
+    sched_lock.unlock();
+
+    RM_READY_MAP.clear();
+    RM_PENDING.clear();
 }
 
 ////////////////////////////////////////////////////////////
@@ -112,6 +128,7 @@ rm_get_entry:
     auto it = RM_READY_MAP.find(k);
     if (it == RM_READY_MAP.end() || !it->second->ready)
     {
+//      std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " waiting for rotation " << fpa::to_string(rotation) << ", precision = " << precision << "\n";
         RM_VALUE_READY.wait(sched_lock);
         goto rm_get_entry;
     }
@@ -121,9 +138,8 @@ rm_get_entry:
 
     p->ref_count--;
     if (p->ref_count == 0)
-    {
         RM_READY_MAP.erase(it);
-    }
+    sched_lock.unlock();
 
     return urotseq;
 }
@@ -136,8 +152,15 @@ rm_thread_iteration()
 {
     // critical section: get pending rotation request:
     std::unique_lock<std::mutex> sched_lock(RM_SCHED_LOCK);
-    while (RM_PENDING.empty())
+    while (RM_PENDING.empty() && !RM_SIG_DONE.load())
         RM_PENDING_UPDATED.wait(sched_lock);
+
+    if (RM_SIG_DONE.load())
+    {
+        std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " done\n";
+        sched_lock.unlock();
+        return;
+    }
 
     PENDING_ENTRY::ptr entry = std::move(RM_PENDING.front());
     RM_PENDING.pop_front();
@@ -158,9 +181,11 @@ rm_thread_iteration()
         p_raw->urotseq = rm_synthesize_rotation(entry->rotation, entry->precision);
 
         sched_lock.lock();
+
+//      std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " synthesized rotation " << fpa::to_string(entry->rotation) << ", precision = " << entry->precision << "\n";
+
         p_raw->ready = true;
         RM_VALUE_READY.notify_all();
-        sched_lock.unlock();
     }
     else
     {
@@ -264,7 +289,7 @@ rm_consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-constexpr size_t GS_CALL_PRINT_FREQUENCY = 1000000;
+constexpr size_t GS_CALL_PRINT_FREQUENCY = 100'000;
 static std::atomic<size_t> GS_CALL_COUNT{0};
 
 std::vector<INSTRUCTION::TYPE>
@@ -276,8 +301,8 @@ rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     std::string fpa_str = fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP);
     std::string epsilon = "1e-" + std::to_string(precision);
 
-//  bool measure_time = gs_call_id % GS_CALL_PRINT_FREQUENCY == 0 || (precision >= 8);
-    bool measure_time = false;
+    bool measure_time = gs_call_id % GS_CALL_PRINT_FREQUENCY == 0 || (precision >= 8);
+//  bool measure_time = false;
     auto [gates_str, t_ms] = gridsynth::gridsynth_gates(
                                     fpa_str, 
                                     epsilon,

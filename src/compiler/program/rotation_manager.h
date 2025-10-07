@@ -25,7 +25,7 @@ struct COMPARABLE_FLOAT
     operator==(const COMPARABLE_FLOAT& other) const
     {
         return -log10(fabsl(value - other.value)) 
-                > std::max(static_cast<double>(precision), static_cast<double>(other.precision));
+                > std::max(static_cast<double>(precision), static_cast<double>(other.precision))-2;
     }
 };
 
@@ -77,6 +77,7 @@ namespace prog
 ////////////////////////////////////////////////////////////
 
 void rotation_manager_init(size_t num_threads=8);
+void rotation_manager_end();
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

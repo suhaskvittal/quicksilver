@@ -469,6 +469,11 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
     other.final_stats_.merge(other.analyze_program());
     final_stats_.merge(other.final_stats_);
 
+    std::cout << "[ PROGRAM_INFO ] post merge counts:"
+        << "\tvirtual inst = " << other.final_stats_.virtual_inst_count
+        << "\tunrolled inst = " << other.final_stats_.unrolled_inst_count
+        << "\n";
+
     // merge data structures (`registers_` and `user_defined_gates_`):
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] merging registers and user-defined gates from external file\n";
@@ -501,19 +506,20 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
 void
 PROGRAM_INFO::flush_and_clear_instructions()
 {
-#if defined(PROGRAM_INFO_VERBOSE)
+    complete_rotation_gates();
+
     std::cout << "[ PROGRAM_INFO ] flushing instructions to file\n";
-#endif
     // first, do optimizations:
     [[ maybe_unused ]] size_t num_gates_removed = dead_gate_elimination();
-
-#if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "[ PROGRAM_INFO ] done with optimizations, removed " << num_gates_removed << " gates\n";
-#endif
 
     // update stats first while we have `instructions_`
     auto curr_stats = analyze_program();
     final_stats_.merge(curr_stats);
+
+    std::cout << "[ PROGRAM_INFO ] rotation count: " << final_stats_.rotation_count << "\n";
+    std::cout << "[ PROGRAM_INFO ] unrolled instruction count: " << final_stats_.unrolled_inst_count << "\n";
+    std::cout << "[ PROGRAM_INFO ] virtual instruction count: " << final_stats_.virtual_inst_count << "\n";
 
     // write to file:
     // if number of qubits has not been written yet, do it now:
@@ -524,16 +530,11 @@ PROGRAM_INFO::flush_and_clear_instructions()
         has_qubit_count_been_written_ = true;
     }
 
-    size_t ii{0};
-    for (auto&& inst : instructions_)
+    for (const auto& inst : instructions_)
     {
-        if (ii % 100'000 == 0)
-            (std::cout << ".").flush();
-        ii++;
         // retrieve the rotation sequence for this instruction:
         if (inst.type == INSTRUCTION::TYPE::RZ || inst.type == INSTRUCTION::TYPE::RX)
         {
-            inst.urotseq = rm_find(inst.angle, get_required_precision(inst.angle));
             if (inst.urotseq.empty()) // this is an RZ(0) or RZ(2*pi) that did not get caught -- just skip it:
                 continue;
         }
@@ -541,7 +542,6 @@ PROGRAM_INFO::flush_and_clear_instructions()
         auto enc = inst.serialize();
         enc.read_write([this] (void* buf, size_t size) { return generic_strm_write(*this->ostrm_p_, buf, size); });
     }
-    std::cout << "\n";
 
     // clear instructions:
     instructions_.clear();
@@ -706,37 +706,68 @@ PROGRAM_INFO::analyze_program() const
 {
     stats_type out{};
 
-    // first, we need to reorganize the instructions into layers:
-    iterate_through_instructions_by_layer(
-        [&out] (size_t layer_id, std::vector<const INSTRUCTION*> layer)
-        {
-            for (const auto* inst : layer)
-            {
-                bool is_sw_gate = (inst->type == INSTRUCTION::TYPE::X 
-                                    || inst->type == INSTRUCTION::TYPE::Y 
-                                    || inst->type == INSTRUCTION::TYPE::Z);
-                bool is_t_like = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TDG);
-                bool is_cxz = (inst->type == INSTRUCTION::TYPE::CX || inst->type == INSTRUCTION::TYPE::CZ);
-                bool is_rot = (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ);
-                bool is_ccxz = (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
+    for (const auto& inst : instructions_)
+    {
+        bool is_sw_gate = (inst.type == INSTRUCTION::TYPE::X 
+                            || inst.type == INSTRUCTION::TYPE::Y 
+                            || inst.type == INSTRUCTION::TYPE::Z);
+        bool is_t_like = (inst.type == INSTRUCTION::TYPE::T || inst.type == INSTRUCTION::TYPE::TDG);
+        bool is_cxz = (inst.type == INSTRUCTION::TYPE::CX || inst.type == INSTRUCTION::TYPE::CZ);
+        bool is_rot = (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ);
+        bool is_ccxz = (inst.type == INSTRUCTION::TYPE::CCX || inst.type == INSTRUCTION::TYPE::CCZ);
 
-                out.total_gate_count++;
-                out.software_gate_count += is_sw_gate;
-                out.t_gate_count += is_t_like;
-                out.cxz_gate_count += is_cxz;
-                out.rotation_count += is_rot;
-                out.ccxz_count += is_ccxz;
+        out.total_gate_count++;
+        out.software_gate_count += is_sw_gate;
+        out.t_gate_count += is_t_like;
+        out.cxz_gate_count += is_cxz;
+        out.rotation_count += is_rot;
+        out.ccxz_count += is_ccxz;
 
-                out.virtual_inst_count++;
-                if (is_rot)
-                    out.unrolled_inst_count += inst->urotseq.size();
-                else
-                    out.unrolled_inst_count++;
-            }
-        }
-    );
+        out.virtual_inst_count++;
+
+        if (is_rot)
+            out.unrolled_inst_count += inst.urotseq.size();
+        else if (inst.type == INSTRUCTION::TYPE::CCX)
+            out.unrolled_inst_count += 15;
+        else if (inst.type == INSTRUCTION::TYPE::CCZ)
+            out.unrolled_inst_count += 13;
+        else
+            out.unrolled_inst_count++;
+    }
 
     return out;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+PROGRAM_INFO::complete_rotation_gates()
+{
+    size_t ii{0};
+    for (auto& inst : instructions_)
+    {
+        if (ii % 100'000 == 0)
+            (std::cout << ".").flush();
+        ii++;
+        if (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ)
+        {
+            auto it = rotation_cache_.find(inst.angle);
+            if (it != rotation_cache_.end())
+            {
+                inst.urotseq = it->second;
+            }
+            else
+            {
+                inst.urotseq = rm_find(inst.angle, get_required_precision(inst.angle));
+                rotation_cache_.insert({inst.angle, inst.urotseq});
+            }
+
+            if (inst.urotseq.empty())
+                std::cerr << "[alert] rotation synthesis yielded empty sequence for " << inst.to_string() << "\n";
+        }
+    }
+    std::cout << "\n";
 }
 
 ////////////////////////////////////////////////////////////
@@ -745,8 +776,12 @@ PROGRAM_INFO::analyze_program() const
 size_t
 get_required_precision(const INSTRUCTION::fpa_type& angle)
 {
-    double mag = fabsl(convert_fpa_to_float(angle));
-    return ceil(-log10(mag)) + 3;
+    size_t msb = angle.join_word_and_bit_idx(angle.msb());
+    if (msb == PROGRAM_INFO::fpa_type::NUM_BITS-1)
+        msb = angle.join_word_and_bit_idx(fpa::negate(angle).msb());
+    msb = PROGRAM_INFO::fpa_type::NUM_BITS-msb-1;
+
+    return (msb/3) + 3;
 }
 
 ////////////////////////////////////////////////////////////
