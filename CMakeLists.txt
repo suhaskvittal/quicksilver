@@ -31,47 +31,49 @@ find_package(ZLIB REQUIRED)
 find_package(LibLZMA REQUIRED)
 
 # need `GMP_DIR` and `MPFR_DIR` to be set for GMP and MPFR
-if (APPLE)
-    set(GMP_INCLUDE_DIR /opt/homebrew/opt/gmp/include)
-    set(MPFR_INCLUDE_DIR /opt/homebrew/opt/mpfr/include)
-    set(GMP_LIBRARIES /opt/homebrew/opt/gmp/lib/libgmp.dylib)
-    set(MPFR_LIBRARIES /opt/homebrew/opt/mpfr/lib/libmpfr.dylib)
-else()
-    find_package(GMP QUIET)
-    find_package(MPFR QUIET)
+if (COMPILE_BINARY_GENERATION)
+    if (APPLE)
+        set(GMP_INCLUDE_DIR /opt/homebrew/opt/gmp/include)
+        set(MPFR_INCLUDE_DIR /opt/homebrew/opt/mpfr/include)
+        set(GMP_LIBRARIES /opt/homebrew/opt/gmp/lib/libgmp.dylib)
+        set(MPFR_LIBRARIES /opt/homebrew/opt/mpfr/lib/libmpfr.dylib)
+    else()
+        find_package(GMP QUIET)
+        find_package(MPFR QUIET)
 
-    if(NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx)
-        find_path(GMP_INCLUDE_DIR NAMES gmp.h)
-        find_library(GMP_LIBRARIES NAMES gmp)
-        find_library(GMPXX_LIBRARIES NAMES gmpxx)
-        if(GMP_INCLUDE_DIR AND GMP_LIBRARIES AND GMPXX_LIBRARIES)
-            add_library(GMP::gmp UNKNOWN IMPORTED)
-            set_target_properties(GMP::gmp PROPERTIES
-                IMPORTED_LOCATION ${GMP_LIBRARIES}
-                INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
-            )
-            add_library(GMP::gmpxx UNKNOWN IMPORTED)
-            set_target_properties(GMP::gmpxx PROPERTIES
-                IMPORTED_LOCATION ${GMPXX_LIBRARIES}
-                INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
-            )
+        if(NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx)
+            find_path(GMP_INCLUDE_DIR NAMES gmp.h)
+            find_library(GMP_LIBRARIES NAMES gmp)
+            find_library(GMPXX_LIBRARIES NAMES gmpxx)
+            if(GMP_INCLUDE_DIR AND GMP_LIBRARIES AND GMPXX_LIBRARIES)
+                add_library(GMP::gmp UNKNOWN IMPORTED)
+                set_target_properties(GMP::gmp PROPERTIES
+                    IMPORTED_LOCATION ${GMP_LIBRARIES}
+                    INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
+                )
+                add_library(GMP::gmpxx UNKNOWN IMPORTED)
+                set_target_properties(GMP::gmpxx PROPERTIES
+                    IMPORTED_LOCATION ${GMPXX_LIBRARIES}
+                    INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
+                )
+            endif()
         endif()
-    endif()
 
-    if(NOT TARGET MPFR::MPFR)
-        find_path(MPFR_INCLUDE_DIR NAMES mpfr.h)
-        find_library(MPFR_LIBRARIES NAMES mpfr)
-        if(MPFR_INCLUDE_DIR AND MPFR_LIBRARIES)
-            add_library(MPFR::MPFR UNKNOWN IMPORTED)
-            set_target_properties(MPFR::MPFR PROPERTIES
-                IMPORTED_LOCATION ${MPFR_LIBRARIES}
-                INTERFACE_INCLUDE_DIRECTORIES ${MPFR_INCLUDE_DIR}
-            )
+        if(NOT TARGET MPFR::MPFR)
+            find_path(MPFR_INCLUDE_DIR NAMES mpfr.h)
+            find_library(MPFR_LIBRARIES NAMES mpfr)
+            if(MPFR_INCLUDE_DIR AND MPFR_LIBRARIES)
+                add_library(MPFR::MPFR UNKNOWN IMPORTED)
+                set_target_properties(MPFR::MPFR PROPERTIES
+                    IMPORTED_LOCATION ${MPFR_LIBRARIES}
+                    INTERFACE_INCLUDE_DIRECTORIES ${MPFR_INCLUDE_DIR}
+                )
+            endif()
         endif()
-    endif()
 
-    if (NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx OR NOT TARGET MPFR::MPFR)
-        message(FATAL_ERROR "GMP and MPFR are required for the compiler.")
+        if (NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx OR NOT TARGET MPFR::MPFR)
+            message(FATAL_ERROR "GMP and MPFR are required for the compiler.")
+        endif()
     endif()
 endif()
 
@@ -138,17 +140,19 @@ target_link_libraries(qssl PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
 
 # Binary generation executable:
 
-add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
+if (COMPILE_BINARY_GENERATION)
+    add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
 
-# need to add flex headers manually on macos
-if (UNIX AND APPLE)
-    target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
+    # need to add flex headers manually on macos
+    if (UNIX AND APPLE)
+        target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
+    endif()
+
+    target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR} "deps/nwqec/include" ${GMP_INCLUDE_DIR} ${MPFR_INCLUDE_DIR})
+    target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
+    target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+    target_link_libraries(qs_gen_binary PRIVATE ${GMP_LIBRARIES} ${MPFR_LIBRARIES} ZLIB::ZLIB LibLZMA::LibLZMA)
 endif()
-
-target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR} "deps/nwqec/include" ${GMP_INCLUDE_DIR} ${MPFR_INCLUDE_DIR})
-target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-target_link_libraries(qs_gen_binary PRIVATE ${GMP_LIBRARIES} ${MPFR_LIBRARIES} ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################

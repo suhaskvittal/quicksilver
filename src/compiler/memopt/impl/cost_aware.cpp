@@ -207,12 +207,11 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
 int64_t
 get_compute_value_of_instruction(INSTRUCTION::TYPE type)
 {
-    /*
     switch (type)
     {
     case INSTRUCTION::TYPE::RZ:
     case INSTRUCTION::TYPE::RX:
-        return 100;
+        return 20;
     case INSTRUCTION::TYPE::CCX:
     case INSTRUCTION::TYPE::CCZ:
         return 10;
@@ -227,7 +226,6 @@ get_compute_value_of_instruction(INSTRUCTION::TYPE type)
     default:
         return 1;
     }
-        */
     return 1;
 }
 

@@ -1,0 +1,12 @@
+[ MEMOPT ] num qubits: 241
+[ MEMOPT ] progress: 100004 instructions processed, 27063 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 200002 instructions processed, 54200 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 300007 instructions processed, 81434 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 400004 instructions processed, 108945 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 500005 instructions processed, 135959 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 600009 instructions processed, 162826 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 700003 instructions processed, 189987 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 800006 instructions processed, 216481 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 900000 instructions processed, 243531 memory instructions, 0 prefetches
+[ MEMOPT ] progress: 1000001 instructions processed, 270694 memory instructions, 0 prefetches
+done -- inst completed: 1000001, memory instructions added: 270694, memory prefetches added: 0, unused bandwidth: 85661, emission calls: 124480, mean lifetime: nan, total timesteps: 248961

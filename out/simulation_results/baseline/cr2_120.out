@@ -1,0 +1,90 @@
+------------- SIM ITERATION 0 -------------
+CMP_CODE_DISTANCE                                    :           21
+CMP_COMPUTE_PATCHES                                  :         1000
+FACT_L1_COUNT                                        :            2
+FACT_L2_COUNT                                        :            1
+MEM_BB_CODE_DISTANCE                                 :           24
+MEM_BB_BANKS_PER_MODULE                              :            0
+
+
+SIMULATION_STATS------------------------------------------------------------
+CLIENT_0
+   KIPS                                              :        2.948
+   VIRTUAL_INST_DONE                                 :      1253472
+   UNROLLED_INST_DONE                                :     10000131
+   MEMORY_SWAPS                                      :            0
+   MEMORY_PREFETCHES                                 :            0
+   T_GATE_COUNT                                      :      5758114
+   T_TOTAL_ERROR                                     :  5.75811e-06
+EVICTIONS_NO_USES                                    :            0
+EVICTIONS_PREFETCH_NO_USES                           :            0
+FACTORY_L0
+   PROD_TRIES                                        :     87686283
+   FAILURES                                          :      1313789
+FACTORY_L1
+   PROD_TRIES                                        :     28093097
+   FAILURES                                          :           95
+MEMORY
+   ALL_REQUESTS                                      :            0
+   PREFETCH_REQUESTS                                 :            0
+   MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST            :          nan
+SCALED_CMP_CYCLES                                    :  1.30368e+09
+L1_FACTORY_COUNT                                     :            2
+L2_FACTORY_COUNT                                     :            1
+COMPUTE_TOTAL_PHYSICAL_QUBITS                        :       881000
+FACTORY_TOTAL_PHYSICAL_QUBITS                        :         6903
+MEMORY_TOTAL_PHYSICAL_QUBITS                         :            0
+SIMULATED_CODE_DISTANCE                              :           21
+COMPUTE_TOTAL_ERROR                                  :      1.30368
+MEMORY_TOTAL_ERROR                                   :            0
+FACTORY_TOTAL_ERROR                                  :  5.57664e-05
+APPLICATION_SUCCESS_RATE                             :    -0.303734
+NEXT_ITERATION
+   CMP_TARGET_ERROR_RATE_PER_CYCLE                   :   7.6706e-15
+   MEM_BB_TARGET_ERROR_RATE_PER_CYCLE                :          inf
+   FACT_TARGET_ERROR_RATE_PER_GATE                   :  1.79319e-10
+------------- SIM ITERATION 1 -------------
+CMP_CODE_DISTANCE                                    :           26
+CMP_COMPUTE_PATCHES                                  :         1000
+FACT_L1_COUNT                                        :            1
+FACT_L2_COUNT                                        :            1
+MEM_BB_CODE_DISTANCE                                 :            6
+MEM_BB_BANKS_PER_MODULE                              :            0
+
+
+SIMULATION_STATS------------------------------------------------------------
+CLIENT_0
+   KIPS                                              :      1.10549
+   VIRTUAL_INST_DONE                                 :      1253472
+   UNROLLED_INST_DONE                                :     10000131
+   MEMORY_SWAPS                                      :            0
+   MEMORY_PREFETCHES                                 :            0
+   T_GATE_COUNT                                      :      5758113
+   T_TOTAL_ERROR                                     :  0.000575811
+EVICTIONS_NO_USES                                    :            0
+EVICTIONS_PREFETCH_NO_USES                           :            0
+FACTORY_L0
+   PROD_TRIES                                        :    116917742
+   FAILURES                                          :      1755378
+FACTORY_L1
+   PROD_TRIES                                        :     23032511
+   FAILURES                                          :           14
+MEMORY
+   ALL_REQUESTS                                      :            0
+   PREFETCH_REQUESTS                                 :            0
+   MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST            :          nan
+SCALED_CMP_CYCLES                                    :  2.80794e+09
+L1_FACTORY_COUNT                                     :            1
+L2_FACTORY_COUNT                                     :            1
+COMPUTE_TOTAL_PHYSICAL_QUBITS                        :      1351000
+FACTORY_TOTAL_PHYSICAL_QUBITS                        :         7221
+MEMORY_TOTAL_PHYSICAL_QUBITS                         :            0
+SIMULATED_CODE_DISTANCE                              :           26
+COMPUTE_TOTAL_ERROR                                  :   0.00887949
+MEMORY_TOTAL_ERROR                                   :            0
+FACTORY_TOTAL_ERROR                                  :   0.00557664
+APPLICATION_SUCCESS_RATE                             :     0.985544
+NEXT_ITERATION
+   CMP_TARGET_ERROR_RATE_PER_CYCLE                   :  3.56133e-15
+   MEM_BB_TARGET_ERROR_RATE_PER_CYCLE                :          inf
+   FACT_TARGET_ERROR_RATE_PER_GATE                   :  1.79319e-10

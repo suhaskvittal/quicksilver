@@ -1,0 +1,141 @@
+------------- SIM ITERATION 0 -------------
+CMP_CODE_DISTANCE                                    :           21
+CMP_COMPUTE_PATCHES                                  :            4
+FACT_L1_COUNT                                        :            2
+FACT_L2_COUNT                                        :            1
+MEM_BB_CODE_DISTANCE                                 :           24
+MEM_BB_BANKS_PER_MODULE                              :            5
+=========COMPUTE DEADLOCK INFO================
+current cycle = 107956936
+compute memory contents:
+	PATCH 0, contents = q31 (c0), num uses = 6
+	PATCH 1, contents = q95 (c0), num uses = 2
+	PATCH 2, contents = q111 (c0), num uses = 2
+	PATCH 3, contents = q15 (c0), num uses = 6
+CLIENT 0:
+	QUBIT 0, cycle avail = 107956888, instruction window:
+		h 0 (1355645), uop 0/0, scheduled = 1, ready = 1 , cycle done = 18446744073709551615, has memory stall = 1, has resource stall = 0
+	QUBIT 1, cycle avail = 107956882, instruction window:
+		h 1 (1355646), uop 0/0, scheduled = 1, ready = 1 , cycle done = 18446744073709551615, has memory stall = 1, has resource stall = 0
+	QUBIT 2, cycle avail = 107956880, instruction window:
+		h 2 (1355647), uop 0/0, scheduled = 1, ready = 1 , cycle done = 18446744073709551615, has memory stall = 1, has resource stall = 0
+	QUBIT 3, cycle avail = 107713833, instruction window:
+	QUBIT 4, cycle avail = 107668990, instruction window:
+	QUBIT 5, cycle avail = 107713843, instruction window:
+	QUBIT 6, cycle avail = 107713861, instruction window:
+	QUBIT 7, cycle avail = 107919019, instruction window:
+	QUBIT 8, cycle avail = 107742409, instruction window:
+	QUBIT 9, cycle avail = 107936966, instruction window:
+	QUBIT 10, cycle avail = 107936972, instruction window:
+	QUBIT 11, cycle avail = 107942391, instruction window:
+	QUBIT 12, cycle avail = 107942433, instruction window:
+	QUBIT 13, cycle avail = 107947875, instruction window:
+	QUBIT 14, cycle avail = 107936948, instruction window:
+	QUBIT 15, cycle avail = 107956892, instruction window:
+	QUBIT 16, cycle avail = 107656777, instruction window:
+	QUBIT 17, cycle avail = 107722398, instruction window:
+	QUBIT 18, cycle avail = 107704818, instruction window:
+	QUBIT 19, cycle avail = 107892034, instruction window:
+	QUBIT 20, cycle avail = 107731594, instruction window:
+	QUBIT 21, cycle avail = 107892042, instruction window:
+	QUBIT 22, cycle avail = 107896170, instruction window:
+	QUBIT 23, cycle avail = 107947879, instruction window:
+	QUBIT 24, cycle avail = 107947885, instruction window:
+	QUBIT 25, cycle avail = 107947912, instruction window:
+	QUBIT 26, cycle avail = 107844540, instruction window:
+	QUBIT 27, cycle avail = 107952170, instruction window:
+	QUBIT 28, cycle avail = 107848353, instruction window:
+	QUBIT 29, cycle avail = 107855693, instruction window:
+	QUBIT 30, cycle avail = 107682058, instruction window:
+	QUBIT 31, cycle avail = 107956900, instruction window:
+	QUBIT 32, cycle avail = 106957346, instruction window:
+	QUBIT 33, cycle avail = 107873923, instruction window:
+	QUBIT 34, cycle avail = 107873922, instruction window:
+	QUBIT 35, cycle avail = 107909367, instruction window:
+	QUBIT 36, cycle avail = 107882939, instruction window:
+	QUBIT 37, cycle avail = 107914331, instruction window:
+	QUBIT 38, cycle avail = 107722432, instruction window:
+	QUBIT 39, cycle avail = 107914337, instruction window:
+	QUBIT 40, cycle avail = 106946668, instruction window:
+	QUBIT 41, cycle avail = 107016552, instruction window:
+	QUBIT 42, cycle avail = 107016575, instruction window:
+	QUBIT 43, cycle avail = 107690769, instruction window:
+	QUBIT 44, cycle avail = 107690796, instruction window:
+	QUBIT 45, cycle avail = 107690798, instruction window:
+	QUBIT 46, cycle avail = 107652666, instruction window:
+	QUBIT 47, cycle avail = 107956880, instruction window:
+	QUBIT 48, cycle avail = 107700279, instruction window:
+	QUBIT 49, cycle avail = 107731559, instruction window:
+	QUBIT 50, cycle avail = 107731623, instruction window:
+	QUBIT 51, cycle avail = 107892026, instruction window:
+	QUBIT 52, cycle avail = 107887073, instruction window:
+	QUBIT 53, cycle avail = 107892030, instruction window:
+	QUBIT 54, cycle avail = 107892038, instruction window:
+	QUBIT 55, cycle avail = 107956884, instruction window:
+	QUBIT 56, cycle avail = 107830133, instruction window:
+	QUBIT 57, cycle avail = 107835606, instruction window:
+	QUBIT 58, cycle avail = 107789270, instruction window:
+	QUBIT 59, cycle avail = 107844469, instruction window:
+	QUBIT 60, cycle avail = 107009594, instruction window:
+	QUBIT 61, cycle avail = 107063014, instruction window:
+	QUBIT 62, cycle avail = 107066612, instruction window:
+	QUBIT 63, cycle avail = 107947893, instruction window:
+	QUBIT 64, cycle avail = 107624327, instruction window:
+	QUBIT 65, cycle avail = 107821147, instruction window:
+	QUBIT 66, cycle avail = 107821180, instruction window:
+	QUBIT 67, cycle avail = 107821184, instruction window:
+	QUBIT 68, cycle avail = 107755613, instruction window:
+	QUBIT 69, cycle avail = 107789268, instruction window:
+	QUBIT 70, cycle avail = 107685929, instruction window:
+	QUBIT 71, cycle avail = 107947916, instruction window:
+	QUBIT 72, cycle avail = 107333143, instruction window:
+	QUBIT 73, cycle avail = 107333149, instruction window:
+	QUBIT 74, cycle avail = 107276168, instruction window:
+	QUBIT 75, cycle avail = 107947918, instruction window:
+	QUBIT 76, cycle avail = 107325534, instruction window:
+	QUBIT 77, cycle avail = 107947920, instruction window:
+	QUBIT 78, cycle avail = 107952172, instruction window:
+	QUBIT 79, cycle avail = 107952187, instruction window:
+	QUBIT 80, cycle avail = 107863850, instruction window:
+	QUBIT 81, cycle avail = 107900505, instruction window:
+	QUBIT 82, cycle avail = 107367279, instruction window:
+	QUBIT 83, cycle avail = 107900509, instruction window:
+	QUBIT 84, cycle avail = 107826005, instruction window:
+	QUBIT 85, cycle avail = 107826034, instruction window:
+	QUBIT 86, cycle avail = 107765240, instruction window:
+	QUBIT 87, cycle avail = 107900513, instruction window:
+	QUBIT 88, cycle avail = 107690802, instruction window:
+	QUBIT 89, cycle avail = 107690804, instruction window:
+	QUBIT 90, cycle avail = 107641240, instruction window:
+	QUBIT 91, cycle avail = 107873931, instruction window:
+	QUBIT 92, cycle avail = 107868556, instruction window:
+	QUBIT 93, cycle avail = 107873951, instruction window:
+	QUBIT 94, cycle avail = 107873957, instruction window:
+	QUBIT 95, cycle avail = 107956890, instruction window:
+	QUBIT 96, cycle avail = 107532333, instruction window:
+	QUBIT 97, cycle avail = 107535682, instruction window:
+	QUBIT 98, cycle avail = 107535688, instruction window:
+	QUBIT 99, cycle avail = 107848331, instruction window:
+	QUBIT 100, cycle avail = 107558043, instruction window:
+	QUBIT 101, cycle avail = 107848336, instruction window:
+	QUBIT 102, cycle avail = 107585129, instruction window:
+	QUBIT 103, cycle avail = 107848343, instruction window:
+	QUBIT 104, cycle avail = 107646789, instruction window:
+	QUBIT 105, cycle avail = 107830068, instruction window:
+	QUBIT 106, cycle avail = 107830098, instruction window:
+	QUBIT 107, cycle avail = 107830098, instruction window:
+	QUBIT 108, cycle avail = 107769290, instruction window:
+	QUBIT 109, cycle avail = 107769294, instruction window:
+	QUBIT 110, cycle avail = 107624315, instruction window:
+	QUBIT 111, cycle avail = 107956896, instruction window:
+	QUBIT 112, cycle avail = 107529030, instruction window:
+	QUBIT 113, cycle avail = 107538980, instruction window:
+	QUBIT 114, cycle avail = 107538984, instruction window:
+	QUBIT 115, cycle avail = 107835582, instruction window:
+	QUBIT 116, cycle avail = 107837681, instruction window:
+	QUBIT 117, cycle avail = 107837709, instruction window:
+	QUBIT 118, cycle avail = 107779898, instruction window:
+	QUBIT 119, cycle avail = 107842361, instruction window:
+	QUBIT 120, cycle avail = 107956838, instruction window:
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  deadlock detected
