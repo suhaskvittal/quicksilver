@@ -16,3 +16,5 @@ bisquit/hamlib/*
 
 commands.out
 nohup.out
+
+out/
