@@ -53,11 +53,22 @@ VISZLAI::emit_memory_instructions(const ws_type& current_working_set, const inst
 
     // first pass: check if any qubits in `current_working_set` have a ready instruction at the head of the window:
     for (inst_ptr inst : priority_instructions)
+    {
         instruction_selection_iteration(inst, new_working_set);
+        if (new_working_set.size() >= cmp_count)
+            break;
+    }
 
     // second pass: check if any qubits in `pending_inst` have a ready instruction at the head of the window:
-    for (inst_ptr inst : head_instructions)
-        instruction_selection_iteration(inst, new_working_set);
+    if (new_working_set.size() < cmp_count)
+    {
+        for (inst_ptr inst : head_instructions)
+        {
+            instruction_selection_iteration(inst, new_working_set);
+            if (new_working_set.size() >= cmp_count)
+                break;
+        }
+    }
 
     // generate memory instructions:
     std::vector<double> qubit_scores(num_qubits, 0.0);

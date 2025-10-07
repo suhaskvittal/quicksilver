@@ -29,7 +29,7 @@ COST_AWARE::emit_memory_instructions(const ws_type& current_working_set, const i
     }
 
     // build DP tree:
-    size_t num_inst_to_read = std::min(size_t{2048}, pending_inst.size());
+    size_t num_inst_to_read = std::min(size_t{512*num_qubits}, pending_inst.size());
     for (size_t i = 0; i < num_inst_to_read; i++)
         update_dp_tree(entry_points, pending_inst[i]);
 
@@ -271,7 +271,7 @@ score_working_set(int64_t compute_value, int64_t memory_cost)
 {
     double cv = static_cast<double>(compute_value);
     double mc = static_cast<double>(memory_cost);
-    double s = cv * pow(2.0, -mc);
+    double s = cv / (mc+1.0);
     return s;
 }
 

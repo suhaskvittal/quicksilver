@@ -40,7 +40,7 @@ IMPL_BASE::transform_working_set_into(const ws_type& curr, const ws_type& target
             if (target.count(*it))
                 continue;
             
-            if (v_it == curr.end() || qubit_scores[*v_it] < qubit_scores[*it])
+            if (v_it == result.working_set.end() || qubit_scores[*v_it] < qubit_scores[*it])
                 v_it = it;
         }
 

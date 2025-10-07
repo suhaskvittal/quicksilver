@@ -86,7 +86,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
                     if (inst_windows_[q].front() != inst)
                         throw std::runtime_error("instruction at head of window is not the same as the one being completed");
                     inst_windows_[q].pop_front();
-                }
+                 }
 
                 num_inst_completed++;
             }
@@ -185,7 +185,12 @@ void
 MEMOPT::emit_memory_instructions()
 {
     auto result = emit_impl_->emit_memory_instructions(working_set_, pending_inst_buffer_, inst_windows_);
+
     working_set_ = std::move(result.working_set);
+
+    if (working_set_.size() != cmp_count_)
+        throw std::runtime_error("working set size does not match number of qubits");
+
     outgoing_inst_buffer_.insert(outgoing_inst_buffer_.end(), result.memory_instructions.begin(), result.memory_instructions.end());
     s_unused_bandwidth += result.unused_bandwidth;
     s_emission_calls++;
