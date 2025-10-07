@@ -13,9 +13,11 @@ TROTTER_TIME_DIVISION = 1000
 #################################################################
 #################################################################
 
-def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], coeff: float, time_division: int) -> str:
+def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], coeff: float, time_division: int, min_coeff=1e-6) -> str:
     out = ''
     t = term
+    if coeff < min_coeff:
+        return ''
     c = coeff/time_division
     
     if len(t) == 0:
@@ -52,7 +54,6 @@ BENCHMARK_LIST = [
     ('e_cr2_120', 'Cr2.hdf5', '/ham_BK120', 120),
 ]
     
-
 if __name__ == '__main__':
     for (output_file_name, input_file, key, num_qubits) in BENCHMARK_LIST[1:]:
         output_path = f'bisquit/qasm/{output_file_name}_td_{TROTTER_TIME_DIVISION}.qasm'

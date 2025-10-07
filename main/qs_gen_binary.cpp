@@ -10,7 +10,9 @@
 #include <fstream>
 #include <string>
 
+#include "argparse.h"
 #include "compiler/program/oq2/lexer_wrapper.h"
+#include "compiler/program/rotation_manager.h"
 #include "parser.tab.h"
 #include "compiler/program.h"
 
@@ -46,23 +48,22 @@ print_stats(std::ostream& out, const PROGRAM_INFO::stats_type& stats)
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2)
-    {
-        std::cerr << "Usage: " << argv[0] << " <input-file> <output-file> [optional: <stats-output-file> <rotation-precision>]\n";
-        return 1;
-    }
+    std::string input_file;
+    std::string output_file;
+    std::string stats_output_file;
+    int64_t num_threads{8};
 
-    std::string input_file{argv[1]};
-    std::string output_file{argv[2]};
-    std::string stats_output_file{};
-    ssize_t urot_precision{PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION};
+    ARGPARSE()
+        .required("input-file", "input file qasm file (can be compressed)", input_file)
+        .required("output-file", "output file binary (.bin or .gz only)", output_file)
+        .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
+        .optional("-t", "--threads", "the number of threads to use", num_threads, 8)
+        .optional("-p", "--print-progress", "the number of instructions to print progress", prog::GL_PRINT_PROGRESS, 1'000'000)
+        .parse(argc, argv);
 
-    if (argc > 3)
-        stats_output_file = std::string{argv[3]};
-    if (argc > 4)
-        urot_precision = std::stoi(std::string{argv[4]});
+    prog::rotation_manager_init(num_threads);
 
-    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file, urot_precision);
+    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
     if (stats_output_file.empty())
     {
         print_stats(std::cout, stats);

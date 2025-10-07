@@ -37,8 +37,42 @@ if (APPLE)
     set(GMP_LIBRARIES /opt/homebrew/opt/gmp/lib/libgmp.dylib)
     set(MPFR_LIBRARIES /opt/homebrew/opt/mpfr/lib/libmpfr.dylib)
 else()
-    find_package(GMP REQUIRED)
-    find_package(MPFR REQUIRED)
+    find_package(GMP QUIET)
+    find_package(MPFR QUIET)
+
+    if(NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx)
+        find_path(GMP_INCLUDE_DIR NAMES gmp.h)
+        find_library(GMP_LIBRARIES NAMES gmp)
+        find_library(GMPXX_LIBRARIES NAMES gmpxx)
+        if(GMP_INCLUDE_DIR AND GMP_LIBRARIES AND GMPXX_LIBRARIES)
+            add_library(GMP::gmp UNKNOWN IMPORTED)
+            set_target_properties(GMP::gmp PROPERTIES
+                IMPORTED_LOCATION ${GMP_LIBRARIES}
+                INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
+            )
+            add_library(GMP::gmpxx UNKNOWN IMPORTED)
+            set_target_properties(GMP::gmpxx PROPERTIES
+                IMPORTED_LOCATION ${GMPXX_LIBRARIES}
+                INTERFACE_INCLUDE_DIRECTORIES ${GMP_INCLUDE_DIR}
+            )
+        endif()
+    endif()
+
+    if(NOT TARGET MPFR::MPFR)
+        find_path(MPFR_INCLUDE_DIR NAMES mpfr.h)
+        find_library(MPFR_LIBRARIES NAMES mpfr)
+        if(MPFR_INCLUDE_DIR AND MPFR_LIBRARIES)
+            add_library(MPFR::MPFR UNKNOWN IMPORTED)
+            set_target_properties(MPFR::MPFR PROPERTIES
+                IMPORTED_LOCATION ${MPFR_LIBRARIES}
+                INTERFACE_INCLUDE_DIRECTORIES ${MPFR_INCLUDE_DIR}
+            )
+        endif()
+    endif()
+
+    if (NOT TARGET GMP::gmp OR NOT TARGET GMP::gmpxx OR NOT TARGET MPFR::MPFR)
+        message(FATAL_ERROR "GMP and MPFR are required for the compiler.")
+    endif()
 endif()
 
 # compile bison/flex files:
@@ -60,10 +94,12 @@ message(STATUS "BISON_OQ2Parser_OUTPUTS: ${BISON_OQ2Parser_OUTPUTS}")
 set(BINARY_GEN_FILES
     ${BISON_OQ2Parser_OUTPUTS} 
     ${FLEX_OQ2Lexer_OUTPUTS}
+    src/argparse.cpp
     src/generic_io.cpp
     src/instruction.cpp
     src/compiler/program.cpp
-    src/compiler/program/expression.cpp)
+    src/compiler/program/expression.cpp
+    src/compiler/program/rotation_manager.cpp)
 
 set(SIM_FILES
     src/argparse.cpp

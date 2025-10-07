@@ -107,7 +107,7 @@ include_stmt: INCLUDE STRING_LITERAL ';'    {
                                                     file_to_read = QELIB1_INC_PATH;
                                                 else
                                                     file_to_read = curr_relative_path + "/" + file_to_read;
-                                                $$ = PROGRAM_INFO::from_file(file_to_read, prog.urot_precision_);
+                                                $$ = PROGRAM_INFO::from_file(file_to_read);
                                             }
             ; 
 

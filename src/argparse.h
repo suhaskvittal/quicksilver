@@ -81,19 +81,12 @@ argparse_get_type_info()
 template <class T> constexpr void
 argparse_check_valid_type()
 {
-    if constexpr (std::is_same<T, std::string>::value)
-        return;
-    else if constexpr (std::is_same<T, int64_t>::value)
-        return;
-    else if constexpr (std::is_same<T, double>::value)
-        return;
-    else if constexpr (std::is_same<T, bool>::value)
-        return;
-    else
-    {
-        throw std::runtime_error("invalid type for argparse: " + std::string(typeid(T).name())
-                            + ", only valid types are std::string, int64_t, double, and bool");
-    }
+    constexpr bool type_is_ok = std::is_same<T, std::string>::value
+                                || std::is_same<T, int64_t>::value
+                                || std::is_same<T, double>::value
+                                || std::is_same<T, bool>::value;
+    static_assert(type_is_ok, 
+        "invalid type for argparse, only valid types are std::string, int64_t, double, and bool");
 }
 
 ////////////////////////////////////////////////////////////

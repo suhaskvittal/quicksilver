@@ -20,32 +20,10 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-// Implementation of `std::hash` for `fpa_type`
-namespace std
-{
-
-template <>
-struct hash<INSTRUCTION::fpa_type>
-{
-    using value_type = INSTRUCTION::fpa_type;
-
-    size_t
-    operator()(const value_type& x) const 
-    { 
-        const auto& words = x.get_words();
-        uint64_t out = std::reduce(words.begin(), words.end(), uint64_t{0},
-                            [] (uint64_t acc, uint64_t word) { return acc ^ word; });
-        return out;
-    }
-};
-
-}   // namespace std
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 namespace prog
 {
+
+extern int64_t GL_PRINT_PROGRESS;
 
 struct EXPRESSION
 {
@@ -106,14 +84,12 @@ struct GATE_DEFINITION
 class PROGRAM_INFO
 {
 public:
-    constexpr static size_t MAX_INST_BEFORE_FLUSH{32*1024};
+    constexpr static size_t MAX_INST_BEFORE_FLUSH{4*1024*1024};
 
     using fpa_type = INSTRUCTION::fpa_type;
 
     using register_table = std::unordered_map<std::string, prog::REGISTER>;
     using gate_decl_table = std::unordered_map<std::string, prog::GATE_DEFINITION>;
-
-    using rotation_cache_type = std::unordered_map<fpa_type, std::vector<INSTRUCTION::TYPE>>;
 
     struct stats_type
     {
@@ -134,22 +110,16 @@ public:
         void generate_calculated_stats();  // use this to compute means, etc.
     };
 
-    constexpr static ssize_t USE_MSB_TO_DETERMINE_UROT_PRECISION{-1};
-
     // `final_stats_` is the aggregate statistics for the entire program.
     // this is only set 
     stats_type final_stats_{};
 
     std::string version_;
-
-    ssize_t urot_precision_{USE_MSB_TO_DETERMINE_UROT_PRECISION};
 private:
     register_table  registers_;
     gate_decl_table user_defined_gates_;
 
     std::vector<INSTRUCTION> instructions_;
-
-    rotation_cache_type rotation_cache_{};
 
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
@@ -157,16 +127,14 @@ private:
     generic_strm_type* ostrm_p_{nullptr};
 
     uint64_t inst_read_{0};
-    uint64_t rotation_count_{0};
 
     bool has_qubit_count_been_written_{false};
 public:
-    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
-
-    static PROGRAM_INFO from_file(std::string, ssize_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
+    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr);
+    static PROGRAM_INFO from_file(std::string);
 
     // returns the final program statistics:
-    static stats_type read_from_file_and_write_to_binary(std::string, std::string, size_t urot_precision=USE_MSB_TO_DETERMINE_UROT_PRECISION);
+    static stats_type read_from_file_and_write_to_binary(std::string, std::string);
     /*
         These are the public member functions that are used to build the program from the Bison parser.
     */
@@ -187,11 +155,6 @@ public:
 private:
     qubit_type get_qubit_id_from_operand(const prog::QASM_INST_INFO::operand_type&) const;
 
-    /*
-        This is a private member function so that we can update a "cache" of rotation sequences.
-    */
-    std::vector<INSTRUCTION::TYPE> gs_cli_call(fpa_type, ssize_t urot_precision);
-    std::vector<INSTRUCTION::TYPE> unroll_rotation(fpa_type);
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
     /*
         Templated function for perform some operations every layer. The callback is called
@@ -201,6 +164,11 @@ private:
     */
     template <class CALLBACK> void iterate_through_instructions_by_layer(const CALLBACK&) const;
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t get_required_precision(const INSTRUCTION::fpa_type&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

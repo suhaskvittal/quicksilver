@@ -6,6 +6,7 @@
 #include "compiler/program.h"
 #include "compiler/program/expression.h"
 #include "compiler/program/oq2/lexer_wrapper.h"
+#include "compiler/program/rotation_manager.h"
 #include "parser.tab.h"
 
 #include <cstdio>
@@ -20,21 +21,14 @@
 // have invalid measurement syntax
 #define DROP_MEASUREMENT_GATES
 #define ALLOW_GATE_DECL_OVERRIDES
-//#define PROGRAM_INFO_SHOW_GS_OUTPUT
-
-#define USE_GS_CPP
-
-//#define PROGRAM_INFO_VERBOSE
-
-#if defined(USE_GS_CPP)
-#include "nwqec/gridsynth/gridsynth.hpp"
-#endif
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 namespace prog
 {
+
+int64_t GL_PRINT_PROGRESS{1'000'000};
 
 std::string
 _generic_value_to_string(const EXPRESSION::generic_value_type& val)
@@ -152,19 +146,17 @@ PROGRAM_INFO::stats_type::generate_calculated_stats()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p, ssize_t urot_precision)
-    :ostrm_p_(ostrm_p),
-    urot_precision_(urot_precision)
-{
-}
+PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p)
+    :ostrm_p_(ostrm_p)
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 PROGRAM_INFO
-PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
+PROGRAM_INFO::from_file(std::string input_file)
 {
-    PROGRAM_INFO prog{nullptr, urot_precision};
+    PROGRAM_INFO prog{nullptr};
 
     generic_strm_type istrm;
     generic_strm_open(istrm, input_file, "rb");
@@ -185,12 +177,12 @@ PROGRAM_INFO::from_file(std::string input_file, ssize_t urot_precision)
 ////////////////////////////////////////////////////////////
 
 PROGRAM_INFO::stats_type
-PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, size_t urot_precision)
+PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file)
 {
     generic_strm_type ostrm;
     generic_strm_open(ostrm, output_file, "wb");
 
-    PROGRAM_INFO prog(&ostrm, urot_precision);
+    PROGRAM_INFO prog(&ostrm);
 
     // get the dirname of `input_file`
     std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
@@ -288,8 +280,8 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
     auto basis_gate_it = std::find(std::begin(BASIS_GATES), std::end(BASIS_GATES), qasm_inst.gate_name);
     if (basis_gate_it != std::end(BASIS_GATES))
     {
-        if (inst_read_ % 1'000'000 == 0)
-            std::cout << "[ PROGRAM_INFO ] read " << inst_read_/1'000'000 << "M instructions\n";
+        if (inst_read_ % GL_PRINT_PROGRESS == 0)
+            std::cout << "[ PROGRAM_INFO ] read " << inst_read_ << " instructions\n";
         inst_read_++;
 
         INSTRUCTION::TYPE inst_type = static_cast<INSTRUCTION::TYPE>(
@@ -305,7 +297,8 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
             // ignore gates with an angle of 0:
             if (rotation.popcount() == 0)
                 return;
-            urotseq = unroll_rotation(rotation);
+            // schedule the rotation's synthesis:
+            rm_schedule_synthesis(rotation, get_required_precision(rotation));
         }
 
         // first, check if any arguments are registers with width > 1 that are un-indexed:
@@ -531,10 +524,16 @@ PROGRAM_INFO::flush_and_clear_instructions()
         has_qubit_count_been_written_ = true;
     }
 
-    for (const auto& inst : instructions_)
+    size_t ii{0};
+    for (auto&& inst : instructions_)
     {
+        if (ii % 100'000 == 0)
+            (std::cout << ".").flush();
+        ii++;
+        // retrieve the rotation sequence for this instruction:
         if (inst.type == INSTRUCTION::TYPE::RZ || inst.type == INSTRUCTION::TYPE::RX)
         {
+            inst.urotseq = rm_find(inst.angle, get_required_precision(inst.angle));
             if (inst.urotseq.empty()) // this is an RZ(0) or RZ(2*pi) that did not get caught -- just skip it:
                 continue;
         }
@@ -542,6 +541,7 @@ PROGRAM_INFO::flush_and_clear_instructions()
         auto enc = inst.serialize();
         enc.read_write([this] (void* buf, size_t size) { return generic_strm_write(*this->ostrm_p_, buf, size); });
     }
+    std::cout << "\n";
 
     // clear instructions:
     instructions_.clear();
@@ -742,410 +742,11 @@ PROGRAM_INFO::analyze_program() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-// declared some constexpr `INSTRUCTION::TYPE`s to make the code more readable:
-constexpr static INSTRUCTION::TYPE H = INSTRUCTION::TYPE::H;
-constexpr static INSTRUCTION::TYPE X = INSTRUCTION::TYPE::X;
-constexpr static INSTRUCTION::TYPE Z = INSTRUCTION::TYPE::Z;
-constexpr static INSTRUCTION::TYPE S = INSTRUCTION::TYPE::S;
-constexpr static INSTRUCTION::TYPE SDG = INSTRUCTION::TYPE::SDG;
-constexpr static INSTRUCTION::TYPE T = INSTRUCTION::TYPE::T;
-constexpr static INSTRUCTION::TYPE TDG = INSTRUCTION::TYPE::TDG;
-constexpr static INSTRUCTION::TYPE SX = INSTRUCTION::TYPE::SX;
-constexpr static INSTRUCTION::TYPE SXDG = INSTRUCTION::TYPE::SXDG;
-constexpr static INSTRUCTION::TYPE TX = INSTRUCTION::TYPE::TX;
-constexpr static INSTRUCTION::TYPE TXDG = INSTRUCTION::TYPE::TXDG;
-
-template <class ITERABLE> std::string
-_urotseq_to_string(ITERABLE iterable)
-{
-    std::stringstream strm;
-    bool first{true};
-    for (auto x : iterable)
-    {
-        if (!first)
-            strm << "'";
-        first = false;
-        std::string_view sx = BASIS_GATES[static_cast<size_t>(x)];
-        strm << sx;
-    }
-    return strm.str();
-}
-
-void
-_flip_h_subsequence(std::vector<INSTRUCTION::TYPE>& urotseq)
-{
-    // find the largest such subsequence sandwiched by `H` and replace those gates with the X/Z rotation alternative
-    std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE> xz_map
-    {
-        {X, Z}, {Z, X},
-        {S, SX}, {SX, S},
-        {SDG, SXDG}, {SXDG, SDG},
-        {T, TX}, {TX, T},
-        {TXDG, TDG}, {TDG, TXDG}
-    };
-
-    // find the first two H gates:
-    auto h_max_begin = std::find(urotseq.begin(), urotseq.end(), H);
-    if (h_max_begin == urotseq.end())
-        return;
-
-    auto h_max_end = std::find(h_max_begin+1, urotseq.end(), H);
-    if (h_max_end == urotseq.end())
-        return;
-
-    size_t max_len = std::distance(h_max_begin, h_max_end);
-
-    // now search for a better subsequence:
-    auto h_begin = std::find(h_max_end+1, urotseq.end(), H);
-    while (h_begin != urotseq.end())
-    {
-        auto h_end = std::find(h_begin+1, urotseq.end(), H);
-        if (h_end == urotseq.end())
-            break;
-
-        size_t len = std::distance(h_begin, h_end);
-        if (len > max_len)
-        {
-            max_len = len;
-            h_max_begin = h_begin;
-            h_max_end = h_end;
-        }
-
-        // recompute `h_begin` and try again:
-        h_begin = std::find(h_end+1, urotseq.end(), H);
-    }
-
-    // now, we should have the best subsequence: flip all gates in between:
-    for (auto it = h_max_begin+1; it != h_max_end; it++)
-        *it = xz_map[*it];
-
-    // set the H gates to nil and remove them:
-    *h_max_begin = INSTRUCTION::TYPE::NIL;
-    *h_max_end = INSTRUCTION::TYPE::NIL;
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
-    urotseq.erase(it, urotseq.end());
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-enum class BASIS_TYPE { X, Z, NONE };
-
-BASIS_TYPE
-_get_basis_type(INSTRUCTION::TYPE g)
-{
-    if (g == X || g == SX || g == SXDG || g == TX || g == TXDG)
-        return BASIS_TYPE::X;
-    else if (g == Z || g == S || g == SDG || g == T || g == TDG)
-        return BASIS_TYPE::Z;
-    else
-        return BASIS_TYPE::NONE;
-}
-
-uint8_t
-_get_rotation_value(INSTRUCTION::TYPE g)
-{
-    // the output is r, where g is some rotation of r*pi/4
-    switch (g)
-    {
-    case X:
-    case Z:
-        return 4;
-    case S:
-    case SX:
-        return 2;
-    case SDG:
-    case SXDG:
-        return 6;
-    case T:
-    case TX:
-        return 1;
-    case TDG:
-    case TXDG:
-        return 7;
-    default:
-        throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
-    }
-}
-
-// returns the iterator after the last modified element
-std::vector<INSTRUCTION::TYPE>::iterator
-_get_consolidated_gate(BASIS_TYPE basis, uint8_t rotation_sum, std::vector<INSTRUCTION::TYPE>::iterator replace_it)
-{
-    bool is_z = basis == BASIS_TYPE::Z;
-    if (rotation_sum == 0)
-        return replace_it;  // kill the entire subsequence
-    else if (rotation_sum == 1 || rotation_sum == 5)
-        *replace_it = is_z ? T : TX;
-    else if (rotation_sum == 2)
-        *replace_it = is_z ? S : SX;
-    else if (rotation_sum == 4)
-        *replace_it = is_z ? Z : X;
-    else if (rotation_sum == 6)
-        *replace_it = is_z ? SDG : SXDG;
-    else if (rotation_sum == 3 || rotation_sum == 7)
-        *replace_it = is_z ? TDG : TXDG;
-    replace_it++;
-
-    // if 3 or 7, add an extra pi rotation
-    if (rotation_sum == 3 || rotation_sum == 7)
-    {
-        *replace_it = is_z ? Z : X;
-        replace_it++;
-    }
-
-    return replace_it;
-}
-
 size_t
-_consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
+get_required_precision(const INSTRUCTION::fpa_type& angle)
 {
-    size_t num_consolidations{0};
-
-    // generate a subsequence, stop until we hit an H gate or gate in a different basis:
-    BASIS_TYPE current_basis{BASIS_TYPE::NONE};
-    uint8_t current_rotation_sum{0};
-    auto seq_begin = urotseq.begin();
-    for (auto it = urotseq.begin(); it != urotseq.end(); it++)
-    {
-        auto g = *it;
-        if (current_basis != BASIS_TYPE::NONE)
-        {
-            if (_get_basis_type(g) != current_basis)
-            {
-                // replace the sequence with the appropriate gate:
-                auto seq_kill_begin = _get_consolidated_gate(current_basis, current_rotation_sum, seq_begin);
-                // set all gates from `seq_kill_begin` to `it` to `NIL` -- we will remove these later:
-                std::fill(seq_kill_begin, it, INSTRUCTION::TYPE::NIL);
-                num_consolidations++;
-                
-                // set basis type to none since we can now start a new subsequence
-                current_basis = BASIS_TYPE::NONE;
-                current_rotation_sum = 0;
-            }
-            else
-            {
-                current_rotation_sum += _get_rotation_value(g);
-                current_rotation_sum &= 7;  // mod 8
-            }
-        }
-
-        // this is not an else since we may set `current_basis` to `BASIS_TYPE::NONE` in the above if statement
-        if (current_basis == BASIS_TYPE::NONE)
-        {
-            if (g == H)
-                continue;  // nothing to be done
-
-            current_basis = _get_basis_type(g);
-            if (current_basis == BASIS_TYPE::NONE)
-                throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
-            current_rotation_sum = _get_rotation_value(g);
-            seq_begin = it;
-        }
-    }
-
-    // if we are still in a subsequence, finish it off:
-    if (current_basis != BASIS_TYPE::NONE)
-    {
-        auto seq_kill_begin = _get_consolidated_gate(current_basis, current_rotation_sum, seq_begin);
-        std::fill(seq_kill_begin, urotseq.end(), INSTRUCTION::TYPE::NIL);
-        num_consolidations++;
-    }
-
-    // remove all `NIL` gates:
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
-    urotseq.erase(it, urotseq.end());
-
-    return num_consolidations;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-const double LG_2_10 = std::log2(10);
-
-std::vector<INSTRUCTION::TYPE>
-PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
-{
-    constexpr size_t ROTATION_SHOW_GS_OUTPUT_EVERY = 100'000;
-
-    std::stringstream cli_strm;
-    // determine the CLI arguments for gridsynth:
-    constexpr size_t ROTW = PROGRAM_INFO::fpa_type::NUM_BITS;
-    size_t msb = std::min(rotation.join_word_and_bit_idx(rotation.msb()), rotation.join_word_and_bit_idx(fpa::negate(rotation).msb()));
-
-    size_t precision;
-#if defined(USE_GS_CPP)
-    double fp_repr = convert_fpa_to_float(rotation);
-    precision = static_cast<size_t>(-std::ceil(std::log10(fp_repr)) + 4);
-#else
-    size_t precision = urot_precision == PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION
-                        ? ROTW - msb + 3
-                        : urot_precision;
-#endif
-
-#if !defined(PROGRAM_INFO_VERBOSE) && defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
-    {
-        std::cout << "[ PROGRAM_INFO ] running gridsynth for angle: " << fpa::to_string(rotation) 
-                                                                            << ", hex string: " << rotation.to_hex_string()
-                                                                            << ", precision: " << precision << "\n";
-    }
-#endif
-
-    std::vector<INSTRUCTION::TYPE> out{};
-    out.reserve(2*precision);
-#if defined(USE_GS_CPP)
-    std::string fpa_str = fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP);
-    std::string epsilon = "1e-" + std::to_string(precision);
-
-#if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
-        std::cout << "\tgridsynth input: " << fpa_str << ", epsilon: " << epsilon << " (b = " << precision << ")\n";
-#endif
-
-    std::string gates_str;
-    double t_ms{0.0};
-#if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    std::tie(gates_str, t_ms) = gridsynth::gridsynth_gates(fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP),
-                                                        epsilon,
-                                                        NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
-                                                        NWQEC::DEFAULT_FACTORING_TIMEOUT_MS,
-                                                        false,
-                                                        rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0);
-#else
-    std::tie(gates_str, t_ms) = gridsynth::gridsynth_gates(fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP),
-                                                        epsilon,
-                                                        NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
-                                                        NWQEC::DEFAULT_FACTORING_TIMEOUT_MS,
-                                                        false,
-                                                        precision >= 8);
-#endif
-    if (t_ms > 5000.0)
-    {
-        std::cerr << "[gs_cpp] possible performance issue: gridsynth took " << t_ms << " ms for inputs: " 
-            << fpa_str << ", epsilon: " << epsilon << " (b = " << precision << "), fpa hex = " << rotation.to_hex_string() << "\n";
-    }
-
-    for (char c : gates_str)
-    {
-        if (c == 'H')
-            out.push_back(H);
-        else if (c == 'T')
-            out.push_back(T);
-        else if (c == 'X')
-            out.push_back(X);
-        else if (c == 'Z')
-            out.push_back(Z);
-        else if (c == 'S')
-            out.push_back(S);
-    }
-
-#if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
-        std::cout << "\tgridsynth output: " << gates_str <<  "\n";
-#endif
-
-#else // !defined(USE_GS_CPP)
-    cli_strm << "gridsynth -b " << precision << " -p \"" << fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH) << "\"";
-    std::string cmd = cli_strm.str();
-#if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] running gridsynth with command: `" << cmd << "`"
-            << "\n\t\tgridsynth output: ";
-#endif
-    
-    // run gridsynth and read its output:
-    FILE* gs = popen(cmd.c_str(), "r");
-    char c;
-    while ((c=fgetc(gs)) != EOF)
-    {
-#if defined(PROGRAM_INFO_VERBOSE)
-        std::cout << c;
-#endif
-        if (c == 'H')
-            out.push_back(H);
-        else if (c == 'T')
-            out.push_back(T);
-        else if (c == 'X')
-            out.push_back(X);
-        else if (c == 'Z')
-            out.push_back(Z);
-        else if (c == 'S')
-            out.push_back(S);
-    }
-
-#if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "\n";
-#endif
-
-    pclose(gs);
-#endif // USE_GS_CPP
-
-    // now we need to coalesce gates inplace:
-    [[maybe_unused]] size_t urotseq_original_size = out.size();
-    
-    size_t progress{0};
-    do
-    {
-        size_t size_before = out.size();
-#if defined(PROGRAM_INFO_VERBOSE)
-        std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
-#endif
-        // flip any subsequences sandwiched by `H` gates:
-        size_t h_count = std::count(out.begin(), out.end(), H);
-        while (h_count > 1)
-        {
-            _flip_h_subsequence(out);
-            h_count -= 2;
-        }
-        _consolidate_and_reduce_subsequences(out);
-        size_t size_after = out.size();
-        progress = size_before - size_after;
-    } 
-    while (progress > 0);
-
-    [[maybe_unused]] size_t urotseq_reduced_size = out.size();
-
-#if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
-    std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
-#elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
-        std::cout << "\t\treduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
-#endif
-
-    if (urotseq_reduced_size == 0)
-    {
-        std::cerr << "[alert] gridsynth returned an empty urotseq, original size: " 
-                    << std::to_string(urotseq_original_size) 
-                    << ", precision: " << precision
-                    << ", angle: "
-                    << fpa::to_string(rotation) 
-                    << ", hex string: " << rotation.to_hex_string() << "\n";
-    }
-
-    rotation_count_++;
-    return out;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::vector<INSTRUCTION::TYPE>
-PROGRAM_INFO::unroll_rotation(fpa_type rotation)
-{
-    constexpr size_t MAX_ROTATION_CACHE_SIZE = 16384;
-
-    auto it = rotation_cache_.find(rotation);
-    if (it != rotation_cache_.end())
-        return it->second;
-
-    if (rotation_cache_.size() >= MAX_ROTATION_CACHE_SIZE)
-        rotation_cache_.clear();
-
-    std::vector<INSTRUCTION::TYPE> out = gs_cli_call(rotation, urot_precision_);
-    rotation_cache_.insert({rotation, out});
-    return out;
+    double mag = fabsl(convert_fpa_to_float(angle));
+    return ceil(-log10(mag)) + 3;
 }
 
 ////////////////////////////////////////////////////////////

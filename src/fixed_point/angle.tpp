@@ -49,6 +49,8 @@ convert_fpa_to_float(const FPA_TYPE<W>& x)
         out += x.test(i) ? m : 0.0;
         m *= 0.5;
     }
+    if (out > M_PI)
+        out -= 2*M_PI;
     return out;
 }
 
@@ -259,17 +261,7 @@ to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
     }
     else
     {
-        if (cnt < cnt_neg)
-        {
-            ss << std::setprecision(5) << convert_fpa_to_float(x);
-        }
-        else
-        {
-            if (fmt == STRING_FORMAT::GRIDSYNTH)
-                ss << "-(" << std::setprecision(5) << convert_fpa_to_float(nx) << ")";
-            else
-                ss << "-" << std::setprecision(5) << convert_fpa_to_float(nx);
-        }
+        ss << std::setprecision(5) << convert_fpa_to_float(x);
     }
     return ss.str();
 }
