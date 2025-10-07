@@ -230,7 +230,8 @@ namespace gridsynth
      * @param measure_time Enable timing measurements
      * @return Vector of gate strings
      */
-    inline std::string gridsynth_gates(
+    inline std::pair<std::string, double>   // gates_str, time in millseconds
+    gridsynth_gates(
         std::string theta,
         std::string epsilon,
         int diophantine_timeout_ms = NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
@@ -243,19 +244,20 @@ namespace gridsynth
         DOmegaUnitary u_approx = gridsynth(
             Float(theta), Float(epsilon),
             diophantine_timeout_ms, factoring_timeout_ms,
-            verbose, measure_time);
+            verbose, false);
 
         std::string gates_str = decompose_domega_unitary(u_approx);
 
+        double t_ms{0.0};
         if (measure_time)
         {
             auto end = std::chrono::high_resolution_clock::now();
             auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start_total);
 
-            std::cout << "Gridsynth time: " << total_duration.count() / 1000.0 << " ms" << std::endl;
+            t_ms = total_duration.count() / 1000.0;
         }
 
-        return gates_str;
+        return {gates_str, t_ms};
     }
 
 } // namespace gridsynth

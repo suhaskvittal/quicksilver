@@ -217,7 +217,7 @@ to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
             if (y.test(i))
             {
                 // add operand in front of term
-                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
+                if (fmt == STRING_FORMAT::GRIDSYNTH)
                 {
                     if (!first)
                         ss << " + ";
@@ -231,7 +231,7 @@ to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
                 }
 
                 // need parentheses for gridsynth format:
-                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
+                if (fmt == STRING_FORMAT::GRIDSYNTH)
                 {
                     ss << "(";
                     if (use_negative)
@@ -250,7 +250,7 @@ to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
                         ss << "/2^" << exp;
                 }
 
-                if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
+                if (fmt == STRING_FORMAT::GRIDSYNTH)
                     ss << ")";
 
                 first = false;
@@ -265,7 +265,7 @@ to_string(const FPA_TYPE<W>& x, STRING_FORMAT fmt)
         }
         else
         {
-            if (fmt == STRING_FORMAT::GRIDSYNTH || fmt == STRING_FORMAT::GRIDSYNTH_CPP)
+            if (fmt == STRING_FORMAT::GRIDSYNTH)
                 ss << "-(" << std::setprecision(5) << convert_fpa_to_float(nx) << ")";
             else
                 ss << "-" << std::setprecision(5) << convert_fpa_to_float(nx);

@@ -20,7 +20,7 @@
 // have invalid measurement syntax
 #define DROP_MEASUREMENT_GATES
 #define ALLOW_GATE_DECL_OVERRIDES
-#define PROGRAM_INFO_SHOW_GS_OUTPUT
+//#define PROGRAM_INFO_SHOW_GS_OUTPUT
 
 #define USE_GS_CPP
 
@@ -962,19 +962,30 @@ _consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+const double LG_2_10 = std::log2(10);
+
 std::vector<INSTRUCTION::TYPE>
 PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precision)
 {
+    constexpr size_t ROTATION_SHOW_GS_OUTPUT_EVERY = 100'000;
+
     std::stringstream cli_strm;
     // determine the CLI arguments for gridsynth:
     constexpr size_t ROTW = PROGRAM_INFO::fpa_type::NUM_BITS;
     size_t msb = std::min(rotation.join_word_and_bit_idx(rotation.msb()), rotation.join_word_and_bit_idx(fpa::negate(rotation).msb()));
+
+    size_t precision;
+#if defined(USE_GS_CPP)
+    double fp_repr = convert_fpa_to_float(rotation);
+    precision = static_cast<size_t>(-std::ceil(std::log10(fp_repr)) + 4);
+#else
     size_t precision = urot_precision == PROGRAM_INFO::USE_MSB_TO_DETERMINE_UROT_PRECISION
                         ? ROTW - msb + 3
                         : urot_precision;
+#endif
 
 #if !defined(PROGRAM_INFO_VERBOSE) && defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % 100'000 == 0)
+    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
     {
         std::cout << "[ PROGRAM_INFO ] running gridsynth for angle: " << fpa::to_string(rotation) 
                                                                             << ", hex string: " << rotation.to_hex_string()
@@ -986,14 +997,36 @@ PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precisio
     out.reserve(2*precision);
 #if defined(USE_GS_CPP)
     std::string fpa_str = fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP);
-    std::string epsilon = std::to_string(pow(2.0, -static_cast<int>(precision)));
+    std::string epsilon = "1e-" + std::to_string(precision);
 
 #if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % 100'000 == 0)
+    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
         std::cout << "\tgridsynth input: " << fpa_str << ", epsilon: " << epsilon << " (b = " << precision << ")\n";
 #endif
 
-    std::string gates_str = gridsynth::gridsynth_gates(fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP), epsilon);
+    std::string gates_str;
+    double t_ms{0.0};
+#if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
+    std::tie(gates_str, t_ms) = gridsynth::gridsynth_gates(fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP),
+                                                        epsilon,
+                                                        NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
+                                                        NWQEC::DEFAULT_FACTORING_TIMEOUT_MS,
+                                                        false,
+                                                        rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0);
+#else
+    std::tie(gates_str, t_ms) = gridsynth::gridsynth_gates(fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP),
+                                                        epsilon,
+                                                        NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
+                                                        NWQEC::DEFAULT_FACTORING_TIMEOUT_MS,
+                                                        false,
+                                                        precision >= 8);
+#endif
+    if (t_ms > 5000.0)
+    {
+        std::cerr << "[gs_cpp] possible performance issue: gridsynth took " << t_ms << " ms for inputs: " 
+            << fpa_str << ", epsilon: " << epsilon << " (b = " << precision << "), fpa hex = " << rotation.to_hex_string() << "\n";
+    }
+
     for (char c : gates_str)
     {
         if (c == 'H')
@@ -1009,7 +1042,7 @@ PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precisio
     }
 
 #if defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % 100'000 == 0)
+    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
         std::cout << "\tgridsynth output: " << gates_str <<  "\n";
 #endif
 
@@ -1057,9 +1090,6 @@ PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precisio
         size_t size_before = out.size();
 #if defined(PROGRAM_INFO_VERBOSE)
         std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
-#elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-        if (rotation_count_ % 100'000 == 0)
-            std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
 #endif
         // flip any subsequences sandwiched by `H` gates:
         size_t h_count = std::count(out.begin(), out.end(), H);
@@ -1080,11 +1110,8 @@ PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precisio
     std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
     std::cout << "[ PROGRAM_INFO ] reduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
 #elif defined(PROGRAM_INFO_SHOW_GS_OUTPUT)
-    if (rotation_count_ % 100'000 == 0)
-    {
-        std::cout << "\t\turotseq: " << _urotseq_to_string(out) << "\n";
+    if (rotation_count_ % ROTATION_SHOW_GS_OUTPUT_EVERY == 0)
         std::cout << "\t\treduced urotseq size from " << urotseq_original_size << " to " << urotseq_reduced_size << "\n";
-    }
 #endif
 
     if (urotseq_reduced_size == 0)
@@ -1107,9 +1134,14 @@ PROGRAM_INFO::gs_cli_call(PROGRAM_INFO::fpa_type rotation, ssize_t urot_precisio
 std::vector<INSTRUCTION::TYPE>
 PROGRAM_INFO::unroll_rotation(fpa_type rotation)
 {
+    constexpr size_t MAX_ROTATION_CACHE_SIZE = 16384;
+
     auto it = rotation_cache_.find(rotation);
     if (it != rotation_cache_.end())
         return it->second;
+
+    if (rotation_cache_.size() >= MAX_ROTATION_CACHE_SIZE)
+        rotation_cache_.clear();
 
     std::vector<INSTRUCTION::TYPE> out = gs_cli_call(rotation, urot_precision_);
     rotation_cache_.insert({rotation, out});
