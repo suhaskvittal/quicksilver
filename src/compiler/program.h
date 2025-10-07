@@ -8,6 +8,7 @@
 
 #include "generic_io.h"
 #include "instruction.h"
+#include "compiler/program/rotation_manager.h"
 
 #include <cstdio>
 #include <memory>
@@ -19,6 +20,7 @@
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
 
 namespace prog
 {
@@ -121,6 +123,10 @@ private:
 
     std::vector<INSTRUCTION> instructions_;
 
+    // this is a cache of the rotation sequences for the rotations that have been synthesized
+    // this is used to avoid re-synthesizing the same rotation sequence multiple times
+    std::unordered_map<INSTRUCTION::fpa_type, std::vector<INSTRUCTION::TYPE>> rotation_cache_;
+
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
 
@@ -155,6 +161,7 @@ public:
 private:
     qubit_type get_qubit_id_from_operand(const prog::QASM_INST_INFO::operand_type&) const;
 
+    void complete_rotation_gates();
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
     /*
         Templated function for perform some operations every layer. The callback is called
