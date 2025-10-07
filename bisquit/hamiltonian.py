@@ -8,12 +8,13 @@ from hamlib_snippets import *
 #################################################################
 #################################################################
 
-TROTTER_TIME_DIVISION = 1000
+TROTTER_TIME_DIVISION = 100
+TERM_LIMIT = 100_000
 
 #################################################################
 #################################################################
 
-def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], coeff: float, time_division: int, min_coeff=1e-6) -> str:
+def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], coeff: float, time_division: int, min_coeff=1e-4) -> str:
     out = ''
     t = term
     if coeff < min_coeff:
@@ -47,7 +48,7 @@ def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], coef
 #################################################################
 
 BENCHMARK_LIST = [
-    ('fermi_hubbard_432', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-6_Ly-6_Lz-6_U-0_enc-bk', 432),
+#   ('fermi_hubbard_432', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-6_Ly-6_Lz-6_U-0_enc-bk', 432),
 #   ('fermi_hubbard_2000', 'FH_D-3.hdf5', '/fh-graph-3D-grid-nonpbc-qubitnodes_Lx-10_Ly-10_Lz-10_U-12_enc-bk'),
     ('v_c2h4o_ethylene_oxide_240', 'all-vib-c2h4o_ethylene_oxide.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 240),
     ('v_hc3h2cn_288', 'all-vib-hc3h2cn.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 288),
@@ -55,8 +56,10 @@ BENCHMARK_LIST = [
 ]
     
 if __name__ == '__main__':
-    for (output_file_name, input_file, key, num_qubits) in BENCHMARK_LIST[1:]:
-        output_path = f'bisquit/qasm/{output_file_name}_td_{TROTTER_TIME_DIVISION}.qasm'
+    for (output_file_name, input_file, key, num_qubits) in BENCHMARK_LIST:
+        term_count = count_terms_hdf5(f'bisquit/hamlib/{input_file}', key)
+        output_path = f'bisquit/qasm/{output_file_name}_d{TROTTER_TIME_DIVISION}_t{TERM_LIMIT//1_000}k_T{term_count//1_000_000}M.qasm'
+        print(output_path)
 
         with open(output_path, 'w') as f:
             f.write(f'OPENQASM 2.0;\n')
@@ -70,8 +73,10 @@ if __name__ == '__main__':
             print(f'reading {input_file}/{key}')
             i = 0
             for (labels, coeffs, max_qubit) in read_pauli_strings_hdf5(f'bisquit/hamlib/{input_file}', key):
-                if i % 1_000_000 == 0:
+                if i % 100_000 == 0:
                     print(f'\twriting term {i}')
+                if i >= TERM_LIMIT:
+                    break
                 i += 1
                 trotter_pauli_expansion = trotter_expand_pauli_string('ctrl', 'q', labels, coeffs, TROTTER_TIME_DIVISION)
                 if len(trotter_pauli_expansion) > 0:

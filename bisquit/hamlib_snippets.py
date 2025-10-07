@@ -213,6 +213,16 @@ def read_pauli_strings_hdf5(fname_hdf5: str, key: str):
         for label, coeff, max_qubit in read_pauli_string_text(f[key][()].decode("utf-8")):
             yield (label, coeff, max_qubit)
 
+def count_terms_hdf5(fname_hdf5: str, key: str):
+    """
+    Count the number of terms in the HDF5 file at specified key.
+    """
+    with h5py.File(fname_hdf5, 'r', libver='latest') as f:
+        text = f[key][()].decode("utf-8")
+        pattern = r'\+\s*(?![^()]*\))'
+        terms = re.split(pattern, text)
+        return len(terms)
+
 #################################################################
 #################################################################
 
