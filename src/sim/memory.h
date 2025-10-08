@@ -79,11 +79,11 @@ public:
     // statistics:
     using client_stats_type = std::unordered_map<int8_t, uint64_t>;
 
-    client_stats_type s_num_prefetch_requests_{};
-    client_stats_type s_num_prefetch_promoted_to_demand_{};
-    uint64_t s_memory_requests_{0};
-    uint64_t s_memory_prefetch_requests_{0};
-    uint64_t s_total_epr_buffer_occupancy_post_request_{0};
+    client_stats_type s_num_prefetch_requests{};
+    client_stats_type s_num_prefetch_promoted_to_demand{};
+    uint64_t s_memory_requests{0};
+    uint64_t s_memory_prefetch_requests{0};
+    uint64_t s_total_epr_buffer_occupancy_post_request{0};
 
     const size_t num_banks_;
     const size_t capacity_per_bank_;

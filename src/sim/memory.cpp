@@ -68,13 +68,13 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT vict
     auto req_it = find_request_for_qubit(requested);
     if (req_it != request_buffer_.end())
     {
-        s_num_prefetch_promoted_to_demand_[requested.client_id] += (req_it->is_prefetch && !is_prefetch);
+        s_num_prefetch_promoted_to_demand[requested.client_id] += (req_it->is_prefetch && !is_prefetch);
         req_it->is_prefetch &= is_prefetch;
         return;
     }
 
     if (is_prefetch)
-        s_num_prefetch_requests_[requested.client_id]++;
+        s_num_prefetch_requests[requested.client_id]++;
 
     // otherwise, create a new request:
     request_type req{inst, requested, victim, is_prefetch};
@@ -254,11 +254,11 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
             OP_add_event_using_cycles(MEMORY_EVENT_TYPE::REMOTE_EPR_PAIR_GENERATED, mean_epr_generation_cycle_time_, MEMORY_EVENT_INFO{});
 
         epr_buffer_occu_ -= 2;
-        s_total_epr_buffer_occupancy_post_request_ += epr_buffer_occu_;
+        s_total_epr_buffer_occupancy_post_request += epr_buffer_occu_;
     }
-    s_memory_requests_++;
+    s_memory_requests++;
     if (req.is_prefetch)
-        s_memory_prefetch_requests_++;
+        s_memory_prefetch_requests++;
 
 #if defined(MEMORY_VERBOSE)
     std::cout << "\tserved memory request for qubit " << req.qubit << " in bank " << bank_idx 

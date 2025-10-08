@@ -16,6 +16,8 @@
 #include "argparse.h"
 #include "compiler/memopt.h"
 #include "sim.h"
+#include "sim/utils/estimation.h"
+#include "sim/utils/factory_builder.h"
 
 #include <zlib.h>
 
@@ -26,229 +28,6 @@ template <class INTA, class INTB> double
 _fpdiv(INTA a, INTB b)
 {
     return static_cast<double>(a) / static_cast<double>(b);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t
-sc_phys_qubit_count(size_t d)
-{
-    return 2*d*d - 1;
-}
-
-size_t
-sc_phys_qubit_count(size_t dx, size_t dz)
-{
-    return 2*dx*dz - 1;
-}
-
-size_t
-bb_phys_qubit_count(size_t d)
-{
-    return 2 * 72 * (d/6);
-}
-
-size_t
-fact_logical_qubit_count(std::string which)
-{
-    // this includes the ancillary space required to perform pauli-product rotations
-    if (which == "15to1")
-        return 9;
-    else if (which == "20to4")
-        return 12;
-    else
-        throw std::runtime_error("fact_logical_qubit_count: unknown logical qubit count for " + which);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-const double PHYS_ERROR{1e-3};
-
-double
-sc_logical_error_rate(size_t d)
-{
-    return 0.1 * pow(100*PHYS_ERROR, 0.5*(d+1));
-}
-
-size_t
-sc_distance_for_target_logical_error_rate(double e)
-{
-    double d = 2.0 * ((log(e) - log(0.1)) / log(100*PHYS_ERROR)) - 1.0;
-
-    // need to intelligently round while avoiding floating point issues
-    size_t d_fl = static_cast<size_t>(floor(d)),
-           d_ce = static_cast<size_t>(ceil(d));
-
-    // 0.1 is insignificant enough that we can round down.
-    if (d - d_fl < 0.1)
-        return d_fl;
-    else
-        return d_ce;
-}
-
-double
-mem_bb_logical_error_rate(size_t d)
-{
-    if (d == 6)
-        return 7e-5;
-    else if (d == 12)
-        return 2e-7;
-    else if (d == 18)
-        return 2e-12;
-    else  // (d = 24)
-        return 2e-17;  // don't actually know this one
-}
-
-size_t
-mem_bb_distance_for_target_logical_error_rate(double e)
-{
-    if (e >= 7e-5)
-        return 6;
-    else if (e >= 2e-7)
-        return 12;
-    else if (e >= 2e-12)
-        return 18;
-    else  // (e = 2e-17)
-        return 24;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-struct factory_info
-{
-    std::string which;
-    size_t      sc_dx;
-    size_t      sc_dz;
-    size_t      sc_dm;
-    double      e_out;
-};
-
-sim::T_FACTORY*
-_create_factory(const factory_info& fi, double freq_khz, size_t level, size_t buffer_capacity=4)
-{
-    size_t initial_input_count;
-    size_t output_count;
-    size_t num_rotation_steps;
-
-    if (fi.which == "15to1")
-    {
-        initial_input_count = 4;
-        output_count = 1;
-        num_rotation_steps = 11;
-    }
-    else if (fi.which == "20to4")
-    {
-        initial_input_count = 3;
-        output_count = 4;
-        num_rotation_steps = 17;
-    }
-    else
-    {
-        throw std::runtime_error("_create_factory: unknown factory type " + fi.which);
-    }
-
-    sim::T_FACTORY* f = new sim::T_FACTORY{freq_khz, 
-                                            fi.e_out, 
-                                            initial_input_count,
-                                            output_count,
-                                            num_rotation_steps,
-                                            buffer_capacity,
-                                            level};
-    return f;
-}
-
-// returns the factory vector and the actual qubits used
-std::pair<std::vector<sim::T_FACTORY*>, size_t>
-fact_create_factory_config_for_target_logical_error_rate(double e, size_t max_phys_qubits, uint64_t t_round_ns, size_t pin_limit=4)
-{
-    // assuming `PHYS_ERROR == 1e-3`:
-
-    std::vector<factory_info> factory_conf;
-    factory_conf.reserve(2);
-
-    if (e >= 1e-8)
-    {
-        factory_conf.push_back({"15to1", 17, 7, 7, 1e-8});
-    }
-    else if (e >= 1e-10)
-    {
-        factory_conf.push_back({"15to1", 13, 5, 5, 1e-7});
-        factory_conf.push_back({"20to4", 23, 11, 13, 1e-10});
-    }
-    else if (e >= 1e-12)
-    {
-        factory_conf.push_back({"15to1", 11, 5, 5, 1e-6});
-        factory_conf.push_back({"15to1", 25, 11, 11, 1e-12});
-    }
-    else if (e >= 1e-14)
-    {
-        factory_conf.push_back({"15to1", 13, 5, 5, 1e-7});
-        factory_conf.push_back({"15to1", 29, 11, 13, 1e-14});
-    }
-    else
-    {
-        factory_conf.push_back({"15to1", 17, 7, 7, 1e-18});
-        factory_conf.push_back({"15to1", 41, 17, 17, 1e-18});
-    }
-
-    // we will make one L2 factory for every `L2_L1_RATIO` L1 factories:
-    constexpr size_t L2_L1_RATIO{8};
-
-    bool l2_factory_exists = (factory_conf.size() > 1);
-
-    std::vector<sim::T_FACTORY*> factories;
-    size_t qubit_count{0};
-
-    size_t l1_fact_count{0};
-    size_t l2_fact_count{0};
-    while ((qubit_count < max_phys_qubits || l1_fact_count == 0 || (l2_factory_exists && l2_fact_count == 0))
-            && ((!l2_factory_exists && l1_fact_count <= pin_limit) || (l2_factory_exists && l2_fact_count <= pin_limit)))
-    {
-        // check if there is an L2 factory in our spec. If so, make one
-        if (l2_factory_exists)
-        {
-            double freq_khz = sim::compute_freq_khz(t_round_ns, factory_conf[1].sc_dm);
-            factories.push_back(_create_factory(factory_conf[1], freq_khz, 1));
-            
-            size_t sc_q_count = sc_phys_qubit_count(factory_conf[1].sc_dx, factory_conf[1].sc_dz);
-            qubit_count += sc_q_count * fact_logical_qubit_count(factory_conf[1].which);
-            l2_fact_count++;
-        }
-
-        for (size_t i = 0; i < L2_L1_RATIO 
-                            && (qubit_count < max_phys_qubits || l1_fact_count == 0) 
-                            && (l2_factory_exists || l1_fact_count <= pin_limit); i++)
-        {
-            double freq_khz = sim::compute_freq_khz(t_round_ns, factory_conf[0].sc_dm);
-            factories.push_back(_create_factory(factory_conf[0], freq_khz, 0));
-
-            size_t sc_q_count = sc_phys_qubit_count(factory_conf[0].sc_dx, factory_conf[0].sc_dz);
-            qubit_count += sc_q_count * fact_logical_qubit_count(factory_conf[0].which);
-            l1_fact_count++;
-        }
-    }
-
-    if (l2_factory_exists)
-    {
-        std::vector<sim::T_FACTORY*> l1_fact, l2_fact;
-        std::copy_if(factories.begin(), factories.end(), std::back_inserter(l1_fact),
-                    [] (auto* f) { return f->level_ == 0; });
-        std::copy_if(factories.begin(), factories.end(), std::back_inserter(l2_fact),
-                    [] (auto* f) { return f->level_ == 1; });
-
-        if (l1_fact.empty())
-            throw std::runtime_error("fact_create_factory_config_for_target_logical_error_rate: no L1 factories found");
-
-        for (auto* f : l1_fact)
-            f->next_level_ = l2_fact;
-        for (auto* f : l2_fact)
-            f->previous_level_ = l1_fact;
-    }
-
-    return {factories, qubit_count};
 }
 
 ////////////////////////////////////////////////////////////
@@ -312,9 +91,9 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     int64_t fact_phys_qubits_per_program_qubit = conf.fact_phys_qubits_per_program_qubit;
 
     // 1. determine number of surface code qubits
-    size_t cmp_sc_code_distance = sc_distance_for_target_logical_error_rate(conf.cmp_target_error_rate_per_cycle);
+    size_t cmp_sc_code_distance = sim::est::sc_distance_for_target_logical_error_rate(conf.cmp_target_error_rate_per_cycle);
     double cmp_sc_freq_ghz = sim::compute_freq_khz(cmp_sc_round_ns, cmp_sc_code_distance);
-    size_t cmp_sc_phys_qubits = cmp_sc_count * sc_phys_qubit_count(cmp_sc_code_distance);
+    size_t cmp_sc_phys_qubits = cmp_sc_count * sim::est::sc_phys_qubit_count(cmp_sc_code_distance);
 
     size_t cmp_sc_num_patches_per_row = 4;
     size_t cmp_sc_num_rows = ceil(_fpdiv(cmp_sc_count, cmp_sc_num_patches_per_row));
@@ -323,9 +102,9 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     size_t mem_bb_banks_per_module = (num_program_qubits > cmp_sc_count) 
                                     ? ceil(_fpdiv(num_program_qubits - cmp_sc_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
                                     : 0;
-    size_t mem_bb_code_distance = mem_bb_distance_for_target_logical_error_rate(conf.mem_bb_target_error_rate_per_cycle);
+    size_t mem_bb_code_distance = sim::est::mem_bb_distance_for_target_logical_error_rate(conf.mem_bb_target_error_rate_per_cycle);
     double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_round_ns, mem_bb_code_distance);
-    size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * bb_phys_qubit_count(mem_bb_code_distance);
+    size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * sim::est::bb_phys_qubit_count(mem_bb_code_distance);
     uint64_t mem_mean_epr_generation_cycle_time = sim::convert_ns_to_cycles(mem_mean_epr_generation_time_ns, mem_bb_freq_ghz);
     
     // 2.1. create memory modules:
@@ -339,12 +118,9 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
 
     // 3. determine factory config:
     size_t fact_max_phys_qubits = num_program_qubits * fact_phys_qubits_per_program_qubit;
-    std::vector<sim::T_FACTORY*> t_factories;
-    size_t fact_phys_qubits;
-    std::tie(t_factories, fact_phys_qubits) = fact_create_factory_config_for_target_logical_error_rate(
-                                                    conf.fact_target_error_rate_per_gate,
-                                                    fact_max_phys_qubits,
-                                                    cmp_sc_round_ns);
+    auto [t_factories, fact_phys_qubits] = sim::util::factory_build(conf.fact_target_error_rate_per_gate,
+                                                                        fact_max_phys_qubits,
+                                                                        cmp_sc_round_ns);
     size_t fact_l1_count = std::count_if(t_factories.begin(), t_factories.end(),
                                         [] (auto* f) { return f->level_ == 0; });
     size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
