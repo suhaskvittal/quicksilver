@@ -40,13 +40,11 @@ public:
 
     uint64_t s_inst_read{0};
     uint64_t s_inst_done{0};
+    uint64_t s_unrolled_inst_done{0};
     uint64_t s_memory_instructions_added{0};
     uint64_t s_memory_prefetches_added{0};
     uint64_t s_unused_bandwidth{0};
     uint64_t s_emission_calls{0};
-
-    uint64_t s_total_lifetime_in_working_set{0};
-    uint64_t s_num_lifetimes_recorded{0};
 
     uint64_t s_timestep{0};
 
@@ -61,9 +59,6 @@ private:
 
     // instruction windows for all qubits:
     std::unordered_map<qubit_type, inst_window_type> inst_windows_;
-
-    // qubit lifetime tracking
-    std::unordered_map<qubit_type, uint64_t> qubit_timestep_entered_working_set_;
 
     // memory instruction emit implementation:
     std::unique_ptr<memopt::IMPL_BASE> emit_impl_;

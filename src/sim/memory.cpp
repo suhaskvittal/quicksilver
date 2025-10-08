@@ -61,38 +61,25 @@ MEMORY_MODULE::find_uninitialized_qubit()
 ////////////////////////////////////////////////////////////
 
 void
-MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT qubit, bool is_prefetch)
+MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT victim, bool is_prefetch)
 {
     // create a new request:
     // first make sure that the qubit does not already have a request:
-    auto req_it = find_request_for_qubit(qubit);
+    auto req_it = find_request_for_qubit(requested);
     if (req_it != request_buffer_.end())
     {
-        s_num_prefetch_promoted_to_demand_[qubit.client_id] += (req_it->is_prefetch && !is_prefetch);
+        s_num_prefetch_promoted_to_demand_[requested.client_id] += (req_it->is_prefetch && !is_prefetch);
         req_it->is_prefetch &= is_prefetch;
         return;
     }
 
     if (is_prefetch)
-        s_num_prefetch_requests_[qubit.client_id]++;
+        s_num_prefetch_requests_[requested.client_id]++;
 
     // otherwise, create a new request:
-    request_type req{inst, qubit, is_prefetch};
+    request_type req{inst, requested, victim, is_prefetch};
     if (!serve_memory_request(req))
         request_buffer_.push_back(req);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-MEMORY_MODULE::serve_mswap(inst_ptr inst, QUBIT requested, QUBIT victim)
-{
-    request_type req{inst, requested, false, std::make_optional(victim)};
-    bool out = serve_memory_request(req);
-    if (!out)
-        request_buffer_.push_back(req);
-    return out;
 }
 
 ////////////////////////////////////////////////////////////
@@ -227,6 +214,8 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
                                                                 req.victim,
                                                                 post_routing_time_ns);
 
+    // Since victim is now required, victim_found should always be true
+    // This check is kept for safety but should never fail
     if (!victim_found)
     {
 #if defined(MEMORY_VERBOSE)

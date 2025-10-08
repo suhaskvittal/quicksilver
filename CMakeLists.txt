@@ -110,9 +110,6 @@ set(SIM_FILES
     src/sim.cpp
     src/sim/client.cpp
     src/sim/clock.cpp
-    src/sim/cmp/replacement.cpp
-    src/sim/cmp/replacement/lru.cpp
-    src/sim/cmp/replacement/lti.cpp
     src/sim/compute.cpp
     src/sim/factory.cpp
     src/sim/memory.cpp

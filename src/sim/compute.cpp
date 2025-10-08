@@ -12,7 +12,7 @@
 #include <limits>
 #include <unordered_set>
 
-#define COMPUTE_VERBOSE
+//#define COMPUTE_VERBOSE
 //#define DISABLE_MEMORY_ROUTING_STALL
 
 namespace sim
@@ -37,8 +37,7 @@ COMPUTE::COMPUTE(double freq_khz,
                 size_t num_rows, 
                 size_t num_patches_per_row,
                 std::vector<T_FACTORY*> t_fact,
-                std::vector<MEMORY_MODULE*> mem_modules,
-                REPLACEMENT_POLICY repl_policy)
+                std::vector<MEMORY_MODULE*> mem_modules)
     :OPERABLE(freq_khz),
     target_t_fact_level_(_get_max_t_factory_level(t_fact)),
     num_rows_(num_rows),
@@ -47,19 +46,6 @@ COMPUTE::COMPUTE(double freq_khz,
     t_fact_(t_fact),
     mem_modules_(mem_modules)
 {
-    // initialize replacement policy:
-    switch (repl_policy)
-    {
-    case REPLACEMENT_POLICY::LTI:
-        repl_ = std::make_unique<cmp::repl::LTI>(this);
-        break;
-    case REPLACEMENT_POLICY::LRU:
-        repl_ = std::make_unique<cmp::repl::LRU>(this);
-        break;
-    default:
-        throw std::runtime_error("invalid replacement policy");
-    }
-
     // initialize routing space:
     auto routing_elements = con_init_routing_space();
     // initialize patches:
@@ -76,19 +62,12 @@ COMPUTE::route_memory_access(
     size_t mem_patch_idx,
     QUBIT incoming_qubit,
     bool is_prefetch,
-    std::optional<QUBIT> victim,
+    QUBIT victim,
     uint64_t extra_mem_access_latency_post_routing_ns)
 {
-    if (!victim.has_value())
-    {
-        victim = repl_->select_victim(incoming_qubit, is_prefetch);
-        if (!victim.has_value())
-            return {false, QUBIT{-1,-1}, 0};
-    }
-
-    auto v_patch_it = find_patch_containing_qubit(*victim);
+    auto v_patch_it = find_patch_containing_qubit(victim);
     if (v_patch_it == patches_.end())
-        throw std::runtime_error("victim qubit " + victim->to_string() + " not found in compute patches");
+        throw std::runtime_error("victim qubit " + victim.to_string() + " not found in compute patches");
 
     PATCH& v_patch = *v_patch_it;
     PATCH& m_patch = patches_[mem_patch_idx];
@@ -98,7 +77,7 @@ COMPUTE::route_memory_access(
 
     uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
     cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[incoming_qubit]);
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[*victim]);
+    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
     cycle_routing_start = std::max(cycle_routing_start, current_cycle());
 
 #if defined(DISABLE_MEMORY_ROUTING_STALL)
@@ -110,15 +89,8 @@ COMPUTE::route_memory_access(
 
     // update operands' available cycles
     uint64_t extra_mem_access_cycles = convert_ns_to_cycles(extra_mem_access_latency_post_routing_ns, OP_freq_khz);
-    qubit_available_cycle_[*victim] = routing_alloc_cycle + extra_mem_access_cycles;
+    qubit_available_cycle_[victim] = routing_alloc_cycle + extra_mem_access_cycles;
     qubit_available_cycle_[incoming_qubit] = routing_alloc_cycle + extra_mem_access_cycles;
-
-    // need to track this if simulator-directed memory accesses are disabled (accesses done by MSWAP and MPREFETCH instead)
-    if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
-    {
-        qubits_unavailable_to_due_memory_access_.insert(incoming_qubit);
-        qubits_unavailable_to_due_memory_access_.insert(*victim);
-    }
 
     s_evictions_no_uses_ += (v_patch.num_uses == 0);
     s_evictions_prefetch_no_uses_ += is_prefetch && (v_patch.num_uses == 0);
@@ -128,11 +100,13 @@ COMPUTE::route_memory_access(
     v_patch.num_uses = 0;
     v_patch.contents = incoming_qubit;
 
-    // update replacement policy:
-    repl_->update_on_fill(incoming_qubit);
+#if defined(COMPUTE_VERBOSE)
+    std::cout << "[ COMPUTE ] routed memory access from " << victim
+                << " to " << incoming_qubit << " (prefetch = " << is_prefetch << ")\n";
+#endif
 
     uint64_t access_time_ns = convert_cycles_to_ns(routing_alloc_cycle - current_cycle(), OP_freq_khz);
-    return {true, *victim, access_time_ns};
+    return {true, victim, access_time_ns};
 }
 
 ////////////////////////////////////////////////////////////
@@ -186,8 +160,10 @@ COMPUTE::dump_deadlock_info()
                 if (!inst->is_scheduled && !std::all_of(ready.begin(), ready.end(), [](bool r) { return r; }))
                     continue;
             
-                bool has_memory_stall = std::find_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(), [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_memory_.end();
-                bool has_resource_stall = std::find_if(inst_waiting_for_resource_.begin(), inst_waiting_for_resource_.end(), [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_resource_.end();
+                bool has_memory_stall = std::find_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(), 
+                                                [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_memory_.end();
+                bool has_resource_stall = std::find_if(inst_waiting_for_resource_.begin(), inst_waiting_for_resource_.end(), 
+                                                [inst](const auto& p) { return p.first == inst; }) != inst_waiting_for_resource_.end();
 
                 std::cerr << "\t\t" << *inst << ", uop " << inst->uop_completed << "/" << inst->num_uops 
                         << ", scheduled = " << inst->is_scheduled << ", ready = ";
@@ -212,7 +188,7 @@ COMPUTE::OP_handle_event(event_type event)
 #if defined(COMPUTE_VERBOSE)
         std::cout << "[ COMPUTE ] got event: magic state available @ cycle = " << current_cycle() << "\n";
 #endif
-        retry_instructions(RETRY_TYPE::RESOURCE, event.info);
+        retry_resource_stalled_instructions(event.info);
     }
     else if (event.id == COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE)
     {
@@ -221,7 +197,7 @@ COMPUTE::OP_handle_event(event_type event)
                 << " requested = " << event.info.mem_accessed_qubit << ")"
                 << " victim = " << event.info.mem_victim_qubit << "\n";
 #endif
-        retry_instructions(RETRY_TYPE::MEMORY, event.info);
+        retry_memory_stalled_instructions(event.info);
     }
     else if (event.id == COMPUTE_EVENT_TYPE::INST_EXECUTE)
     {
@@ -555,54 +531,9 @@ COMPUTE::client_schedule(client_ptr& c)
                         });
         auto max_it = std::max_element(avail_cycles.begin(), avail_cycles.end());
         if (*max_it > current_cycle())
-        {
             OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::INST_EXECUTE, *max_it - current_cycle(), COMPUTE_EVENT_INFO{c->id, inst});
-
-            if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
-            {
-                // we want to count the time between the latest memory stall to the latest non-memory stall
-                // -- the isolated stall time is the difference between these two times
-                QUBIT latest_mem_stall_q{-1, -1};
-                QUBIT latest_no_mem_stall_q{-1, -1};
-
-                for (qubit_type qid : inst->qubits)
-                {
-                    QUBIT q{c->id, qid};
-                    uint64_t cycle_avail = qubit_available_cycle_[q];
-                    if (cycle_avail < current_cycle())
-                        continue;
-
-                    if (qubits_unavailable_to_due_memory_access_.count(q))
-                    {
-                        if (latest_mem_stall_q.qubit_id < 0 || cycle_avail > qubit_available_cycle_[latest_mem_stall_q])
-                            latest_mem_stall_q = q;
-                    }
-                    else
-                    {
-                        if (latest_no_mem_stall_q.qubit_id < 0 || cycle_avail > qubit_available_cycle_[latest_no_mem_stall_q])
-                            latest_no_mem_stall_q = q;
-                    }
-                }
-
-                if (latest_mem_stall_q.qubit_id >= 0 && latest_no_mem_stall_q.qubit_id >= 0)
-                {
-                    uint64_t mem_stall_end = qubit_available_cycle_[latest_mem_stall_q];
-                    uint64_t non_mem_stall_end = qubit_available_cycle_[latest_no_mem_stall_q];
-
-                    if (mem_stall_end > non_mem_stall_end)
-                        inst->total_isolated_memory_stall_cycles += mem_stall_end - non_mem_stall_end;
-                }
-                else if (latest_mem_stall_q.qubit_id >= 0)
-                {
-                    inst->total_isolated_memory_stall_cycles += qubit_available_cycle_[latest_mem_stall_q] - current_cycle();
-                }
-                // don't care about other cases -- these have no memory stalls
-            }
-        }
         else // save a little time and execute right now:
-        {
             client_execute(c, inst);
-        }
     }
 }
 
@@ -718,55 +649,15 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
     if (is_software_instruction(inst->type))
         return do_sw_gate(c, inst);
 
-    // do memory access if necessary
-    exec_result_type result{};
-
+    // verify that all qubits are present:
     std::vector<PATCH*> qubit_patches(inst->qubits.size());
     for (size_t i = 0; i < inst->qubits.size(); i++)
     {
         QUBIT q{c->id, inst->qubits[i]};
         auto patch_it = find_patch_containing_qubit(q);
         if (patch_it == patches_.end())
-        {
-            // this means that the qubit is memory -- we need to do a memory access
-            result.is_memory_stall = true;
-
-            // find the module that contains the qubit and initiate the memory access
-            if (!GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
-                access_memory_and_die_if_qubit_not_found(inst, q);
-        }
-        else
-        {
-            qubit_patches[i] = &(*patch_it);
-        }
-    }
-
-    // return early if we are waiting for memory
-    if (result.is_memory_stall)
-    {
-        // check if there is also a concurrent resource stall
-        bool needs_resource = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TX
-                                || inst->type == INSTRUCTION::TYPE::TDG || inst->type == INSTRUCTION::TYPE::TXDG
-                                || inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX
-                                || inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
-        // can also happen if the uop is a t gate:
-        if (needs_resource)
-        {
-            size_t num_resource_states_avail = std::transform_reduce(t_fact_.begin(), t_fact_.end(),
-                                                                        size_t{0},
-                                                                        std::plus<size_t>{},
-                                                                        [this] (T_FACTORY* f) 
-                                                                        { 
-                                                                            return (f->level_ >= this->target_t_fact_level_ ? f->buffer_occu_ : 0);
-                                                                        });
-            result.is_resource_stall = (num_resource_states_avail == 0);
-        }
-        return result;
-    }
-
-    if (GL_IMPL_RZ_PREFETCH)
-    {
-        try_rz_directed_prefetch(c, inst);
+            throw std::runtime_error("qubit " + q.to_string() + " not found in compute patches");
+        qubit_patches[i] = &(*patch_it);
     }
 
     return do_gate(c, inst, qubit_patches);
@@ -780,24 +671,17 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
 {
     if (result.is_memory_stall)
     {
-        inst_waiting_for_memory_.emplace_back(inst, c->id);
-        
-        // only start tracking if this is an isolated memory stall
-        if (!result.is_resource_stall)
-            inst->memory_stall_start_cycle = std::min(inst->memory_stall_start_cycle, current_cycle());
+        // verify that `inst` is a memory instruction:
+        if (inst->type != INSTRUCTION::TYPE::MSWAP && inst->type != INSTRUCTION::TYPE::MPREFETCH)
+            throw std::runtime_error("instruction " + inst->to_string() + " is not a memory instruction");
 
-#if defined(COMPUTE_VERBOSE)
-        std::cout << "\tinstruction \"" << *inst << "\" is waiting for memory access\n";
-#endif
+        inst_waiting_for_memory_.emplace_back(inst, c->id);
+        inst->memory_stall_start_cycle = std::min(inst->memory_stall_start_cycle, current_cycle());
     }
     else if (result.is_resource_stall)
     {
         inst_waiting_for_resource_.emplace_back(inst, c->id);
         inst->resource_stall_start_cycle = std::min(inst->resource_stall_start_cycle, current_cycle());
-
-#if defined(COMPUTE_VERBOSE)
-        std::cout << "\tinstruction \"" << *inst << "\" is waiting for resource\n";
-#endif
     }
     else
     {
@@ -811,7 +695,8 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
         if (result.cycles_until_done > 1'000'000)
         {
             throw std::runtime_error("instruction " + inst->to_string() + " will take too long to complete "
-                                    + " -- definitely a bug, latency = " + std::to_string(result.cycles_until_done) + " cycles");
+                                    + " -- definitely a bug, latency = " 
+                                    + std::to_string(result.cycles_until_done) + " cycles");
         }
 
         COMPUTE_EVENT_INFO event_info;
@@ -826,12 +711,6 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
         {
             QUBIT q{c->id, qid};
             qubit_available_cycle_[q] = current_cycle() + result.cycles_until_done;
-
-            if (inst->type != INSTRUCTION::TYPE::MSWAP && inst->type != INSTRUCTION::TYPE::MPREFETCH)
-            {
-                if (GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS && qubits_unavailable_to_due_memory_access_.count(q))
-                    qubits_unavailable_to_due_memory_access_.erase(q);
-            }
         }
 
         // update stall related stats:
@@ -1139,9 +1018,6 @@ COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
     if (GL_ELIDE_MSWAP_INSTRUCTIONS || (inst->type == INSTRUCTION::TYPE::MPREFETCH && GL_ELIDE_MPREFETCH_INSTRUCTIONS))
         return result;
 
-    if (!GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS)
-        throw std::runtime_error("MSWAP and MPREFETCH instructions should only be added when simulator-directed memory accesses are disabled (add -dsma flag)");
-
     // check if the operands are in memory
     qubit_type q_requested = inst->qubits[0];
     qubit_type q_victim = inst->qubits[1];
@@ -1164,9 +1040,10 @@ COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
         throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() + " not found in any memory module -- inst: " + inst->to_string());
     }
 
-    // this is a demand access -- must be served immediately
-    result.is_memory_stall = !(*module_it)->serve_mswap(inst, requested, victim);
-    result.cycles_until_done = 0;
+    // mark this as a memory stall -- eventually, this should be served
+    // submit memory request:
+    (*module_it)->initiate_memory_access(inst, requested, victim, inst->type == INSTRUCTION::TYPE::MPREFETCH);
+    result.is_memory_stall = true;
     return result;
 }
 
@@ -1174,79 +1051,49 @@ COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE::retry_instructions(RETRY_TYPE type, COMPUTE_EVENT_INFO event_info)
+COMPUTE::retry_memory_stalled_instructions(COMPUTE_EVENT_INFO event_info)
 {
-    if (type == RETRY_TYPE::MEMORY)
+    // find instructions waiting for the completed memory access to finish:
+    QUBIT q_accessed = event_info.mem_accessed_qubit;
+    QUBIT q_victim = event_info.mem_victim_qubit;
+    for (size_t i = 0; i < inst_waiting_for_memory_.size(); i++)
     {
-        // find instructions waiting for the completed memory access to finish:
-        QUBIT q_accessed = event_info.mem_accessed_qubit;
-        QUBIT q_victim = event_info.mem_victim_qubit;
-        for (size_t i = 0; i < inst_waiting_for_memory_.size(); i++)
+        auto [inst, client_id] = inst_waiting_for_memory_[i];
+        bool client_match = client_id == q_accessed.client_id;
+        bool qubit_match = (inst->qubits[0] == q_accessed.qubit_id && inst->qubits[1] == q_victim.qubit_id);
+        if (client_match && qubit_match)
         {
-            auto [inst, client_id] = inst_waiting_for_memory_[i];
-            bool client_match = client_id == q_accessed.client_id;
+            // update stats:
+            inst->total_isolated_memory_stall_cycles += current_cycle() - inst->memory_stall_start_cycle;
+            inst->memory_stall_start_cycle = std::numeric_limits<uint64_t>::max();
 
-            if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
-            {
-                // check that both qubits match;
-                bool qubit_match = (inst->qubits[0] == q_accessed.qubit_id && inst->qubits[1] == q_victim.qubit_id);
-                if (client_match && qubit_match)
-                {
-                    exec_result_type result{};
-                    result.cycles_until_done = 0;
-                    process_execution_result(clients_[client_id], inst, result);
-                    inst_waiting_for_memory_[i].first = nullptr;  // set to nullptr to indicate that this entry is invalid
-                }
-                continue;
-            }
-
-            bool qubit_match = std::find(inst->qubits.begin(), inst->qubits.end(), q_accessed.qubit_id) != inst->qubits.end();
-            if (client_match && qubit_match)
-            {
-
-                auto& c = clients_[client_id];
-                auto result = execute_instruction(c, inst);
-                // if we are not stalled by memory anymore, then we can remove the instruction from the buffer
-                if (!result.is_memory_stall)
-                {
-                    // update stall statistics:
-                    if (current_cycle() > inst->memory_stall_start_cycle)
-                    {
-                        inst->total_isolated_memory_stall_cycles += current_cycle() - inst->memory_stall_start_cycle;
-                        inst->memory_stall_start_cycle = std::numeric_limits<uint64_t>::max();
-                    }
-
-                    process_execution_result(c, inst, result);
-                    inst_waiting_for_memory_[i].first = nullptr;  // set to nullptr to indicate that this entry is invalid
-                }
-            }
-        }
-        
-        auto inst_it = std::remove_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(),
-                                    [](const auto& pair) { return pair.first == nullptr; });
-        inst_waiting_for_memory_.erase(inst_it, inst_waiting_for_memory_.end());
-    }
-    else if (type == RETRY_TYPE::RESOURCE)
-    {
-        if (inst_waiting_for_resource_.empty())
-            return;
-
-        auto [inst, client_id] = inst_waiting_for_resource_.front();
-        auto result = execute_instruction(clients_[client_id], inst);
-        if (!result.is_resource_stall)
-        {
-            // update stall statistics:
-            if (current_cycle() > inst->resource_stall_start_cycle)
-            {
-                inst->total_isolated_resource_stall_cycles += current_cycle() - inst->resource_stall_start_cycle;
-                inst->resource_stall_start_cycle = std::numeric_limits<uint64_t>::max();
-            }
-
-            inst->resource_stall_start_cycle = std::numeric_limits<uint64_t>::max();
-
+            exec_result_type result{};
+            result.cycles_until_done = 0;
             process_execution_result(clients_[client_id], inst, result);
-            inst_waiting_for_resource_.pop_front();
+            inst_waiting_for_memory_[i].first = nullptr;  // set to nullptr to indicate that this entry is invalid
         }
+    }
+    
+    auto inst_it = std::remove_if(inst_waiting_for_memory_.begin(), inst_waiting_for_memory_.end(),
+                                [](const auto& pair) { return pair.first == nullptr; });
+    inst_waiting_for_memory_.erase(inst_it, inst_waiting_for_memory_.end());
+}
+
+void
+COMPUTE::retry_resource_stalled_instructions(COMPUTE_EVENT_INFO event_info)
+{
+    if (inst_waiting_for_resource_.empty())
+        return;
+
+    auto [inst, client_id] = inst_waiting_for_resource_.front();
+    auto result = execute_instruction(clients_[client_id], inst);
+    if (!result.is_resource_stall)
+    {
+        // update stall statistics:
+        inst->total_isolated_resource_stall_cycles += current_cycle() - inst->resource_stall_start_cycle;
+        inst->resource_stall_start_cycle = std::numeric_limits<uint64_t>::max();
+        process_execution_result(clients_[client_id], inst, result);
+        inst_waiting_for_resource_.pop_front();
     }
 }
 
@@ -1272,106 +1119,6 @@ COMPUTE::find_memory_module_containing_qubit(QUBIT q)
 {
     return std::find_if(mem_modules_.begin(), mem_modules_.end(),
                         [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
-}
-
-void
-COMPUTE::access_memory_and_die_if_qubit_not_found(inst_ptr inst, QUBIT q, bool is_prefetch)
-{
-    auto module_it = find_memory_module_containing_qubit(q);
-    if (module_it == mem_modules_.end())
-    {
-        std::cerr << "compute patches:\n";
-        for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-            std::cerr << "\t" << patches_[i].contents << "\n";
-
-        for (size_t i = 0; i < mem_modules_.size(); i++)
-        {
-            std::cerr << "memory module " << i << "------------------\n";
-            mem_modules_[i]->dump_contents();
-        }
-
-        throw std::runtime_error("qubit " + q.to_string() + " not found in any memory module");
-    }
-    (*module_it)->initiate_memory_access(inst, q, is_prefetch);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class ITER> double
-_weighted_window_depth(ITER begin_it, ITER it)
-{
-    return std::transform_reduce(begin_it, it, double{0.0}, std::plus<double>(),
-                                [] (COMPUTE::inst_ptr x) -> double
-                                {
-                                    if (x->type == INSTRUCTION::TYPE::RZ || x->type == INSTRUCTION::TYPE::RX)
-                                        return x->urotseq.size();
-                                    else if (x->type == INSTRUCTION::TYPE::CCX || x->type == INSTRUCTION::TYPE::CCZ)
-                                        return NUM_CCX_UOPS;
-                                    else if (is_software_instruction(x->type))
-                                        return 0.0;
-                                    else
-                                        return 2.0;
-                                });
-}
-
-void
-COMPUTE::try_rz_directed_prefetch(client_ptr& c, inst_ptr inst)
-{
-    /*
-        Explanation: if this gate is an RZ or RX gate, then we will prefetch the qubit operand for the next RZ or RX gate
-        in instruction order.
-    */
-    if (inst->has_initiated_prefetch || (inst->type != INSTRUCTION::TYPE::RZ && inst->type != INSTRUCTION::TYPE::RX))
-        return;
-
-    std::unordered_set<qubit_type> qubits_in_cmp;
-    for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-    {
-        if (patches_[i].contents.client_id == c->id)
-            qubits_in_cmp.insert(patches_[i].contents.qubit_id);
-    }
-
-    QUBIT q{c->id, inst->qubits[0]};
-    const auto& win = inst_windows_[q];
-
-    if (win.empty())
-        throw std::runtime_error("rz_directed_prefetch: no window found for " + q.to_string());
-
-    std::unordered_set<qubit_type> pf_targets;
-    size_t pf_limit{1};
-    for (auto it = win.begin()+1; it != win.end(); it++)
-    {
-        // only care about multi qubit instructions:
-        inst_ptr pf_inst = *it;
-        if (pf_inst->qubits.size() == 1)
-            continue;
-
-        // only care about instructions that are not scheduled:
-        if (pf_inst->is_scheduled)
-            continue;
-            
-        // only care about instructions that have not initiated a prefetch:
-        if (pf_inst->has_pending_prefetch_request)
-            continue;
-
-        for (qubit_type qid : pf_inst->qubits)
-        {
-            if (qubits_in_cmp.find(qid) == qubits_in_cmp.end())
-                pf_targets.insert(qid);
-        }
-
-        pf_inst->has_initiated_prefetch = true;
-
-        pf_limit--;
-        if (!pf_limit)
-            break;
-    }
-
-    if (pf_targets.empty())
-        return;
-
-    inst->has_initiated_prefetch = true;
 }
 
 ////////////////////////////////////////////////////////////

@@ -42,6 +42,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
     // reset stats:
     s_inst_read = 0;
     s_inst_done = 0;
+    s_unrolled_inst_done = 0;
     s_memory_instructions_added = 0;
     s_memory_prefetches_added = 0;
     s_unused_bandwidth = 0;
@@ -54,12 +55,14 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
 
     std::cout << "[ MEMOPT ] num qubits: " << num_qubits_ << "\n";
 
-    while (s_inst_done < stop_after_completing_n_instructions && (pending_inst_buffer_.size() > 0 || !generic_strm_eof(istrm)))
+    while (s_unrolled_inst_done < stop_after_completing_n_instructions 
+            && (pending_inst_buffer_.size() > 0 || !generic_strm_eof(istrm)))
     {
         if (!generic_strm_eof(istrm))
             read_instructions(istrm);
 
         // check if there are any ready instructions:
+        size_t num_unrolled_inst_completed{0};
         size_t num_inst_completed{0};
         for (size_t i = 0; i < pending_inst_buffer_.size(); i++)
         {
@@ -89,28 +92,46 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
                  }
 
                 num_inst_completed++;
+                // handle unrolled inst:
+                if (inst->type == INSTRUCTION::TYPE::RZ || inst->type == INSTRUCTION::TYPE::RX)
+                    num_unrolled_inst_completed += inst->urotseq.size();
+                else if (inst->type == INSTRUCTION::TYPE::CCX)
+                    num_unrolled_inst_completed += 15;  // 15 uops for CCX, 13 for CCZ
+                else if (inst->type == INSTRUCTION::TYPE::CCZ)
+                    num_unrolled_inst_completed += 13;
+                else
+                    num_unrolled_inst_completed++;
             }
         }
 
         if (num_inst_completed > 0)
         {
+            uint64_t prev_inst_done = s_unrolled_inst_done;
+
+            s_inst_done += num_inst_completed;
+            s_unrolled_inst_done += num_unrolled_inst_completed;
+
             auto it = std::remove(pending_inst_buffer_.begin(), pending_inst_buffer_.end(), nullptr);
             pending_inst_buffer_.erase(it, pending_inst_buffer_.end());
 
-            uint64_t prev_inst_done = s_inst_done;
-            s_inst_done += num_inst_completed;
-
-            if (print_progress_freq_ && (print_progress_freq_ == 1 || (s_inst_done % print_progress_freq_) < (prev_inst_done % print_progress_freq_)))
+            bool pp = (print_progress_freq_ == 1)
+                    || (s_unrolled_inst_done % print_progress_freq_) < (prev_inst_done % print_progress_freq_);
+            if (print_progress_freq_ && pp)
             {
-                size_t num_mem = std::count_if(outgoing_inst_buffer_.begin(), outgoing_inst_buffer_.end(),
-                                                [](inst_ptr inst) { return inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH; });
-                size_t num_mprefetch = std::count_if(outgoing_inst_buffer_.begin(), outgoing_inst_buffer_.end(),
-                                                    [](inst_ptr inst) { return inst->type == INSTRUCTION::TYPE::MPREFETCH; });
+                size_t num_mem{0}, num_mprefetch{0};
+                for (auto* inst : outgoing_inst_buffer_)
+                {
+                    num_mem += (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                    num_mprefetch += (inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                }
 
                 num_mem += s_memory_instructions_added;
                 num_mprefetch += s_memory_prefetches_added;
 
-                std::cout << "[ MEMOPT ] progress: " << s_inst_done << " instructions processed, " << num_mem << " memory instructions, " << num_mprefetch << " prefetches" << std::endl;
+                std::cout << "[ MEMOPT ] progress: " << s_inst_done << " instructions processed, " 
+                            << s_unrolled_inst_done << " unrolled instructions done, "
+                            << num_mem << " memory instructions, " 
+                            << num_mprefetch << " prefetches\n";
             }
 
             // handle the outgoing buffer if it is too large:

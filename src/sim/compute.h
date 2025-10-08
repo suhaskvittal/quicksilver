@@ -7,7 +7,6 @@
 #define SIM_COMPUTE_h
 
 #include "sim/client.h"
-#include "sim/cmp/replacement.h"
 #include "sim/factory.h"
 #include "sim/memory.h"
 #include "sim/operable.h"
@@ -45,6 +44,9 @@ struct COMPUTE_EVENT_INFO
     QUBIT    mem_victim_qubit;
 };
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 class COMPUTE : public OPERABLE<COMPUTE_EVENT_TYPE, COMPUTE_EVENT_INFO>
 {
 public:
@@ -63,9 +65,6 @@ public:
         uint64_t   cycles_until_done{std::numeric_limits<uint64_t>::max()};
     };
 
-    enum class RETRY_TYPE { MEMORY, RESOURCE };
-    enum class REPLACEMENT_POLICY { LRU, LTI };
-
     // first: whether or not a victim was found
     // second: the victim
     // third: the time taken for the access (ns)
@@ -83,8 +82,6 @@ private:
 
     // track when qubits become available:
     std::unordered_map<QUBIT, uint64_t> qubit_available_cycle_;
-    // this is set after a memory access is routed -- clear after an instruction is scheduled for completion
-    std::unordered_set<QUBIT>           qubits_unavailable_to_due_memory_access_;
     
     // track instruction windows for each qubit to manage dependencies:
     std::unordered_map<QUBIT, inst_window_type> inst_windows_;
@@ -104,8 +101,6 @@ private:
     std::vector<T_FACTORY*> t_fact_;
     std::vector<MEMORY_MODULE*> mem_modules_;
 
-    std::unique_ptr<cmp::REPLACEMENT_POLICY_BASE> repl_;
-
     // useful variables for initialization:
     // patch indices:
     size_t compute_start_idx_;
@@ -116,15 +111,14 @@ public:
             size_t num_rows, 
             size_t patches_per_row,
             std::vector<T_FACTORY*>,
-            std::vector<MEMORY_MODULE*>,
-            REPLACEMENT_POLICY=REPLACEMENT_POLICY::LTI);
+            std::vector<MEMORY_MODULE*>);
 
     // returns how long it takes to complete the memory access
     // `extra_mem_access_latency_post_routing_ns` is used to set qubit availability times for the qubits involved in the memory access
     memory_route_result_type route_memory_access(size_t mem_patch_idx,
-                                                QUBIT incoming_qubit, 
+                                                QUBIT incoming_qubit,
                                                 bool is_prefetch,
-                                                std::optional<QUBIT> preselected_victim,
+                                                QUBIT victim,
                                                 uint64_t extra_mem_access_latency_post_routing_ns);
 
     void OP_init() override;
@@ -170,15 +164,12 @@ private:
     exec_result_type do_mswap_or_mprefetch(client_ptr&, inst_ptr);
     
     // retries the execution of instructions in the given buffer provided the appropriate resources are available
-    void retry_instructions(RETRY_TYPE, COMPUTE_EVENT_INFO);
+    void retry_memory_stalled_instructions(COMPUTE_EVENT_INFO);
+    void retry_resource_stalled_instructions(COMPUTE_EVENT_INFO);
 
     std::vector<PATCH>::iterator find_patch_containing_qubit(QUBIT);
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
-
-    void access_memory_and_die_if_qubit_not_found(inst_ptr, QUBIT, bool is_prefetch=false);
-
-    void try_rz_directed_prefetch(client_ptr&, inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////

@@ -67,9 +67,8 @@ public:
     {
         inst_ptr inst;
         QUBIT qubit;
+        QUBIT victim;
         bool is_prefetch;
-
-        std::optional<QUBIT> victim{std::nullopt};  // may not be known if requests are made by the simulator
     };
 
     using search_result_type = std::tuple<bool, std::vector<bank_type>::iterator, std::vector<QUBIT>::iterator>;
@@ -107,10 +106,7 @@ public:
     search_result_type find_qubit(QUBIT);
     search_result_type find_uninitialized_qubit();
 
-    void initiate_memory_access(inst_ptr, QUBIT, bool is_prefetch=false);
-    // returns true if the request was immediately served, false otherwise
-    bool serve_mswap(inst_ptr, QUBIT requested, QUBIT victim);
-
+    void initiate_memory_access(inst_ptr, QUBIT requested, QUBIT victim, bool is_prefetch=false);
     void dump_contents();
 
     void OP_init() override;

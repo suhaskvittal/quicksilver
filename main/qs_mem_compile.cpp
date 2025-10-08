@@ -11,6 +11,20 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+template <class T> void
+print_stat_line(std::ostream& out, std::string name, T value)
+{
+    out << std::setw(64) << std::left << name;
+    if constexpr (std::is_floating_point<T>::value)
+        out << std::setw(12) << std::right << std::fixed << std::setprecision(8) << value;
+    else
+        out << std::setw(12) << std::right << value;
+    out << "\n";
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 constexpr int64_t EMIT_IMPL_ID_VISZLAI = static_cast<int64_t>(MEMOPT::EMIT_IMPL_ID::VISZLAI);
 
 int
@@ -46,16 +60,12 @@ main(int argc, char** argv)
     generic_strm_close(istrm);
     generic_strm_close(ostrm);
 
-    double mean_lifetime = static_cast<double>(compiler.s_total_lifetime_in_working_set) / static_cast<double>(compiler.s_num_lifetimes_recorded);
-
-    std::cout << "done -- inst completed: " << compiler.s_inst_done
-                << ", memory instructions added: " << compiler.s_memory_instructions_added
-                << ", memory prefetches added: " << compiler.s_memory_prefetches_added 
-                << ", unused bandwidth: " << compiler.s_unused_bandwidth
-                << ", emission calls: " << compiler.s_emission_calls
-                << ", mean lifetime: " << mean_lifetime
-                << ", total timesteps: " << compiler.s_timestep
-                << "\n";
+    print_stat_line(std::cout, "INST_DONE", compiler.s_inst_done);
+    print_stat_line(std::cout, "UNROLLED_INST_DONE", compiler.s_unrolled_inst_done);
+    print_stat_line(std::cout, "MEMORY_INSTRUCTIONS", compiler.s_memory_instructions_added);
+    print_stat_line(std::cout, "MEMORY_PREFETCHES", compiler.s_memory_prefetches_added);
+    print_stat_line(std::cout, "EMISSION_CALLS", compiler.s_emission_calls);
+    print_stat_line(std::cout, "TOTAL_TIMESTEPS", compiler.s_timestep);
 
     return 0;
 }

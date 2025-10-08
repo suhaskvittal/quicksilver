@@ -25,7 +25,6 @@ std::chrono::steady_clock::time_point GL_SIM_WALL_START;
 
 bool GL_PRINT_PROGRESS{false};
 int64_t GL_PRINT_PROGRESS_FREQ{-1};
-bool GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS{false};
 bool GL_ELIDE_MSWAP_INSTRUCTIONS{false};
 bool GL_ELIDE_MPREFETCH_INSTRUCTIONS{false};
 

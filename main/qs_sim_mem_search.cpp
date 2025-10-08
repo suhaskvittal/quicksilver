@@ -271,9 +271,8 @@ struct ITERATION_CONFIG
     int64_t     inst_assume_total;
 
     // compute setup:
-    int64_t                          cmp_sc_count;
-    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl;
-    int64_t                          cmp_sc_round_ns;
+    int64_t     cmp_sc_count;
+    int64_t     cmp_sc_round_ns;
 
     // memory setup:
     size_t   mem_bb_num_modules;
@@ -300,9 +299,8 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     int64_t     inst_sim = conf.inst_sim;
     int64_t     inst_assume_total = conf.inst_assume_total;
 
-    int64_t                          cmp_sc_count = conf.cmp_sc_count;
-    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = conf.cmp_repl;
-    uint64_t                         cmp_sc_round_ns = conf.cmp_sc_round_ns;
+    int64_t     cmp_sc_count = conf.cmp_sc_count;
+    uint64_t    cmp_sc_round_ns = conf.cmp_sc_round_ns;
 
     size_t mem_bb_num_modules = conf.mem_bb_num_modules;
     size_t mem_bb_qubits_per_bank = conf.mem_bb_qubits_per_bank;
@@ -353,7 +351,7 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
                                         [] (auto* f) { return f->level_ == 1; });
 
     // 4. initialize `GL_CMP`
-    sim::GL_CMP = new sim::COMPUTE(cmp_sc_freq_ghz, {trace}, cmp_sc_num_rows, cmp_sc_num_patches_per_row, t_factories, mem_modules, cmp_repl);
+    sim::GL_CMP = new sim::COMPUTE(cmp_sc_freq_ghz, {trace}, cmp_sc_num_rows, cmp_sc_num_patches_per_row, t_factories, mem_modules);
 
     // 5. run simulation:
     std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";
@@ -473,7 +471,6 @@ main(int argc, char* argv[])
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
     int64_t cmp_sc_count;
-    int64_t cmp_repl_id;
     int64_t cmp_sc_round_ns;
 
     int64_t fact_phys_qubits_per_program_qubit;
@@ -495,11 +492,9 @@ main(int argc, char* argv[])
         // just in time compilation (limited qubit count):
         .optional("-jit", "--just-in-time-compilation", "enable just in time compilation for limited qubit count", jit, false)
         // setup:
-        .optional("-dsma", "--disable-simulator-directed-memory-access", "disable simulator directed memory access", sim::GL_DISABLE_SIMULATOR_DIRECTED_MEMORY_ACCESS, false)
         .optional("-ems", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
         // configuration:
         .optional("", "--cmp-sc-count", "number of surface codes to allocate to compute", cmp_sc_count, 4)
-        .optional("-crepl", "--cmp-repl-policy", "replacement policy for compute", cmp_repl_id, static_cast<int>(sim::COMPUTE::REPLACEMENT_POLICY::LTI))
         .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
 
         .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", fact_phys_qubits_per_program_qubit, 50)
@@ -513,7 +508,6 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
-    sim::COMPUTE::REPLACEMENT_POLICY cmp_repl = static_cast<sim::COMPUTE::REPLACEMENT_POLICY>(cmp_repl_id);
 
     uint64_t mem_mean_epr_generation_time_ns = (1.0/mem_epr_generation_frequency_khz) * 1e6;
     
@@ -577,7 +571,6 @@ main(int argc, char* argv[])
     conf.inst_assume_total = inst_assume_total;
 
     conf.cmp_sc_count = cmp_sc_count;
-    conf.cmp_repl = cmp_repl;
     conf.cmp_sc_round_ns = cmp_sc_round_ns;
 
     conf.mem_bb_num_modules = mem_bb_num_modules;
