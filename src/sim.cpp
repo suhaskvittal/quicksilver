@@ -101,11 +101,11 @@ print_stats(std::ostream& out)
     
     // accumulate any client-level stats:
     uint64_t total_memory_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_memory_requests_; });
+                                                    [] (auto* m) { return m->s_memory_requests; });
     uint64_t total_memory_prefetch_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_memory_prefetch_requests_; });
+                                                    [] (auto* m) { return m->s_memory_prefetch_requests; });
     uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request_; });
+                                                    [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request; });
     double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
 
     out << "MEMORY\n";

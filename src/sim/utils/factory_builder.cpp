@@ -3,6 +3,7 @@
  *  date:   8 October 2025
  * */
 
+#include "sim/utils/estimation.h"
 #include "sim/utils/factory_builder.h"
 
 namespace sim
@@ -14,11 +15,11 @@ namespace util
 ////////////////////////////////////////////////////////////////
 
 std::vector<FACTORY_INFO> 
-make_factory_config(double target_error_rate)
+make_factory_config(double e)
 {
     // assumes `PHYS_ERROR==1e-3`
 
-    std::vector<factory_info> factory_conf;
+    std::vector<FACTORY_INFO> factory_conf;
     factory_conf.reserve(2);
 
     if (e >= 1e-8)
@@ -93,7 +94,11 @@ create_factory_from_info(const FACTORY_INFO& fi, double freq_khz, size_t level, 
 constexpr size_t L2_L1_RATIO{8};
 
 factory_build_result_type
-factory_build(double target_error_rate, size_t max_phys_qubits, uint64_t t_round_ns, size_t pin_limit)
+factory_build(double target_error_rate,
+                size_t max_phys_qubits,
+                uint64_t l1_round_ns,
+                uint64_t l2_round_ns,
+                size_t pin_limit)
 {
     std::vector<FACTORY_INFO> factory_conf = make_factory_config(target_error_rate);
     bool l2_factory_exists = (factory_conf.size() > 1);
@@ -101,35 +106,33 @@ factory_build(double target_error_rate, size_t max_phys_qubits, uint64_t t_round
     std::vector<T_FACTORY*> l1_fact, l2_fact;
     size_t qubit_count{0};
 
-    while ((qubit_count < max_phys_qubits || l1_fact_count == 0 || (l2_factory_exists && l2_fact_count == 0))
-            && ((!l2_factory_exists && l1_fact_count <= pin_limit) || (l2_factory_exists && l2_fact_count <= pin_limit)))
+    while ((qubit_count < max_phys_qubits || l1_fact.empty() || (l2_factory_exists && l2_fact.empty()))
+            && ((!l2_factory_exists && l1_fact.size() <= pin_limit) || (l2_factory_exists && l2_fact.size() <= pin_limit)))
     {
         // check if there is an L2 factory in our spec. If so, make one
         if (l2_factory_exists)
         {
             const FACTORY_INFO& l2_fact_conf = factory_conf[1];
 
-            double freq_khz = sim::compute_freq_khz(t_round_ns, l2_fact_conf.sc_dm);
+            double freq_khz = sim::compute_freq_khz(l2_round_ns, l2_fact_conf.sc_dm);
             T_FACTORY* f = create_factory_from_info(l2_fact_conf, freq_khz, 1);
             l2_fact.push_back(f);
             
-            size_t sc_q_count = sc_phys_qubit_count(l2_fact_conf.sc_dx, l2_fact_conf.sc_dz);
-            qubit_count += sc_q_count * fact_logical_qubit_count(l2_fact_conf.which);
-            l2_fact_count++;
+            size_t sc_q_count = est::sc_phys_qubit_count(l2_fact_conf.sc_dx, l2_fact_conf.sc_dz);
+            qubit_count += sc_q_count * est::fact_logical_qubit_count(l2_fact_conf.which);
         }
 
         const FACTORY_INFO& l1_fact_conf = factory_conf[0];
         for (size_t i = 0; i < L2_L1_RATIO 
-                            && (qubit_count < max_phys_qubits || l1_fact_count == 0) 
-                            && (l2_factory_exists || l1_fact_count <= pin_limit); i++)
+                            && (qubit_count < max_phys_qubits || l1_fact.empty()) 
+                            && (l2_factory_exists || l1_fact.size() <= pin_limit); i++)
         {
-            double freq_khz = sim::compute_freq_khz(t_round_ns, l1_fact_conf.sc_dm);
+            double freq_khz = sim::compute_freq_khz(l1_round_ns, l1_fact_conf.sc_dm);
             T_FACTORY* f = create_factory_from_info(l1_fact_conf, freq_khz, 0);
             l1_fact.push_back(f);
 
-            size_t sc_q_count = sc_phys_qubit_count(l1_fact_conf.sc_dx, l1_fact_conf.sc_dz);
-            qubit_count += sc_q_count * fact_logical_qubit_count(l1_fact_conf.which);
-            l1_fact_count++;
+            size_t sc_q_count = est::sc_phys_qubit_count(l1_fact_conf.sc_dx, l1_fact_conf.sc_dz);
+            qubit_count += sc_q_count * est::fact_logical_qubit_count(l1_fact_conf.which);
         }
     }
 

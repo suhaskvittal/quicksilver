@@ -113,7 +113,8 @@ set(SIM_FILES
     src/sim/compute.cpp
     src/sim/factory.cpp
     src/sim/memory.cpp
-    src/sim/routing.cpp)
+    src/sim/routing.cpp
+    src/sim/utils/factory_builder.cpp)
 
 set(MEMOPT_FILES
     src/compiler/memopt.cpp

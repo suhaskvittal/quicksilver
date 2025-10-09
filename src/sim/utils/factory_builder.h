@@ -30,7 +30,7 @@ struct FACTORY_INFO
 
 using factory_build_result_type = std::pair<std::vector<T_FACTORY*>, size_t>;
 
-std::vector<FACTORY_INFO> make_factory_config(double target_error_rate)
+std::vector<FACTORY_INFO> make_factory_config(double target_error_rate);
 T_FACTORY*                create_factory_from_info(const FACTORY_INFO&, 
                                                         double freq_khz, 
                                                         size_t level,
@@ -39,7 +39,8 @@ T_FACTORY*                create_factory_from_info(const FACTORY_INFO&,
 // returns the factory vector and the actual qubits used
 factory_build_result_type factory_build(double target_error_rate, 
                                             size_t max_phys_qubits, 
-                                            uint64_t t_round_ns,
+                                            uint64_t l1_sc_round_ns,
+                                            uint64_t l2_sc_round_ns,
                                             size_t pin_limit=4);
 
 ////////////////////////////////////////////////////////////////
