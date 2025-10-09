@@ -26,11 +26,6 @@ make_factory_config(double e)
     {
         factory_conf.push_back({"15to1", 17, 7, 7, 1e-8});
     }
-    else if (e >= 1e-10)
-    {
-        factory_conf.push_back({"15to1", 13, 5, 5, 1e-7});
-        factory_conf.push_back({"20to4", 23, 11, 13, 1e-10});
-    }
     else if (e >= 1e-12)
     {
         factory_conf.push_back({"15to1", 11, 5, 5, 1e-6});
@@ -151,7 +146,7 @@ factory_build(double target_error_rate,
     std::move(l1_fact.begin(), l1_fact.end(), factories.begin());
     std::move(l2_fact.begin(), l2_fact.end(), factories.begin() + l1_fact.size());
 
-    return {factories, qubit_count};
+    return {factories, qubit_count, factory_conf};
 }
 
 ////////////////////////////////////////////////////////////////

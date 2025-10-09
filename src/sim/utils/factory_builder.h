@@ -28,13 +28,13 @@ struct FACTORY_INFO
 ////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////
 
-using factory_build_result_type = std::pair<std::vector<T_FACTORY*>, size_t>;
+using factory_build_result_type = std::tuple<std::vector<T_FACTORY*>, size_t, std::vector<FACTORY_INFO>>;
 
 std::vector<FACTORY_INFO> make_factory_config(double target_error_rate);
 T_FACTORY*                create_factory_from_info(const FACTORY_INFO&, 
                                                         double freq_khz, 
                                                         size_t level,
-                                                        size_t buffer_capacity=4);
+                                                        size_t buffer_capacity=16);
 
 // returns the factory vector and the actual qubits used
 factory_build_result_type factory_build(double target_error_rate, 

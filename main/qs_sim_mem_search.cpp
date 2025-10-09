@@ -16,9 +16,11 @@
 #include "argparse.h"
 #include "compiler/memopt.h"
 #include "sim.h"
-#include "sim/utils/enums.h"
+#include "sim/utils/defs.h"
 #include "sim/utils/estimation.h"
 #include "sim/utils/factory_builder.h"
+
+#include <sys/stat.h>
 
 #include <zlib.h>
 
@@ -66,8 +68,8 @@ struct ITERATION_CONFIG
     int64_t fact_phys_qubits_per_program_qubit;
 
     // other:
-    sim::QHT_LATENCY_REDUCTION_TARGET qht_latency_reduce_which;
-    double                            qht_reduction_fraction;
+    int64_t qht_latency_reduce_which;
+    double  qht_reduction_fraction;
 
     // output of an iteration:
     double application_success_rate;
@@ -101,22 +103,22 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
 
     int64_t fact_phys_qubits_per_program_qubit = conf.fact_phys_qubits_per_program_qubit;
 
-    auto   qht_latency_reduce_which = conf.qht_latency_reduce_which;
-    double qht_reduction_fraction = conf.qht_reduction_fraction;
+    int64_t qht_latency_reduce_which = conf.qht_latency_reduce_which;
+    double  qht_reduction_fraction = conf.qht_reduction_fraction;
 
     // 1. determine number of surface code qubits
-    int64_t cmp_sc_adjusted_round_ns = (qht_latency_reduce_which == sim::QHT_LATENCY_REDUCTION_TARGET::COMPUTE)
+    int64_t cmp_sc_adjusted_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_COMPUTE)
                                             ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
                                             : cmp_sc_round_ns;
     size_t cmp_sc_code_distance = sim::est::sc_distance_for_target_logical_error_rate(conf.cmp_target_error_rate_per_cycle);
-    double cmp_sc_freq_ghz = sim::compute_freq_khz(cmp_sc_adjusted_round_ns, cmp_sc_code_distance);
+    double cmp_sc_freq_khz = sim::compute_freq_khz(cmp_sc_adjusted_round_ns, cmp_sc_code_distance);
     size_t cmp_sc_phys_qubits = cmp_sc_count * sim::est::sc_phys_qubit_count(cmp_sc_code_distance);
 
     size_t cmp_sc_num_patches_per_row = 4;
     size_t cmp_sc_num_rows = ceil(_fpdiv(cmp_sc_count, cmp_sc_num_patches_per_row));
 
     // 2. determine memory config:
-    int64_t mem_bb_adjusted_round_ns = (qht_latency_reduce_which == sim::QHT_LATENCY_REDUCTION_TARGET::MEMORY)
+    int64_t mem_bb_adjusted_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_MEMORY)
                                             ? qht_scale_round_ns(mem_bb_round_ns, qht_reduction_fraction)
                                             : mem_bb_round_ns;
     size_t mem_bb_banks_per_module = (num_program_qubits > cmp_sc_count) 
@@ -137,34 +139,53 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     }
 
     // 3. determine factory config:
-    int64_t l1_sc_round_ns = (qht_latency_reduce_which == sim::QHT_LATENCY_REDUCTION_TARGET::ALL_FACTORY || qht_latency_reduce_which == sim::QHT_LATENCY_REDUCTION_TARGET::L1_FACTORY_ONLY)
+    int64_t l1_sc_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
                                 ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
                                 : cmp_sc_round_ns;
-    int64_t l2_sc_round_ns = (qht_latency_reduce_which == sim::QHT_LATENCY_REDUCTION_TARGET::ALL_FACTORY)
+    int64_t l2_sc_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
                                 ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
                                 : cmp_sc_round_ns;
 
     size_t fact_max_phys_qubits = num_program_qubits * fact_phys_qubits_per_program_qubit;
-    auto [t_factories, fact_phys_qubits] = sim::util::factory_build(conf.fact_target_error_rate_per_gate,
+    auto [t_factories, fact_phys_qubits, factory_conf] = sim::util::factory_build(conf.fact_target_error_rate_per_gate,
                                                                         fact_max_phys_qubits,
                                                                         l1_sc_round_ns,
                                                                         l2_sc_round_ns);
-    size_t fact_l1_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                        [] (auto* f) { return f->level_ == 0; });
-    size_t fact_l2_count = std::count_if(t_factories.begin(), t_factories.end(),
-                                        [] (auto* f) { return f->level_ == 1; });
+    double fact_l1_freq_ghz, fact_l2_freq_ghz;
+    size_t fact_l1_count{0}, fact_l2_count{0};
+    for (auto* f : t_factories)
+    {
+        if (f->level_ == 0)
+        {
+            fact_l1_count++;
+            fact_l1_freq_ghz = f->OP_freq_khz;
+        }
+        else
+        {
+            fact_l2_count++;
+            fact_l2_freq_ghz = f->OP_freq_khz;
+        }
+    }
 
     // 4. initialize `GL_CMP`
-    sim::GL_CMP = new sim::COMPUTE(cmp_sc_freq_ghz, {trace}, cmp_sc_num_rows, cmp_sc_num_patches_per_row, t_factories, mem_modules);
+    sim::GL_CMP = new sim::COMPUTE(cmp_sc_freq_khz, {trace}, cmp_sc_num_rows, cmp_sc_num_patches_per_row, t_factories, mem_modules);
 
     // 5. run simulation:
     std::cout << "------------- SIM ITERATION " << sim_iter << " -------------\n";
     sim::print_stat_line(std::cout, "CMP_CODE_DISTANCE", cmp_sc_code_distance, false);
     sim::print_stat_line(std::cout, "CMP_COMPUTE_PATCHES", cmp_sc_num_patches_per_row*cmp_sc_num_rows, false);
+    sim::print_stat_line(std::cout, "CMP_FREQUENCY_KHZ", cmp_sc_freq_khz, false);
+
     sim::print_stat_line(std::cout, "FACT_L1_COUNT", fact_l1_count, false);
+    sim::print_stat_line(std::cout, "FACT_L1_TYPE", factory_conf[0].which, false);
+    sim::print_stat_line(std::cout, "FACT_L1_FREQUENCY_KHZ", fact_l1_freq_ghz, false);
     sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
+    sim::print_stat_line(std::cout, "FACT_L2_TYPE", factory_conf[1].which, false);
+    sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", fact_l2_freq_ghz, false);
+
     sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
     sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
+    sim::print_stat_line(std::cout, "MEM_BB_FREQUENCY_KHZ", mem_bb_freq_ghz, false);
     if (mem_is_remote)
         sim::print_stat_line(std::cout, "MEM_BB_MEAN_EPR_GENERATION_CYCLE_TIME", mem_mean_epr_generation_cycle_time, false);
 
@@ -192,6 +213,20 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
         if (deadlock)
         {
             sim::GL_CMP->dump_deadlock_info();
+    
+            std::vector<sim::T_FACTORY*> l1_factories, l2_factories;
+            std::copy_if(t_factories.begin(), t_factories.end(), std::back_inserter(l1_factories),
+                        [] (auto* f) { return f->level_ == 0; });
+            std::copy_if(t_factories.begin(), t_factories.end(), std::back_inserter(l2_factories),
+                        [] (auto* f) { return f->level_ == 1; });
+
+            std::cerr << "L1 factories:\n";
+            for (auto* f : l1_factories)
+                std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
+            std::cerr << "L2 factories:\n";
+            for (auto* f : l2_factories)
+                std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
+
             throw std::runtime_error("deadlock detected");
         }
 
@@ -287,7 +322,7 @@ main(int argc, char* argv[])
     int64_t mem_epr_buffer_capacity;
     double  mem_epr_generation_frequency_khz;
 
-    int64_t qht_latency_reduce_which_id;
+    int64_t qht_latency_reduce_which;
     double  qht_reduction_fraction;
 
     ARGPARSE()
@@ -314,13 +349,11 @@ main(int argc, char* argv[])
         .optional("", "--mem-epr-generation-frequency", "remote memory epr generation frequency (in kHz)", mem_epr_generation_frequency_khz, 1024)
 
         // quantum hyperthreading parameters:
-        .optional("-qht", "--qht-reduce-which", "QHT latency reduction target (0=none, 1=compute, etc.)", qht_latency_reduce_which_id, 0)
+        .optional("-qht", "--qht-reduce-which", "QHT latency reduction target", qht_latency_reduce_which, 0)
         .optional("", "--qht-reduction-fraction", "fraction of syndrome extraction time to reduce", qht_reduction_fraction, 0.2)
         .parse(argc, argv);
 
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
-
-    auto qht_latency_reduce_which = static_cast<sim::QHT_LATENCY_REDUCTION_TARGET>(qht_latency_reduce_which_id);
 
     uint64_t mem_mean_epr_generation_time_ns = (1.0/mem_epr_generation_frequency_khz) * 1e6;
     
@@ -328,8 +361,10 @@ main(int argc, char* argv[])
     if (jit)
     {
         // Create new trace filename with instruction count
-        std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1);
+        std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
         std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
+
+        mkdir(trace_dir.c_str(), 0777);
         
         std::string new_trace;
         auto it = trace_filename.find(".gz");
@@ -353,7 +388,7 @@ main(int argc, char* argv[])
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
         MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
-        mc.run(istrm, ostrm, inst_sim/10);
+        mc.run(istrm, ostrm, 2*inst_sim);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);
 
@@ -401,7 +436,7 @@ main(int argc, char* argv[])
     size_t sim_iter{0};
     bool converged{false};
 //  while (!converged)
-    while (sim_iter <= 1)
+    while (sim_iter < 1)
     {
         conf = sim_iteration(conf, sim_iter);
         sim_iter++;

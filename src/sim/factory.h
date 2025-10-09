@@ -69,6 +69,8 @@ public:
     void OP_handle_event(event_type) override;
 
     void consume_state(size_t num_consumed=1);
+
+    size_t get_step() const { return step_; }
 private:
     void production_step();
     void production_step_level_0();
