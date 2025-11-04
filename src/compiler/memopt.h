@@ -79,4 +79,20 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+// could use a DAG, but this is simple and works
+// note that this uses a `std::shared_ptr` since performance is non-critical
+using inst_schedule_type = std::unordered_map<qubit_type, std::deque<std::shared_ptr<INSTRUCTION>>>;
+
+bool validate_schedule(generic_strm_type& ground_truth, generic_strm_type& test, size_t cmp_count);
+
+/*
+ * Helper functions:
+ * */
+
+bool read_instructions(generic_strm_type&, inst_schedule_type&, size_t cmp_count, bool check_memory_access_validity);
+bool compare_instruction_windows(const inst_schedule_type&, const inst_schedule_type&);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 #endif

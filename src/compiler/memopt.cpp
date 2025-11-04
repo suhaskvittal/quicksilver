@@ -219,3 +219,138 @@ MEMOPT::emit_memory_instructions()
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+bool 
+validate_schedule(generic_strm_type& ground_truth, generic_strm_type& test, size_t cmp_count)
+{
+    // skip the first four bytes from each strm:
+    uint32_t unused_4b;
+    generic_strm_read(ground_truth, &unused_4b, sizeof(unused_4b));
+    generic_strm_read(test, &unused_4b, sizeof(unused_4b));
+
+    inst_schedule_type gt_win, test_win;
+
+    read_instructions(ground_truth, gt_win, cmp_count, false);
+    if (!read_instructions(test, test_win, cmp_count, true))
+        return false;
+
+    if (!compare_instruction_windows(gt_win, test_win))
+        return false;
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+read_instructions(generic_strm_type& istrm, inst_schedule_type& inst_windows, size_t cmp_count, bool check_memory_access_validity)
+{
+    std::vector<qubit_type> qubits(cmp_count);
+    std::iota(qubits.begin(), qubits.end(), 0);
+
+    // check validity every `EPOCH_SIZE` instructions:
+    while (!generic_strm_eof(istrm))
+    {
+        INSTRUCTION::io_encoding enc;
+        enc.read_write([&istrm] (void* buf, size_t size) { return generic_strm_read(istrm, buf, size); });
+        std::shared_ptr<INSTRUCTION> inst{new INSTRUCTION(std::move(enc))};
+
+        if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
+        {
+            // make sure that the qubits are in the correct places:
+            if (check_memory_access_validity)
+            {
+                auto q0 = inst->qubits[0],
+                     q1 = inst->qubits[1];
+
+                auto q0_it = std::find(qubits.begin(), qubits.end(), q0);
+                auto q1_it = std::find(qubits.begin(), qubits.end(), q1);
+
+                if (q0_it != qubits.end())
+                {
+                    std::cout << "[ VALIDATE ] qubit " << q0 
+                            << " found in compute region: inst " << *inst << "\n";
+                    return false;
+                }
+
+                if (q1_it == qubits.end())
+                {
+                    std::cout << "[ VALIDATE ] qubit " << q1 
+                            << " not found in compute region: inst " << *inst << "\n";
+                    return false;
+                }
+
+                *q1_it = q0;
+            }
+            continue;
+        }
+
+        bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
+                                || inst->type == INSTRUCTION::TYPE::Y
+                                || inst->type == INSTRUCTION::TYPE::Z
+                                || inst->type == INSTRUCTION::TYPE::SWAP;
+
+        if (check_memory_access_validity && !is_software_inst)
+        {
+            // check that the arguments are all in the compute region:
+            bool all_present = std::all_of(inst->qubits.begin(), inst->qubits.end(),
+                                            [&qubits] (qubit_type q) 
+                                            {
+                                                return std::find(qubits.begin(), qubits.end(), q) != qubits.end();
+                                            });
+            if (!all_present)
+            {
+                std::cout << "[ VALIDATE ] not all qubits found in compute region: inst " << *inst << "\n";
+                return false;
+            }
+        }
+
+        for (qubit_type q : inst->qubits)
+            inst_windows[q].push_back(inst);
+    }
+
+    return true;
+}
+
+bool
+compare_instruction_windows(const inst_schedule_type& gt, const inst_schedule_type& test)
+{
+    for (const auto& [q, gt_win] : gt)
+    {
+        auto test_it = test.find(q);
+        if (test_it == test.end())
+        {
+            std::cout << "[ VALIDATE ] qubit " << q << " not found in test window\n";
+            return false;
+        }
+
+        if (gt_win.size() != test_it->second.size())
+        {
+            std::cout << "[ VALIDATE ] qubit " << q << " window size mismatch: " 
+                        << gt_win.size() << " != " << test_it->second.size() << "\n";
+            return false;
+        }
+
+        const auto& test_win = test_it->second;
+        for (size_t i = 0; i < gt_win.size(); i++)
+        {
+            bool type_matches = (gt_win[i]->type == test_win[i]->type);
+            bool qubits_match = (gt_win[i]->qubits == test_win[i]->qubits);
+            bool urotseq_matches = (gt_win[i]->urotseq == test_win[i]->urotseq);
+
+            if (!type_matches || !qubits_match || !urotseq_matches)
+            {
+                std::cout << "[ VALIDATE ] qubit " << q << " instruction " << i << " mismatch:\n";
+                std::cout << "\tground truth: " << *gt_win[i] << "\n";
+                std::cout << "\ttest: " << *test_win[i] << "\n";
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
