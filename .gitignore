@@ -21,3 +21,5 @@ nohup.out
 
 out/
 out.tar.gz
+
+plots/
