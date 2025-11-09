@@ -57,7 +57,7 @@ COMPUTE::COMPUTE(double freq_khz,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::memory_route_result_type
+COMPUTE::memory_route_result_type 
 COMPUTE::route_memory_access(
     size_t mem_patch_idx,
     QUBIT incoming_qubit,
@@ -135,7 +135,10 @@ COMPUTE::dump_deadlock_info()
     std::cerr << "compute memory contents:\n";
     for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
     {
-        std::cerr << "\tPATCH " << (i-compute_start_idx_) << ", contents = " << patches_[i].contents << ", num uses = " << patches_[i].num_uses << "\n";
+        std::cerr << "\tPATCH " << (i-compute_start_idx_) 
+                    << ", contents = " << patches_[i].contents 
+                    << ", num uses = " << patches_[i].num_uses 
+                    << "\n";
     }
 
     for (auto& c : clients_)
@@ -634,7 +637,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
 
         // as this instruction is retired, it may be possible to find victims for any pending memory requests
         for (auto* m : mem_modules_)
-            m->OP_add_event(MEMORY_EVENT_TYPE::COMPUTE_COMPLETED_INST, 0);
+            m->OP_add_event(MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS, 0);
     }
 }
 
@@ -1037,7 +1040,9 @@ COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
             mem_modules_[i]->dump_contents();
         }
 
-        throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() + " not found in any memory module -- inst: " + inst->to_string());
+        throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() 
+                                    + " not found in any memory module -- inst: " 
+                                    + inst->to_string());
     }
 
     // mark this as a memory stall -- eventually, this should be served

@@ -111,6 +111,7 @@ set(SIM_FILES
     src/sim/client.cpp
     src/sim/clock.cpp
     src/sim/compute.cpp
+    src/sim/epr_generator.cpp
     src/sim/factory.cpp
     src/sim/memory.cpp
     src/sim/routing.cpp

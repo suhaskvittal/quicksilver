@@ -41,7 +41,8 @@ const double TARGET_APP_SUCCESS_RATE{0.99};
 
 struct ITERATION_CONFIG
 {
-    // target error rates are used to determine code distance and factory config -- probably the only thing that is modified between iterations
+    // target error rates are used to determine code distance and factory config 
+    // -- probably the only thing that is modified between iterations
     double cmp_target_error_rate_per_cycle;
     double mem_bb_target_error_rate_per_cycle;
     double fact_target_error_rate_per_gate;
@@ -125,15 +126,15 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
                                     ? ceil(_fpdiv(num_program_qubits - cmp_sc_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
                                     : 0;
     size_t mem_bb_code_distance = sim::est::mem_bb_distance_for_target_logical_error_rate(conf.mem_bb_target_error_rate_per_cycle);
-    double mem_bb_freq_ghz = sim::compute_freq_khz(mem_bb_adjusted_round_ns, mem_bb_code_distance);
+    double mem_bb_freq_khz = sim::compute_freq_khz(mem_bb_adjusted_round_ns, mem_bb_code_distance);
     size_t mem_bb_phys_qubits = mem_bb_num_modules * mem_bb_banks_per_module * sim::est::bb_phys_qubit_count(mem_bb_code_distance);
-    uint64_t mem_mean_epr_generation_cycle_time = sim::convert_ns_to_cycles(mem_mean_epr_generation_time_ns, mem_bb_freq_ghz);
+    uint64_t mem_mean_epr_generation_cycle_time = sim::convert_ns_to_cycles(mem_mean_epr_generation_time_ns, mem_bb_freq_khz);
     
     // 2.1. create memory modules:
     std::vector<sim::MEMORY_MODULE*> mem_modules;
     for (size_t i = 0; i < mem_bb_num_modules; i++)
     {
-        auto* m = new sim::MEMORY_MODULE(mem_bb_freq_ghz, mem_bb_banks_per_module, mem_bb_qubits_per_bank, 
+        auto* m = new sim::MEMORY_MODULE(mem_bb_freq_khz, mem_bb_banks_per_module, mem_bb_qubits_per_bank, 
                                         mem_is_remote, mem_epr_buffer_capacity, mem_mean_epr_generation_cycle_time);
         mem_modules.push_back(m);
     }
@@ -151,19 +152,19 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
                                                                         fact_max_phys_qubits,
                                                                         l1_sc_round_ns,
                                                                         l2_sc_round_ns);
-    double fact_l1_freq_ghz, fact_l2_freq_ghz;
+    double fact_l1_freq_khz, fact_l2_freq_khz;
     size_t fact_l1_count{0}, fact_l2_count{0};
     for (auto* f : t_factories)
     {
         if (f->level_ == 0)
         {
             fact_l1_count++;
-            fact_l1_freq_ghz = f->OP_freq_khz;
+            fact_l1_freq_khz = f->OP_freq_khz;
         }
         else
         {
             fact_l2_count++;
-            fact_l2_freq_ghz = f->OP_freq_khz;
+            fact_l2_freq_khz = f->OP_freq_khz;
         }
     }
 
@@ -178,14 +179,14 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
 
     sim::print_stat_line(std::cout, "FACT_L1_COUNT", fact_l1_count, false);
     sim::print_stat_line(std::cout, "FACT_L1_TYPE", factory_conf[0].which, false);
-    sim::print_stat_line(std::cout, "FACT_L1_FREQUENCY_KHZ", fact_l1_freq_ghz, false);
+    sim::print_stat_line(std::cout, "FACT_L1_FREQUENCY_KHZ", fact_l1_freq_khz, false);
     sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
     sim::print_stat_line(std::cout, "FACT_L2_TYPE", factory_conf[1].which, false);
-    sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", fact_l2_freq_ghz, false);
+    sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", fact_l2_freq_khz, false);
 
     sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
     sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
-    sim::print_stat_line(std::cout, "MEM_BB_FREQUENCY_KHZ", mem_bb_freq_ghz, false);
+    sim::print_stat_line(std::cout, "MEM_BB_FREQUENCY_KHZ", mem_bb_freq_khz, false);
     if (mem_is_remote)
         sim::print_stat_line(std::cout, "MEM_BB_MEAN_EPR_GENERATION_CYCLE_TIME", mem_mean_epr_generation_cycle_time, false);
 
@@ -193,14 +194,22 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
     sim::GL_CURRENT_TIME_NS = 0;
 
-    // 5.1. initialize each component:
+    // 5.1. collect EPR generators from memory modules
+    std::vector<sim::EPR_GENERATOR*> epr_generators;
+    for (auto* m : mem_modules)
+    {
+        if (auto* epr_gen = m->get_epr_generator())
+            epr_generators.push_back(epr_gen);
+    }
+
+    // 5.2. initialize each component:
     sim::GL_CMP->OP_init();
     for (auto* m : mem_modules)
         m->OP_init();
     for (auto* f : t_factories)
         f->OP_init();
 
-    // 5.2. loop until `inst_sim` is reached
+    // 5.3. loop until `inst_sim` is reached
     bool done;
     do
     {
@@ -208,7 +217,16 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
         sim::T_FACTORY* earliest_fact = sim::arbitrate_event_selection_from_vector(t_factories);
         sim::MEMORY_MODULE* earliest_mem = sim::arbitrate_event_selection_from_vector(mem_modules);
 
-        bool deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
+        bool deadlock;
+        if (epr_generators.empty())
+        {
+            deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, sim::GL_CMP);
+        }
+        else
+        {
+            sim::EPR_GENERATOR* earliest_epr = sim::arbitrate_event_selection_from_vector(epr_generators);
+            deadlock = sim::arbitrate_event_execution(earliest_fact, earliest_mem, earliest_epr, sim::GL_CMP);
+        }
 
         if (deadlock)
         {
@@ -226,6 +244,10 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
             std::cerr << "L2 factories:\n";
             for (auto* f : l2_factories)
                 std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
+
+            std::cerr << "EPR generators:\n";
+            for (auto* eg : epr_generators)
+                std::cerr << "epr buffer occu = " << eg->get_occupancy() << "\n";
 
             throw std::runtime_error("deadlock detected");
         }
@@ -339,14 +361,16 @@ main(int argc, char* argv[])
         .optional("", "--cmp-sc-count", "number of surface codes to allocate to compute", cmp_sc_count, 4)
         .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
 
-        .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", fact_phys_qubits_per_program_qubit, 50)
+        .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", 
+                    fact_phys_qubits_per_program_qubit, 50)
 
         .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
         .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
-        .optional("", "--mem-bb-round-ns", "round time for memory banks", mem_bb_round_ns, 1800)
+        .optional("", "--mem-bb-round-ns", "round time for memory banks", mem_bb_round_ns, 1300)
         .optional("", "--mem-is-remote", "enable remote memory", mem_is_remote, false)
-        .optional("", "--mem-epr-buffer-capacity", "remote memory epr buffer capacity", mem_epr_buffer_capacity, 4)
-        .optional("", "--mem-epr-generation-frequency", "remote memory epr generation frequency (in kHz)", mem_epr_generation_frequency_khz, 1024)
+        .optional("", "--mem-epr-buffer-capacity", "remote memory epr buffer capacity", mem_epr_buffer_capacity, 8)
+        .optional("", "--mem-epr-generation-frequency", "remote memory epr generation frequency (in kHz)", 
+                    mem_epr_generation_frequency_khz, 0.004)
 
         // quantum hyperthreading parameters:
         .optional("-qht", "--qht-reduce-which", "QHT latency reduction target", qht_latency_reduce_which, 0)

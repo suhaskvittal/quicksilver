@@ -18,8 +18,8 @@ extern COMPUTE* GL_CMP;
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_MODULE::MEMORY_MODULE(double freq_khz, 
-                            size_t num_banks, 
+MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
+                            size_t num_banks,
                             size_t capacity_per_bank,
                             bool is_remote_module,
                             size_t epr_buffer_capacity,
@@ -28,11 +28,26 @@ MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
     num_banks_(num_banks),
     capacity_per_bank_(capacity_per_bank),
     banks_(num_banks, bank_type(capacity_per_bank)),
-    is_remote_module_(is_remote_module),
-    epr_buffer_capacity_(epr_buffer_capacity),
-    mean_epr_generation_cycle_time_(mean_epr_generation_cycle_time)
+    is_remote_module_(is_remote_module)
 {
     request_buffer_.reserve(128);
+
+    // Create EPR generator for remote modules
+    if (is_remote_module_)
+    {
+        // Convert mean generation cycle time to frequency for EPR_GENERATOR
+        double epr_freq_khz = freq_khz / mean_epr_generation_cycle_time;
+        epr_generator_ = new EPR_GENERATOR(epr_freq_khz, this, epr_buffer_capacity);
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+MEMORY_MODULE::~MEMORY_MODULE()
+{
+    if (epr_generator_ != nullptr)
+        delete epr_generator_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -103,7 +118,7 @@ void
 MEMORY_MODULE::OP_init()
 {
     if (is_remote_module_)
-        OP_add_event_using_cycles(MEMORY_EVENT_TYPE::REMOTE_EPR_PAIR_GENERATED, mean_epr_generation_cycle_time_, MEMORY_EVENT_INFO{});
+        epr_generator_->OP_init();
 }
 
 ////////////////////////////////////////////////////////////
@@ -150,26 +165,12 @@ MEMORY_MODULE::OP_handle_event(event_type event)
         if (req_it != request_buffer_.end())
             request_buffer_.erase(req_it);
     }
-    else if (event.id == MEMORY_EVENT_TYPE::COMPUTE_COMPLETED_INST)
+    else if (event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
         // then, retry all pending requests
         auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
                                 [this] (const auto& req) { return this->serve_memory_request(req); });
         request_buffer_.erase(it, request_buffer_.end());
-    }
-    else if (event.id == MEMORY_EVENT_TYPE::REMOTE_EPR_PAIR_GENERATED)
-    {
-        epr_buffer_occu_++;
-        if (epr_buffer_occu_ < epr_buffer_capacity_)
-            OP_add_event_using_cycles(MEMORY_EVENT_TYPE::REMOTE_EPR_PAIR_GENERATED, mean_epr_generation_cycle_time_, MEMORY_EVENT_INFO{});
-
-        // retry memory requests:
-        if (epr_buffer_occu_ >= 2)
-        {
-            auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
-                                    [this] (const auto& req) { return this->serve_memory_request(req); });
-            request_buffer_.erase(it, request_buffer_.end());
-        }
     }
 }
 
@@ -193,7 +194,7 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
         return false;
 
     // if there aren't enough EPR pairs, then we also have to exit:
-    if (is_remote_module_ && epr_buffer_occu_ < 2)
+    if (is_remote_module_ && epr_generator_->get_occupancy() < 2)
         return false;
 
     [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
@@ -249,12 +250,8 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
 
     if (is_remote_module_)
     {
-        // only submit a generation event if the buffer is full, as this clears the buffer
-        if (epr_buffer_occu_ == epr_buffer_capacity_)
-            OP_add_event_using_cycles(MEMORY_EVENT_TYPE::REMOTE_EPR_PAIR_GENERATED, mean_epr_generation_cycle_time_, MEMORY_EVENT_INFO{});
-
-        epr_buffer_occu_ -= 2;
-        s_total_epr_buffer_occupancy_post_request += epr_buffer_occu_;
+        epr_generator_->consume_epr_pairs(2);
+        s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
     }
     s_memory_requests++;
     if (req.is_prefetch)

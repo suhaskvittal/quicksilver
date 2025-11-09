@@ -8,6 +8,7 @@
 
 #include "sim/operable.h"
 #include "sim/client.h"
+#include "sim/epr_generator.h"
 
 #include <deque>
 #include <tuple>
@@ -23,10 +24,7 @@ namespace sim
 enum class MEMORY_EVENT_TYPE
 {
     MEMORY_ACCESS_COMPLETED,
-    COMPUTE_COMPLETED_INST,
-    
-    // only when `is_remote_module_` is true
-    REMOTE_EPR_PAIR_GENERATED 
+    RETRY_MEMORY_ACCESS
 };
 
 struct MEMORY_EVENT_INFO
@@ -88,26 +86,30 @@ public:
     const size_t num_banks_;
     const size_t capacity_per_bank_;
     const bool   is_remote_module_;
-    const size_t   epr_buffer_capacity_;
-    const uint64_t mean_epr_generation_cycle_time_;
 protected:
     std::vector<bank_type> banks_;
     std::vector<request_type> request_buffer_;
 
-    size_t epr_buffer_occu_{0};
+    // EPR generator for remote modules (owned by this MEMORY_MODULE)
+    EPR_GENERATOR* epr_generator_{nullptr};
 public:
-    MEMORY_MODULE(double freq_khz, 
-                    size_t num_banks, 
+    MEMORY_MODULE(double freq_khz,
+                    size_t num_banks,
                     size_t capacity_per_bank,
                     bool is_remote_module=false,
                     size_t epr_buffer_capacity=4,
                     uint64_t mean_epr_generation_cycle_time=10);
+
+    ~MEMORY_MODULE();
 
     search_result_type find_qubit(QUBIT);
     search_result_type find_uninitialized_qubit();
 
     void initiate_memory_access(inst_ptr, QUBIT requested, QUBIT victim, bool is_prefetch=false);
     void dump_contents();
+
+    // Access to EPR generator for COMPUTE (shared access, not ownership transfer)
+    EPR_GENERATOR* get_epr_generator() const { return epr_generator_; }
 
     void OP_init() override;
 protected:
