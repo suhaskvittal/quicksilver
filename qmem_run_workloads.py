@@ -45,7 +45,7 @@ if exec_mode == 'compile':
             # run compile
             compiled_trace_path = f'benchmarks/bin/compiled/{base_name}_{compiled_trace_ext}.gz'
             output_stats_path = f'{compiled_results_folder}/{base_name}.out'
-            cmd = f'./build/qs_mem_compile benchmarks/bin/{w} {compiled_trace_path} -c {cmp_count} -e {compiler_impl} -i {2*sim_inst_count} -pp 1000000 &> {output_stats_path}'
+            cmd = f'./build/qs_mem_compile benchmarks/bin/{w} {compiled_trace_path} -c {cmp_count} -e {compiler_impl} -i {int(1.2*sim_inst_count)} -pp 1000000 &> {output_stats_path}'
             print(cmd)
 else:
     os.system(f'mkdir -p {simulation_results_folder}')

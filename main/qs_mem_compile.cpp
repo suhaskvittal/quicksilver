@@ -8,6 +8,9 @@
 #include "instruction.h"
 #include "compiler/memopt.h"
 
+#include <chrono>
+#include <iomanip>
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -57,11 +60,21 @@ main(int argc, char** argv)
     generic_strm_open(istrm, input_trace_file, "rb");
     generic_strm_open(ostrm, output_trace_file, "wb");
 
+    // Start timing the compilation
+    auto compile_start = std::chrono::high_resolution_clock::now();
+
     MEMOPT compiler(cmp_count, emit_impl, print_progress_freq);
     compiler.run(istrm, ostrm, inst_limit);
 
+    // End timing the compilation
+    auto compile_end = std::chrono::high_resolution_clock::now();
+
     generic_strm_close(istrm);
     generic_strm_close(ostrm);
+
+    // Calculate compilation time in seconds
+    auto compile_duration = std::chrono::duration_cast<std::chrono::microseconds>(compile_end - compile_start);
+    double compile_time_seconds = compile_duration.count() / 1000000.0;
 
     double compute_intensity = static_cast<double>(compiler.s_unrolled_inst_done) 
                                     / static_cast<double>(compiler.s_memory_instructions_added);
@@ -74,6 +87,7 @@ main(int argc, char** argv)
     print_stat_line(std::cout, "TOTAL_TIMESTEPS", compiler.s_timestep);
 
     print_stat_line(std::cout, "COMPUTE_INTENSITY", compute_intensity);
+    print_stat_line(std::cout, "COMPILE_TIME", compile_time_seconds);
     
     // validate schedule:
     if (validate)
