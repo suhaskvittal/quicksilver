@@ -58,6 +58,15 @@ gate ccp(X) a, b, c
     rz(X/2)     c;
 }
 
+gate ch a, b
+{
+    sxdg b;
+    tdg b;
+    cx a, b;
+    t b;
+    sx b;
+}
+
 //////////////////////////////////////
 //  CONTROLLED UNITARY GATES        //
 //////////////////////////////////////
