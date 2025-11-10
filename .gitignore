@@ -20,6 +20,10 @@ nohup.out
 
 out/
 
+bisquit/classiq
+bisquit/classiq/*
+
 *.tar.gz
+test.qasm
 
 plots/
