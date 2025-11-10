@@ -19,6 +19,11 @@ elif pol == 'dpt' or pol == 'dpt_near_memory':
     compiled_trace_ext = 'dpt'
     compiled_results_folder = f'out/qmem/compiled_results/dpt'
 
+if pol == 'viszlai' or pol == 'dpt':
+    mem_opts = '--mem-is-remote --mem-epr-buffer-capacity 4 --mem-epr-generation-frequency 1024 --mem-bb-round-ns 1800000'
+else:
+    mem_opts = '--mem-bb-round-ns 1800'
+
 simulation_results_folder = f'out/qmem/simulation_results/{pol}'
 
 base_workloads = ['BQ_e_cr2_120_d100_t1M_T5M.xz', 'BQ_shor_rsa256_iter_4.xz', 'BQ_v_c2h4o_ethylene_oxide_240_d100_t1M_T15M.xz', 'BQ_v_hc3h2cn_288_d100_t1M_T63M.xz']
@@ -61,6 +66,5 @@ else:
                         + f' --cmp-sc-count {cmp_count}'\
                         + f' --fact-phys-qubits-per-program-qubit {FACT_PHYS_QUBITS_PER_PROGRAM_QUBIT}'\
                         + f' --mem-bb-num-modules {MEM_BB_NUM_MODULES}'\
-                        + f' --mem-is-remote --mem-epr-buffer-capacity 4 --mem-epr-generation-frequency 1024'\
-                        + f' --mem-bb-round-ns 1800000 &> {output_stats_path}'
+                        + f' {mem_opts} &> {output_stats_path}'
                 print(cmd)

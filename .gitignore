@@ -6,7 +6,6 @@ Debug/
 
 benchmarks/bin/*
 benchmarks/stats/*
-benchmarks.tar.gz
 
 venv/
 venv/*
@@ -20,6 +19,7 @@ sim_commands.out
 nohup.out
 
 out/
-out.tar.gz
+
+*.tar.gz
 
 plots/
