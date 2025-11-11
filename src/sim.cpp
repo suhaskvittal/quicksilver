@@ -29,6 +29,8 @@ int64_t GL_PRINT_PROGRESS_FREQ{-1};
 bool GL_ELIDE_MSWAP_INSTRUCTIONS{false};
 bool GL_ELIDE_MPREFETCH_INSTRUCTIONS{false};
 
+bool GL_IMPL_DECOUPLED_LOAD_STORE{false};
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -72,8 +74,9 @@ print_stats(std::ostream& out)
         print_stat_line(out, "T_TOTAL_ERROR", c->s_total_t_error);
     }
 
-    print_stat_line(out, "EVICTIONS_NO_USES", GL_CMP->s_evictions_no_uses_, false);
-    print_stat_line(out, "EVICTIONS_PREFETCH_NO_USES", GL_CMP->s_evictions_prefetch_no_uses_, false);
+    print_stat_line(out, "EVICTIONS_NO_USES", GL_CMP->s_evictions_no_uses, false);
+    print_stat_line(out, "EVICTIONS_PREFETCH_NO_USES", GL_CMP->s_evictions_prefetch_no_uses, false);
+    print_stat_line(out, "OPERATIONS_WITH_DECOUPLED_LOADS", GL_CMP->s_operations_with_decoupled_loads, false);
 
     // print factory stats:
     std::unordered_map<size_t, std::vector<T_FACTORY*>> factory_level_map;
@@ -107,10 +110,17 @@ print_stats(std::ostream& out)
                                                     [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request; });
     double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
 
+    uint64_t total_decoupled_loads = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_decoupled_loads; });
+    uint64_t total_decoupled_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_decoupled_stores; });
+
     out << "MEMORY\n";
     print_stat_line(out, "ALL_REQUESTS", total_memory_requests);
     print_stat_line(out, "PREFETCH_REQUESTS", total_memory_prefetch_requests);
     print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
+    print_stat_line(out, "DECOUPLED_LOADS", total_decoupled_loads);
+    print_stat_line(out, "DECOUPLED_STORES", total_decoupled_stores);
 }
 
 ////////////////////////////////////////////////////////////

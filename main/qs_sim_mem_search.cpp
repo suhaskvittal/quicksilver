@@ -231,6 +231,14 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
         if (deadlock)
         {
             sim::GL_CMP->dump_deadlock_info();
+
+            for (size_t i = 0; i < mem_modules.size(); i++)
+            {
+                std::cerr << "memory module " << i 
+                            << " (patch = " << mem_modules[i]->output_patch_idx_  
+                            << ")------------------\n";
+                mem_modules[i]->dump_contents();
+            }
     
             std::vector<sim::T_FACTORY*> l1_factories, l2_factories;
             std::copy_if(t_factories.begin(), t_factories.end(), std::back_inserter(l1_factories),
@@ -246,8 +254,11 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
                 std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
 
             std::cerr << "EPR generators:\n";
-            for (auto* eg : epr_generators)
-                std::cerr << "epr buffer occu = " << eg->get_occupancy() << "\n";
+            for (size_t i = 0; i < epr_generators.size(); i++)
+            {
+                std::cerr << "EG " << i << ":\n";
+                epr_generators[i]->dump_deadlock_info();
+            }
 
             throw std::runtime_error("deadlock detected");
         }
@@ -372,6 +383,9 @@ main(int argc, char* argv[])
         .optional("", "--mem-epr-generation-frequency", "remote memory epr generation frequency (in kHz)", 
                     mem_epr_generation_frequency_khz, 0.004)
 
+        // decoupled load/store:
+        .optional("-dls", "--decoupled-load-store", "enable decoupled load/store", sim::GL_IMPL_DECOUPLED_LOAD_STORE, false)
+
         // quantum hyperthreading parameters:
         .optional("-qht", "--qht-reduce-which", "QHT latency reduction target", qht_latency_reduce_which, 0)
         .optional("", "--qht-reduction-fraction", "fraction of syndrome extraction time to reduce", qht_reduction_fraction, 0.2)
@@ -412,6 +426,7 @@ main(int argc, char* argv[])
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
         MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::COST_AWARE, sim::GL_PRINT_PROGRESS_FREQ);
+//      MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
         mc.run(istrm, ostrm, 2*inst_sim);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);

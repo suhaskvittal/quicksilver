@@ -66,8 +66,10 @@ public:
     };
 
     // statistics:
-    uint64_t s_evictions_no_uses_{0};
-    uint64_t s_evictions_prefetch_no_uses_{0};
+    uint64_t s_evictions_no_uses{0};
+    uint64_t s_evictions_prefetch_no_uses{0};
+
+    uint64_t s_operations_with_decoupled_loads{0};
 
     const size_t target_t_fact_level_;
     const size_t num_rows_;
@@ -116,6 +118,10 @@ public:
 
     void dump_deadlock_info();
 
+    void reassign_decoupled_store(INSTRUCTION*, QUBIT);  // this occurs when there are no locations to 
+                                                         // perform a decoupled store
+    bool has_any_empty_program_patches() const;
+
     // exposing some data to user:
     const std::vector<client_ptr>& get_clients() const { return clients_; }
     bool                           is_present_in_compute(QUBIT q) const { return find_patch_containing_qubit_c(q) != patches_.end(); }
@@ -152,7 +158,7 @@ private:
     exec_result_type do_rz_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     exec_result_type do_ccx_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     
-    exec_result_type do_mswap_or_mprefetch(client_ptr&, inst_ptr);
+    exec_result_type do_memory_instruction(client_ptr&, inst_ptr);
     
     // retries the execution of instructions in the given buffer provided the appropriate resources are available
     void retry_memory_stalled_instructions(COMPUTE_EVENT_INFO);
@@ -161,6 +167,8 @@ private:
     std::vector<PATCH>::iterator find_patch_containing_qubit(QUBIT);
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
+
+    std::vector<PATCH>::iterator find_epr_generator_containing_qubit(QUBIT);
 };
 
 ////////////////////////////////////////////////////////////

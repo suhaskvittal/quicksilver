@@ -33,6 +33,7 @@ constexpr std::string_view BASIS_GATES[] =
     "mprefetch",
     "dload",
     "dstore",
+    "mswap_d",
 
     "nil"
 };
@@ -84,6 +85,7 @@ struct INSTRUCTION
         MPREFETCH,  // programmer-directed prefetch (same semantics as `MSWAP`)
         DLOAD,      // decoupled load
         DSTORE,     // decoupled store
+        MSWAP_D,    // mswap with decoupled hint
 
         NIL
     };
@@ -201,6 +203,7 @@ is_memory_instruction(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::MSWAP
         || t == INSTRUCTION::TYPE::MPREFETCH
+        || t == INSTRUCTION::TYPE::MSWAP_D
         || t == INSTRUCTION::TYPE::DLOAD
         || t == INSTRUCTION::TYPE::DSTORE;
 }
@@ -209,7 +212,14 @@ inline bool
 is_coupled_memory_instruction(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::MSWAP
-        || t == INSTRUCTION::TYPE::MPREFETCH;
+        || t == INSTRUCTION::TYPE::MPREFETCH
+        || t == INSTRUCTION::TYPE::MSWAP_D;
+}
+
+inline bool
+is_decouplable_memory_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::MSWAP_D;
 }
 
 ////////////////////////////////////////////////////////////

@@ -19,7 +19,10 @@ IMPL_BASE::IMPL_BASE(size_t cmp_count)
 ////////////////////////////////////////////////////////////
 
 IMPL_BASE::result_type
-IMPL_BASE::transform_working_set_into(const ws_type& curr, const ws_type& target, const std::vector<double>& qubit_scores)
+IMPL_BASE::transform_working_set_into(const ws_type& curr, 
+                                        const ws_type& target, 
+                                        const std::vector<double>& qubit_scores,
+                                        INSTRUCTION::TYPE inst_type)
 {
     result_type result;
     // copy `curr` for now -- we will modify this here
@@ -48,7 +51,7 @@ IMPL_BASE::transform_working_set_into(const ws_type& curr, const ws_type& target
             break;
 
         // add memory instruction:
-        inst_ptr mswap = new INSTRUCTION(INSTRUCTION::TYPE::MSWAP, {q, *v_it});
+        inst_ptr mswap = new INSTRUCTION(inst_type, {q, *v_it});
         result.memory_instructions.push_back(mswap);
 
         result.working_set.erase(v_it);

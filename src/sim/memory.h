@@ -87,6 +87,9 @@ public:
     uint64_t s_memory_prefetch_requests{0};
     uint64_t s_total_epr_buffer_occupancy_post_request{0};
 
+    uint64_t s_decoupled_loads{0};
+    uint64_t s_decoupled_stores{0};
+
     const size_t num_banks_;
     const size_t capacity_per_bank_;
     const bool   is_remote_module_;

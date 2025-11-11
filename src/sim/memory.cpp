@@ -45,8 +45,6 @@ MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
     banks_(num_banks, bank_type(capacity_per_bank)),
     is_remote_module_(is_remote_module)
 {
-    request_buffer_.reserve(128);
-
     // Create EPR generator for remote modules
     if (is_remote_module_)
     {
@@ -98,9 +96,7 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT vict
     auto req_it = find_request_for_qubit(requested);
     if (req_it != request_buffer_.end())
     {
-        s_num_prefetch_promoted_to_demand[requested.client_id] += (req_it->is_prefetch && !is_prefetch);
-        req_it->is_prefetch &= is_prefetch;
-        return;
+        throw std::runtime_error("qubit " + requested.to_string() + " already has a pending request");
     }
 
     if (is_prefetch)
@@ -143,21 +139,40 @@ void
 MEMORY_MODULE::OP_handle_event(event_type event)
 {
 #if defined(MEMORY_VERBOSE)
-    std::cout << "[ MEMORY ] request queue contents:\n";
+    std::cout << "[ MEMORY patch = " << output_patch_idx_ << " ] request queue contents:\n";
     for (const auto& req : request_buffer_)
     {
         auto [found, b_it, q_it] = this->find_qubit(req.qubit);
         size_t bank_idx = std::distance(banks_.begin(), b_it);
-        std::cout << "\t\t" << req.qubit << ", bank = " << bank_idx << "\n";
+        std::cout << "\t\t" << *req.inst << ", bank = " << bank_idx << "\n";
+    }
+
+    if (is_remote_module_)
+    {
+        std::cout << "[ MEMORY ] decoupled loads:";
+        for (const auto& q : epr_generator_->get_decoupled_loads())
+            std::cout << " " << q;
+        std::cout << ", epr buffer occu: " << epr_generator_->get_occupancy() 
+            << ", has capacity = " << epr_generator_->has_capacity()
+            << "\n";
     }
 #endif
 
     if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED || event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
-        // then, retry all pending requests
         auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
-                                [this] (const auto& req) { return this->serve_memory_request(req); });
-        request_buffer_.erase(it, request_buffer_.end());
+                                [this] (const auto& req) 
+                                { 
+                                    return req.inst->type == INSTRUCTION::TYPE::DLOAD && serve_memory_request(req);
+                                });
+
+        if (it == request_buffer_.end())
+        {
+            it = std::find_if(request_buffer_.begin(), request_buffer_.end(),
+                                [this] (const auto& req) { return serve_memory_request(req); });
+        }
+        if (it != request_buffer_.end())
+            request_buffer_.erase(it);
     }
 }
 
@@ -214,7 +229,10 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     {
         std::tie(found, b_it, q_it) = find_uninitialized_qubit();
         if (!found)
-            throw std::runtime_error("no uninitialized qubit found in memory for decoupled store");
+        {
+            GL_CMP->reassign_decoupled_store(req.inst, req.qubit);
+            return true;  // return true so this instruction is removed from the request buffer
+        }
     }
 
     [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
@@ -261,10 +279,24 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
                                 mem_event_info);
 
     COMPUTE_EVENT_INFO cmp_event_info;
-    cmp_event_info.mem_accessed_qubit = req.qubit;
-    cmp_event_info.mem_victim_qubit = req.victim;
+    if (is_coupled_memory_instruction(req.inst->type))
+    {
+        cmp_event_info.mem_accessed_qubit = req.qubit;
+        cmp_event_info.mem_victim_qubit = req.victim;
+    }
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+    {
+        cmp_event_info.mem_accessed_qubit = req.qubit;
+        cmp_event_info.mem_victim_qubit = QUBIT{-1,-1};
+    }
+    else
+    {
+        cmp_event_info.mem_accessed_qubit = QUBIT{-1,-1};
+        cmp_event_info.mem_victim_qubit = req.qubit;
+    }
+    uint64_t cmp_cycles_from_now = cmp_completion_cycle - GL_CMP->current_cycle();
     GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 
-                                        cmp_completion_cycle - GL_CMP->current_cycle(), 
+                                        cmp_cycles_from_now,
                                         cmp_event_info);
 
     // update EPR generator -- if this is a decoupled store, then we get a loaded qubit popped off
@@ -274,9 +306,9 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     {
         if (is_coupled_memory_instruction(req.inst->type))
             epr_generator_->consume_epr_pairs(epr_pairs_needed);
-        else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        else if (req.inst->type == INSTRUCTION::TYPE::DLOAD && !GL_CMP->has_any_empty_program_patches())
             epr_generator_->alloc_decoupled_load(req.qubit);
-        else
+        else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
             dstore_loaded_qubit = epr_generator_->free_decoupled_load();
 
         s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
@@ -288,13 +320,10 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
         GL_CMP->update_state_after_memory_access(req.qubit, QUBIT{-1,-1}, cmp_completion_cycle, false);
     else
-        GL_CMP->update_state_after_memory_access(req.qubit, req.qubit, cmp_completion_cycle, req.is_prefetch);
+        GL_CMP->update_state_after_memory_access(dstore_loaded_qubit, req.qubit, cmp_completion_cycle, false);
 
 #if defined(MEMORY_VERBOSE)
-    std::cout << "\tserved memory request for qubit " << req.qubit << " in bank " << bank_idx 
-                << "\n\t\tcompletion cycle = " << mem_access_done_cycle
-                << "\n\t\tvictim = " << victim
-                << "\n";
+    std::cout << "\tserved memory request for inst = " << *req.inst << "\n";
     std::cout << "\tbank " << bank_idx << " state:\n";
     for (size_t i = 0; i < banks_[bank_idx].contents.size(); i++)
         std::cout << "\t\t" << i << " : " << banks_[bank_idx].contents[i] << "\n";
@@ -304,6 +333,11 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     s_memory_requests++;
     if (req.is_prefetch)
         s_memory_prefetch_requests++;
+
+    if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        s_decoupled_loads++;
+    else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
+        s_decoupled_stores++;
 
     return true;
 }

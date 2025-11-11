@@ -13,7 +13,7 @@
 #include <unordered_set>
 
 //#define COMPUTE_VERBOSE
-//#define DISABLE_MEMORY_ROUTING_STALL
+#define DISABLE_MEMORY_ROUTING_STALL
 
 namespace sim
 {
@@ -62,7 +62,25 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
 {
     auto v_patch_it = find_patch_containing_qubit(victim);
     if (v_patch_it == patches_.end())
-        throw std::runtime_error("victim qubit " + victim.to_string() + " not found in compute patches");
+    {
+        if (GL_IMPL_DECOUPLED_LOAD_STORE)
+            v_patch_it = find_epr_generator_containing_qubit(victim);
+
+        if (v_patch_it == patches_.end())
+        {
+            std::cerr << "compute patches:\n";
+            for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+                std::cerr << "\t" << patches_[i].contents << "\n";
+
+            for (size_t i = 0; i < mem_modules_.size(); i++)
+            {
+                std::cerr << "memory module " << i << "------------------\n";
+                mem_modules_[i]->dump_contents();
+            }
+
+            throw std::runtime_error("victim qubit " + victim.to_string() + " not found in compute patches");
+        }
+    }
 
     PATCH& v_patch = *v_patch_it;
     PATCH& m_patch = patches_[mem_patch_idx];
@@ -70,10 +88,11 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
     auto v_bus_it = find_next_available_bus(v_patch);
     auto m_bus_it = find_next_available_bus(m_patch);
 
-    uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
-    cycle_routing_start = std::max(cycle_routing_start, module_cycle_free);
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
-    cycle_routing_start = std::max(cycle_routing_start, current_cycle());
+//  uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
+//  cycle_routing_start = std::max(cycle_routing_start, module_cycle_free);
+//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
+//  cycle_routing_start = std::max(cycle_routing_start, current_cycle());
+    uint64_t cycle_routing_start = current_cycle();
 
 #if defined(DISABLE_MEMORY_ROUTING_STALL)
     uint64_t routing_alloc_cycle = cycle_routing_start;
@@ -83,13 +102,8 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
 #endif
 
     // update stats:
-    s_evictions_no_uses_ += (v_patch.num_uses == 0);
-    s_evictions_prefetch_no_uses_ += v_patch.is_prefetched && (v_patch.num_uses == 0);
-
-#if defined(COMPUTE_VERBOSE)
-    std::cout << "[ COMPUTE ] routed memory access from " << victim
-                << " to " << incoming_qubit << " (prefetch = " << is_prefetch << ")\n";
-#endif
+    s_evictions_no_uses += (v_patch.num_uses == 0);
+    s_evictions_prefetch_no_uses += v_patch.is_prefetched && (v_patch.num_uses == 0);
 
     uint64_t access_time_ns = convert_cycles_to_ns(routing_alloc_cycle - current_cycle(), OP_freq_khz);
     return access_time_ns;
@@ -101,16 +115,36 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
 void
 COMPUTE::update_state_after_memory_access(QUBIT loaded, QUBIT stored, uint64_t cycle_done, bool is_prefetch)
 {
-    qubit_available_cycle_[loaded] = cycle_done;
+    if (loaded.qubit_id >= 0)
+        qubit_available_cycle_[loaded] = cycle_done;
 
     if (stored.qubit_id >= 0)
-    {
         qubit_available_cycle_[stored] = cycle_done;
 
+    if (has_any_empty_program_patches() || stored.qubit_id >= 0)
+    {
         auto p_it = find_patch_containing_qubit(stored);
-        p_it->num_uses = 0;
-        p_it->contents = loaded;
-        p_it->is_prefetched = is_prefetch;
+        if (p_it != patches_.end())
+        {
+            p_it->num_uses = 0;
+            p_it->contents = loaded;
+            p_it->is_prefetched = is_prefetch;
+        }
+        else
+        {
+            for (auto* m : mem_modules_)
+            {
+                auto eg = m->get_epr_generator();
+                if (eg->contains_loaded_qubit(stored))
+                {
+                    if (loaded.qubit_id < 0)
+                        eg->remove_decoupled_load(stored);
+                    else
+                        eg->exchange_decoupled_load(stored, loaded);
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -152,6 +186,8 @@ COMPUTE::dump_deadlock_info()
         for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
         {
             QUBIT q{c->id, qid};
+            if (inst_windows_[q].empty())
+                continue;
             std::cerr << "\tQUBIT " << qid << ", cycle avail = " << qubit_available_cycle_[q] << ", instruction window:\n";
             for (auto* inst : inst_windows_[q])
             {
@@ -183,6 +219,31 @@ COMPUTE::dump_deadlock_info()
             }
         }
     }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE::has_any_empty_program_patches() const
+{
+    auto begin = patches_.begin() + compute_start_idx_,
+         end = patches_.begin() + memory_start_idx_;
+    return std::any_of(begin, end, [](const auto& p) { return p.contents.qubit_id < 0; });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::reassign_decoupled_store(INSTRUCTION* inst, QUBIT stored)
+{
+    auto module_it = find_memory_module_containing_qubit(QUBIT{-1,-1});
+    if (module_it == mem_modules_.end())
+        throw std::runtime_error("no memory module found for decoupled store");
+
+    MEMORY_MODULE* m = *module_it;
+    m->initiate_memory_access(inst, stored, QUBIT{-1,-1});
 }
 
 ////////////////////////////////////////////////////////////
@@ -499,13 +560,69 @@ COMPUTE::client_schedule(client_ptr& c)
     for (qubit_type qid = 0; qid < static_cast<qubit_type>(c->num_qubits); qid++)
     {
         QUBIT q{c->id, qid};
-        const auto& win = inst_windows_[q];
+        auto& win = inst_windows_[q];
         if (win.empty())
             continue;
 
         inst_ptr inst = win.front();
         if (visited.count(inst) || inst->is_scheduled)
             continue;
+
+        if (GL_IMPL_DECOUPLED_LOAD_STORE 
+                && is_decouplable_memory_instruction(inst->type))
+        {
+            // check if `q` is the loaded qubit:
+            if (inst->qubits[0] == qid)
+            {
+                // find memory module containing `q`:
+                auto module_it = find_memory_module_containing_qubit(q);
+                if (module_it == mem_modules_.end())
+                {
+                    std::cerr << "compute patches:\n";
+                    for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+                        std::cerr << "\t" << patches_[i].contents << "\n";
+                    throw std::runtime_error("decoupled load for inst `" + inst->to_string()  
+                            + " : qubit " + q.to_string() + " not found in any memory module");
+                }
+
+                MEMORY_MODULE* m = *module_it;
+                EPR_GENERATOR* eg = m->get_epr_generator();
+                if (eg->can_store_decoupled_load() && eg->get_occupancy() >= eg->buffer_capacity_/2)
+                {
+                    qubit_type vid = inst->qubits[1];
+
+                    // create a new decoupled load instruction:
+                    inst_ptr dload = new INSTRUCTION(INSTRUCTION::TYPE::DLOAD, {qid});
+
+                    // transform the other instruction (on the stored qubit) into a decoupled store:
+                    QUBIT victim{c->id, vid};
+                    auto& v_win = inst_windows_[victim];
+                    inst_ptr dstore = new INSTRUCTION(INSTRUCTION::TYPE::DSTORE, {vid});
+
+                    dload->inst_number = inst->inst_number;
+                    dstore->inst_number = inst->inst_number;
+                    
+                    // replace instances of `inst`
+                    win[0] = dload;
+                    auto v_it = std::find(v_win.begin(), v_win.end(), inst);
+                    *v_it = dstore;
+
+#if defined(COMPUTE_VERBOSE)
+                    std::cout << "\tclient " << static_cast<int>(c->id) 
+                                << " instruction \"" << *inst << "\" transformed into decoupled load/store pair"
+                                << " -- dload = " << *dload << ", dstore = " << *dstore << "\n";
+#endif
+
+                    // delete `inst`:
+                    delete inst;
+                    inst = dload;
+
+                    // indicate that this is an inflight decoupled load:
+                    eg->mark_inflight_decoupled_load();
+                }
+            }
+        }
+
         visited.insert(inst);
 
         // verify two things:
@@ -539,9 +656,16 @@ COMPUTE::client_schedule(client_ptr& c)
                         });
         auto max_it = std::max_element(avail_cycles.begin(), avail_cycles.end());
         if (*max_it > current_cycle())
+        {
             OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::INST_EXECUTE, *max_it - current_cycle(), COMPUTE_EVENT_INFO{c->id, inst});
+#if defined(COMPUTE_VERBOSE)
+            std::cout << "\t\tis being scheduled for execution @ cycle = " << *max_it << "\n";
+#endif
+        }
         else // save a little time and execute right now:
+        {
             client_execute(c, inst);
+        }
     }
 }
 
@@ -553,8 +677,8 @@ COMPUTE::client_execute(client_ptr& c, inst_ptr inst)
 {
     // check if this is an MSWAP instruction -- cannot fail
     exec_result_type result;
-    if (is_coupled_memory_instruction(inst->type))
-        result = do_mswap_or_mprefetch(c, inst);
+    if (is_memory_instruction(inst->type))
+        result = do_memory_instruction(c, inst);
     else
         result = execute_instruction(c, inst);
     process_execution_result(c, inst, result);
@@ -590,7 +714,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
         uint64_t unrolled_inst_done_before = c->s_unrolled_inst_done;
 
         // do not increment instruction done count for directive-like instructions (i.e., mswap)
-        if (!is_coupled_memory_instruction(inst->type))
+        if (!is_memory_instruction(inst->type))
         {
             c->s_inst_done++;
             if (inst->num_uops > 0)
@@ -624,6 +748,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
             inst_windows_[q].pop_front();
         }
         delete inst;
+
 
         // print progress if flag is set:
         bool pp = (c->s_unrolled_inst_done % GL_PRINT_PROGRESS_FREQ) 
@@ -664,7 +789,43 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         QUBIT q{c->id, inst->qubits[i]};
         auto patch_it = find_patch_containing_qubit(q);
         if (patch_it == patches_.end())
-            throw std::runtime_error("qubit " + q.to_string() + " not found in compute patches");
+        {
+            // check if one of the EPR generators has this qubit:
+            if (GL_IMPL_DECOUPLED_LOAD_STORE)
+            {
+                patch_it = find_epr_generator_containing_qubit(q);
+                if (patch_it != patches_.end())
+                    ++s_operations_with_decoupled_loads;
+            }
+
+            // if we reach this point -- error has occurred, print out contents of compute patches
+            // and epr generator decoupled qubits:
+            if (patch_it == patches_.end())
+            {
+                std::cerr << "failed instruction: " << *inst << "\n";
+                std::cerr << "compute patches:\n";
+                for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+                    std::cerr << "\t" << patches_[i].contents << "\n";
+
+                std::cerr << "epr generator decoupled qubits:\n";
+                for (size_t i = 0; i < mem_modules_.size(); i++)
+                {
+                    auto eg = mem_modules_[i]->get_epr_generator();
+                    std::cerr << "EG " << i << ":\n";
+                    for (auto q : eg->get_decoupled_loads())
+                        std::cerr << "\t" << q << "\n";
+                }
+
+                std::cerr << "memory contents:\n";
+                for (size_t i = 0; i < mem_modules_.size(); i++)
+                {
+                    std::cerr << "memory module " << i << "------------------\n";
+                    mem_modules_[i]->dump_contents();
+                }
+
+                throw std::runtime_error("qubit " + q.to_string() + " not found in compute patches");
+            }
+        }
         qubit_patches[i] = &(*patch_it);
     }
 
@@ -680,7 +841,7 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
     if (result.is_memory_stall)
     {
         // verify that `inst` is a memory instruction:
-        if (!is_coupled_memory_instruction(inst->type))
+        if (!is_memory_instruction(inst->type))
             throw std::runtime_error("instruction " + inst->to_string() + " is not a memory instruction");
 
         inst_waiting_for_memory_.emplace_back(inst, c->id);
@@ -837,8 +998,9 @@ COMPUTE::do_h_or_s_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_
     auto bus_it = find_next_available_bus(q_patch);
     
     // get earliest start time for gate:
-    uint64_t cycle_routing_start = std::max(bus_it->cycle_free, current_cycle());
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
+//  uint64_t cycle_routing_start = std::max(bus_it->cycle_free, current_cycle());
+//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
+    uint64_t cycle_routing_start = current_cycle();
     
     // compute amount of time spent in routing stall:
     uint64_t latency = (cycle_routing_start - current_cycle()) + 2;
@@ -884,11 +1046,16 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
             auto f_bus_it = find_next_available_bus(f_patch);
 
             // three way max to determine when to start routing
-            uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
-            cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
+//          uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
+//          cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
+            uint64_t cycle_routing_start = current_cycle();
 
+#if defined(DISABLE_MEMORY_ROUTING_STALL)
+            uint64_t routing_alloc_cycle = cycle_routing_start;
+#else
             auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
             update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
+#endif
 
             // note that `routing_alloc_cycle - current_cycle()` is number of cycles spent waiting for routing space
             f->consume_state();
@@ -920,12 +1087,17 @@ COMPUTE::do_cx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patc
     auto q0_bus_it = find_next_available_bus(q0_patch);
     auto q1_bus_it = find_next_available_bus(q1_patch);
 
-    uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q0_patch.contents]);
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q1_patch.contents]);
+//  uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
+//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q0_patch.contents]);
+//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q1_patch.contents]);
+    uint64_t cycle_routing_start = current_cycle();
 
+#if defined(DISABLE_MEMORY_ROUTING_STALL)
+    uint64_t routing_alloc_cycle = cycle_routing_start;
+#else
     auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q0_bus_it, q1_bus_it, cycle_routing_start);
     update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
+#endif
 
     result.routing_stall_cycles = routing_alloc_cycle - current_cycle();
     result.cycles_until_done = 2 + result.routing_stall_cycles;
@@ -1020,18 +1192,31 @@ COMPUTE::do_ccx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_pat
 ////////////////////////////////////////////////////////////
 
 COMPUTE::exec_result_type
-COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
+COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
 {
     exec_result_type result{};
     if (GL_ELIDE_MSWAP_INSTRUCTIONS || (inst->type == INSTRUCTION::TYPE::MPREFETCH && GL_ELIDE_MPREFETCH_INSTRUCTIONS))
         return result;
 
-    // check if the operands are in memory
-    qubit_type q_requested = inst->qubits[0];
-    qubit_type q_victim = inst->qubits[1];
+    QUBIT requested{-1,-1}, victim{-1,-1};
+    if (is_coupled_memory_instruction(inst->type))
+    {
+        qubit_type q_requested = inst->qubits[0];
+        qubit_type q_victim = inst->qubits[1];
 
-    QUBIT requested{c->id, q_requested};
-    QUBIT victim{c->id, q_victim};
+        requested = QUBIT{c->id, q_requested};
+        victim = QUBIT{c->id, q_victim};
+    }
+    else if (inst->type == INSTRUCTION::TYPE::DLOAD)
+    {
+        requested = QUBIT{c->id, inst->qubits[0]};
+    }
+    else
+    {
+        victim = QUBIT{c->id, inst->qubits[0]};
+    }
+
+    // check if the operands are in memory
     auto module_it = find_memory_module_containing_qubit(requested);
     if (module_it == mem_modules_.end())
     {
@@ -1052,7 +1237,12 @@ COMPUTE::do_mswap_or_mprefetch(client_ptr& c, inst_ptr inst)
 
     // mark this as a memory stall -- eventually, this should be served
     // submit memory request:
-    (*module_it)->initiate_memory_access(inst, requested, victim, inst->type == INSTRUCTION::TYPE::MPREFETCH);
+    if (is_coupled_memory_instruction(inst->type))
+        (*module_it)->initiate_memory_access(inst, requested, victim, inst->type == INSTRUCTION::TYPE::MPREFETCH);
+    else if (inst->type == INSTRUCTION::TYPE::DLOAD)
+        (*module_it)->initiate_memory_access(inst, requested, QUBIT{-1,-1}, false);
+    else
+        (*module_it)->initiate_memory_access(inst, victim, QUBIT{-1,-1}, false);
     result.is_memory_stall = true;
     return result;
 }
@@ -1069,8 +1259,27 @@ COMPUTE::retry_memory_stalled_instructions(COMPUTE_EVENT_INFO event_info)
     for (size_t i = 0; i < inst_waiting_for_memory_.size(); i++)
     {
         auto [inst, client_id] = inst_waiting_for_memory_[i];
-        bool client_match = client_id == q_accessed.client_id;
-        bool qubit_match = (inst->qubits[0] == q_accessed.qubit_id && inst->qubits[1] == q_victim.qubit_id);
+
+        bool client_match;
+        bool qubit_match;
+        if (q_victim.qubit_id < 0)
+        {
+            client_match = client_id == q_accessed.client_id;
+            qubit_match = (inst->qubits[0] == q_accessed.qubit_id) && (inst->type == INSTRUCTION::TYPE::DLOAD);
+        }
+        else if (q_accessed.qubit_id < 0)
+        {
+            client_match = client_id == q_victim.client_id;
+            qubit_match = (inst->qubits[0] == q_victim.qubit_id) && (inst->type == INSTRUCTION::TYPE::DSTORE);
+        }
+        else
+        {
+            client_match = client_id == q_accessed.client_id;
+            qubit_match = (inst->qubits[0] == q_accessed.qubit_id) 
+                            && (inst->qubits[1] == q_victim.qubit_id) 
+                            && is_coupled_memory_instruction(inst->type);
+        }
+
         if (client_match && qubit_match)
         {
             // update stats:
@@ -1129,6 +1338,19 @@ COMPUTE::find_memory_module_containing_qubit(QUBIT q)
 {
     return std::find_if(mem_modules_.begin(), mem_modules_.end(),
                         [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
+}
+
+std::vector<PATCH>::iterator
+COMPUTE::find_epr_generator_containing_qubit(QUBIT q)
+{
+    for (auto* m : mem_modules_)
+    {
+        auto eg = m->get_epr_generator();
+        if (eg->contains_loaded_qubit(q))
+            return patches_.begin() + m->output_patch_idx_;
+    }
+
+    return patches_.end();
 }
 
 ////////////////////////////////////////////////////////////

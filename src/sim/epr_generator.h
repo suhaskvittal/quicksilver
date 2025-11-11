@@ -42,7 +42,11 @@ private:
     size_t             epr_buffer_occu_{0};
     std::deque<QUBIT>  decoupled_loads_{};
 
+    size_t inflight_decoupled_loads_{0};
+
     MEMORY_MODULE* owner_;
+
+    bool has_inflight_epr_generation_event_{false};
 public:
     EPR_GENERATOR(double freq_khz, MEMORY_MODULE*, size_t buffer_cap);
 
@@ -50,12 +54,20 @@ public:
 
     void consume_epr_pairs(size_t count);
     void alloc_decoupled_load(QUBIT);
+    void exchange_decoupled_load(QUBIT, QUBIT);
+    void remove_decoupled_load(QUBIT);
     QUBIT free_decoupled_load();
 
     bool contains_loaded_qubit(QUBIT) const;
+
+    void mark_inflight_decoupled_load();
     size_t get_occupancy() const;
     bool has_capacity() const;
     bool can_store_decoupled_load() const;
+
+    void dump_deadlock_info();
+
+    const std::deque<QUBIT>& get_decoupled_loads() const { return decoupled_loads_; }
 protected:
     void OP_handle_event(event_type) override;
 };
