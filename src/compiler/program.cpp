@@ -708,9 +708,7 @@ PROGRAM_INFO::analyze_program() const
 
     for (const auto& inst : instructions_)
     {
-        bool is_sw_gate = (inst.type == INSTRUCTION::TYPE::X 
-                            || inst.type == INSTRUCTION::TYPE::Y 
-                            || inst.type == INSTRUCTION::TYPE::Z);
+        bool is_sw_gate = is_software_instruction(inst.type);
         bool is_t_like = (inst.type == INSTRUCTION::TYPE::T || inst.type == INSTRUCTION::TYPE::TDG);
         bool is_cxz = (inst.type == INSTRUCTION::TYPE::CX || inst.type == INSTRUCTION::TYPE::CZ);
         bool is_rot = (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ);

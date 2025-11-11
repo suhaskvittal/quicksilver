@@ -31,6 +31,8 @@ constexpr std::string_view BASIS_GATES[] =
     // memory instruction:
     "mswap",
     "mprefetch",
+    "dload",
+    "dstore",
 
     "nil"
 };
@@ -80,6 +82,8 @@ struct INSTRUCTION
                     //          -- "mswap q0, q1" means move q0 to compute and q1 to memory (q0 is requested, q1 is victim)
                     //          -- throws error in simulation if q0 is not in memory or q1 is not in compute
         MPREFETCH,  // programmer-directed prefetch (same semantics as `MSWAP`)
+        DLOAD,      // decoupled load
+        DSTORE,     // decoupled store
 
         NIL
     };
@@ -179,6 +183,34 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
     angle(_angle),
     urotseq(urotseq_begin, urotseq_end)
 {}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+inline bool
+is_software_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::X
+        || t == INSTRUCTION::TYPE::Y
+        || t == INSTRUCTION::TYPE::Z
+        || t == INSTRUCTION::TYPE::SWAP;
+}
+
+inline bool
+is_memory_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::MSWAP
+        || t == INSTRUCTION::TYPE::MPREFETCH
+        || t == INSTRUCTION::TYPE::DLOAD
+        || t == INSTRUCTION::TYPE::DSTORE;
+}
+
+inline bool
+is_coupled_memory_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::MSWAP
+        || t == INSTRUCTION::TYPE::MPREFETCH;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

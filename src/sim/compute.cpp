@@ -57,13 +57,8 @@ COMPUTE::COMPUTE(double freq_khz,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE::memory_route_result_type 
-COMPUTE::route_memory_access(
-    size_t mem_patch_idx,
-    QUBIT incoming_qubit,
-    bool is_prefetch,
-    QUBIT victim,
-    uint64_t extra_mem_access_latency_post_routing_ns)
+uint64_t
+COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module_cycle_free)
 {
     auto v_patch_it = find_patch_containing_qubit(victim);
     if (v_patch_it == patches_.end())
@@ -76,7 +71,7 @@ COMPUTE::route_memory_access(
     auto m_bus_it = find_next_available_bus(m_patch);
 
     uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
-    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[incoming_qubit]);
+    cycle_routing_start = std::max(cycle_routing_start, module_cycle_free);
     cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
     cycle_routing_start = std::max(cycle_routing_start, current_cycle());
 
@@ -87,18 +82,9 @@ COMPUTE::route_memory_access(
     update_free_times_along_routing_path(path, routing_alloc_cycle, routing_alloc_cycle);
 #endif
 
-    // update operands' available cycles
-    uint64_t extra_mem_access_cycles = convert_ns_to_cycles(extra_mem_access_latency_post_routing_ns, OP_freq_khz);
-    qubit_available_cycle_[victim] = routing_alloc_cycle + extra_mem_access_cycles;
-    qubit_available_cycle_[incoming_qubit] = routing_alloc_cycle + extra_mem_access_cycles;
-
+    // update stats:
     s_evictions_no_uses_ += (v_patch.num_uses == 0);
-    s_evictions_prefetch_no_uses_ += is_prefetch && (v_patch.num_uses == 0);
-
-    // set `v_patch` contents to `incoming_qubit`
-    v_patch.is_prefetched = is_prefetch;
-    v_patch.num_uses = 0;
-    v_patch.contents = incoming_qubit;
+    s_evictions_prefetch_no_uses_ += v_patch.is_prefetched && (v_patch.num_uses == 0);
 
 #if defined(COMPUTE_VERBOSE)
     std::cout << "[ COMPUTE ] routed memory access from " << victim
@@ -106,7 +92,26 @@ COMPUTE::route_memory_access(
 #endif
 
     uint64_t access_time_ns = convert_cycles_to_ns(routing_alloc_cycle - current_cycle(), OP_freq_khz);
-    return {true, victim, access_time_ns};
+    return access_time_ns;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE::update_state_after_memory_access(QUBIT loaded, QUBIT stored, uint64_t cycle_done, bool is_prefetch)
+{
+    qubit_available_cycle_[loaded] = cycle_done;
+
+    if (stored.qubit_id >= 0)
+    {
+        qubit_available_cycle_[stored] = cycle_done;
+
+        auto p_it = find_patch_containing_qubit(stored);
+        p_it->num_uses = 0;
+        p_it->contents = loaded;
+        p_it->is_prefetched = is_prefetch;
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -150,7 +155,7 @@ COMPUTE::dump_deadlock_info()
             std::cerr << "\tQUBIT " << qid << ", cycle avail = " << qubit_available_cycle_[q] << ", instruction window:\n";
             for (auto* inst : inst_windows_[q])
             {
-                bool is_sw = is_software_instruction(inst->type);
+                bool is_sw = ::is_software_instruction(inst->type);
                 std::vector<bool> ready(inst->qubits.size(), false);
                 std::transform(inst->qubits.begin(), inst->qubits.end(), ready.begin(),
                                 [this, &c, inst, is_sw] (qubit_type qid) 
@@ -548,7 +553,7 @@ COMPUTE::client_execute(client_ptr& c, inst_ptr inst)
 {
     // check if this is an MSWAP instruction -- cannot fail
     exec_result_type result;
-    if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
+    if (is_coupled_memory_instruction(inst->type))
         result = do_mswap_or_mprefetch(c, inst);
     else
         result = execute_instruction(c, inst);
@@ -585,7 +590,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
         uint64_t unrolled_inst_done_before = c->s_unrolled_inst_done;
 
         // do not increment instruction done count for directive-like instructions (i.e., mswap)
-        if (inst->type != INSTRUCTION::TYPE::MSWAP && inst->type != INSTRUCTION::TYPE::MPREFETCH)
+        if (!is_coupled_memory_instruction(inst->type))
         {
             c->s_inst_done++;
             if (inst->num_uops > 0)
@@ -649,7 +654,7 @@ COMPUTE::exec_result_type
 COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
 {
     // check if the instruction is a software instruction
-    if (is_software_instruction(inst->type))
+    if (::is_software_instruction(inst->type))
         return do_sw_gate(c, inst);
 
     // verify that all qubits are present:
@@ -675,7 +680,7 @@ COMPUTE::process_execution_result(client_ptr& c, inst_ptr inst, exec_result_type
     if (result.is_memory_stall)
     {
         // verify that `inst` is a memory instruction:
-        if (inst->type != INSTRUCTION::TYPE::MSWAP && inst->type != INSTRUCTION::TYPE::MPREFETCH)
+        if (!is_coupled_memory_instruction(inst->type))
             throw std::runtime_error("instruction " + inst->to_string() + " is not a memory instruction");
 
         inst_waiting_for_memory_.emplace_back(inst, c->id);
@@ -1146,14 +1151,7 @@ update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_type>& p
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
-is_software_instruction(INSTRUCTION::TYPE type)
-{
-    return type == INSTRUCTION::TYPE::X
-        || type == INSTRUCTION::TYPE::Y
-        || type == INSTRUCTION::TYPE::Z
-        || type == INSTRUCTION::TYPE::SWAP;
-}
+
 
 bool
 is_t_like_instruction(INSTRUCTION::TYPE type)

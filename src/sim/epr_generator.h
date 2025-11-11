@@ -9,6 +9,8 @@
 #include "sim/operable.h"
 #include "sim/client.h"  // for QUBIT type
 
+#include <deque>
+
 namespace sim
 {
 
@@ -19,17 +21,11 @@ class MEMORY_MODULE;
 
 enum class EG_EVENT_TYPE
 {
-    EPR_GENERATED,
-    EPR_CONSUMED,
-
-    DECOUPLED_LOAD_ALLOC,
-    DECOUPLED_LOAD_FREE
+    EPR_GENERATED
 };
 
 struct EG_EVENT_INFO
 {
-    // for decoupled load only;
-    QUBIT loaded_qubit;
 };
 
 /*
@@ -41,18 +37,25 @@ public:
     using typename OPERABLE<EG_EVENT_TYPE, EG_EVENT_INFO>::event_type;
 
     const size_t buffer_capacity_;
+    const size_t max_decoupled_loads_;
 private:
-    size_t epr_buffer_occu_{0};
+    size_t             epr_buffer_occu_{0};
+    std::deque<QUBIT>  decoupled_loads_{};
 
     MEMORY_MODULE* owner_;
 public:
     EPR_GENERATOR(double freq_khz, MEMORY_MODULE*, size_t buffer_cap);
 
-    // Public interface for checking and consuming EPR pairs
-    size_t get_occupancy() const { return epr_buffer_occu_; }
-    void consume_epr_pairs(size_t count);
-
     void OP_init() override;
+
+    void consume_epr_pairs(size_t count);
+    void alloc_decoupled_load(QUBIT);
+    QUBIT free_decoupled_load();
+
+    bool contains_loaded_qubit(QUBIT) const;
+    size_t get_occupancy() const;
+    bool has_capacity() const;
+    bool can_store_decoupled_load() const;
 protected:
     void OP_handle_event(event_type) override;
 };

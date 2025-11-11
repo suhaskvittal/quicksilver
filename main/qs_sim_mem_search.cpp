@@ -411,7 +411,7 @@ main(int argc, char* argv[])
 
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
-        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
+        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::COST_AWARE, sim::GL_PRINT_PROGRESS_FREQ);
         mc.run(istrm, ostrm, 2*inst_sim);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);

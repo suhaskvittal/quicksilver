@@ -18,6 +18,21 @@ extern COMPUTE* GL_CMP;
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+uint64_t
+MEMORY_MODULE::bank_type::rotate_to_location_and_store(std::vector<QUBIT>::iterator target_it, QUBIT stored)
+{
+    uint64_t left_rotation_cycles = std::distance(contents.begin(), target_it),
+             right_rotation_cycles = std::distance(target_it, contents.end());
+    uint64_t rotation_cycles = std::min(left_rotation_cycles, right_rotation_cycles);
+
+    *target_it = stored;
+    std::rotate(contents.begin(), target_it, contents.end());
+    return rotation_cycles;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
                             size_t num_banks,
                             size_t capacity_per_bank,
@@ -137,35 +152,7 @@ MEMORY_MODULE::OP_handle_event(event_type event)
     }
 #endif
 
-    if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED)
-    {
-        size_t free_bank_idx = event.info.bank_with_completed_request;
-        // find a request mapping to this bank and issue it
-        auto req_it = find_request_for_bank(free_bank_idx, request_buffer_.begin());
-
-#if defined(MEMORY_VERBOSE)
-        std::cout << "\tmemory access completed for bank " << free_bank_idx << ", cycle = " << current_cycle() << "\n";
-        if (req_it != request_buffer_.end())
-            std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
-        else
-            std::cout << "\tno request found for bank " << free_bank_idx << "\n";
-#endif
-
-        while (req_it != request_buffer_.end() && !serve_memory_request(*req_it))
-        {
-#if defined(MEMORY_VERBOSE)
-            if (req_it != request_buffer_.end())
-                std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
-            else
-                std::cout << "\tno request found for bank " << free_bank_idx << "\n";
-#endif
-            req_it = find_request_for_bank(free_bank_idx, req_it+1);
-        }
-
-        if (req_it != request_buffer_.end())
-            request_buffer_.erase(req_it);
-    }
-    else if (event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
+    if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED || event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
         // then, retry all pending requests
         auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
@@ -180,82 +167,128 @@ MEMORY_MODULE::OP_handle_event(event_type event)
 bool
 MEMORY_MODULE::serve_memory_request(const request_type& req)
 {
-    constexpr uint64_t MSWAP_MEM_CYCLES = 3;  // note that these are memory cycles
-
 #if defined(MEMORY_VERBOSE)
-    std::cout << "[ MEMORY ] initiated memory access to qubit " << req.qubit << " cycle " << current_cycle() << "\n";
+    if (is_coupled_memory_instruction(req.inst->type))
+    {
+        std::cout << "[ MEMORY ] initiated memswap between " 
+                        << req.qubit << " and " << req.victim
+                        << " @ cycle " << current_cycle() << "\n";
+    }
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+    {
+        std::cout << "[ MEMORY ] initiated decoupled load for " 
+                        << req.qubit << " @ cycle " << current_cycle() << "\n";
+    }
+    else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
+    {
+        std::cout << "[ MEMORY ] initiated decoupled store for " 
+                        << req.qubit << " @ cycle " << current_cycle() << "\n";
+    }
 #endif
 
-    auto [found, b_it, q_it] = find_qubit(req.qubit);
-    if (!found)
-        throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
-
-    if (b_it->cycle_free > current_cycle())
+    // check if this channel is free:
+    if (cycle_free_ > current_cycle())
         return false;
 
     // if there aren't enough EPR pairs, then we also have to exit:
-    if (is_remote_module_ && epr_generator_->get_occupancy() < 2)
+    const size_t epr_pairs_needed = is_coupled_memory_instruction(req.inst->type) ? 2 : 1;
+    if (is_remote_module_ && epr_generator_->get_occupancy() < epr_pairs_needed)
         return false;
+
+    // validate that we are not getting a decoupled load/store on a non-remote module
+    if (!is_remote_module_ && !is_coupled_memory_instruction(req.inst->type))
+        throw std::runtime_error("decoupled load/store on non-remote memory module");
+
+    // find appropriate memory locatino:
+    bool found;
+    std::vector<bank_type>::iterator b_it;
+    std::vector<QUBIT>::iterator q_it;
+
+    if (is_coupled_memory_instruction(req.inst->type) || req.inst->type == INSTRUCTION::TYPE::DLOAD)
+    {
+        std::tie(found, b_it, q_it) = find_qubit(req.qubit);
+        if (!found)
+            throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
+    }
+    else
+    {
+        std::tie(found, b_it, q_it) = find_uninitialized_qubit();
+        if (!found)
+            throw std::runtime_error("no uninitialized qubit found in memory for decoupled store");
+    }
 
     [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
 
     // first determine how long it will take to rotate the qubit to the head of the bank
-    uint64_t left_rotation_cycles = std::distance(b_it->contents.begin(), q_it);
-    uint64_t right_rotation_cycles = std::distance(q_it, b_it->contents.end());
-    uint64_t rotation_cycles = std::min(left_rotation_cycles, right_rotation_cycles);
+    uint64_t rotation_cycles;
+    if (is_coupled_memory_instruction(req.inst->type))
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.victim);
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, QUBIT{-1,-1});
+    else
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.qubit);
 
-    uint64_t post_routing_cycles = rotation_cycles + MSWAP_MEM_CYCLES;
+    // perform routing + memory access operations:
+    uint64_t post_routing_cycles{rotation_cycles};
+    if (is_coupled_memory_instruction(req.inst->type))
+        post_routing_cycles += MSWAP_CYCLES;
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        post_routing_cycles += LOAD_CYCLES;
+    else
+        post_routing_cycles += STORE_CYCLES;
+
     uint64_t post_routing_time_ns = convert_cycles_to_ns(post_routing_cycles, OP_freq_khz);
-
-    // perform the memory swap and convert to compute cycles
-    auto [victim_found, victim, access_time_ns] = GL_CMP->route_memory_access(
-                                                                output_patch_idx_,
-                                                                req.qubit,
-                                                                req.is_prefetch,
-                                                                req.victim,
-                                                                post_routing_time_ns);
-
-    // Since victim is now required, victim_found should always be true
-    // This check is kept for safety but should never fail
-    if (!victim_found)
-    {
-#if defined(MEMORY_VERBOSE)
-        std::cout << "\tfailed to find victim for qubit " << req.qubit << "\n";
-#endif
-        return false;
-    }
-
-    // update memory:
-    *q_it = victim;
-    // complete the rotation now that we have assigned `*q_it`
-    std::rotate(b_it->contents.begin(), q_it, b_it->contents.end());
+    uint64_t access_time_ns;
+    if (is_coupled_memory_instruction(req.inst->type))
+        access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.victim, cycle_free_);
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        access_time_ns = 0;  // no routing required (storing in EPR pair)
+    else
+        access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.qubit, cycle_free_);
 
     // final completion time is `GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns`
     uint64_t completion_time_ns = GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns;
-    uint64_t mem_completion_cycle = convert_ns_to_cycles(completion_time_ns, OP_freq_khz);
-    uint64_t cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
+    uint64_t mem_completion_cycle = convert_ns_to_cycles(completion_time_ns, OP_freq_khz),
+             cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
     
     // update when bank is free
-    b_it->cycle_free = mem_completion_cycle;
+    cycle_free_ = mem_completion_cycle;
 
     // submit completion events
     MEMORY_EVENT_INFO mem_event_info;
-    mem_event_info.bank_with_completed_request = bank_idx;
-    OP_add_event_using_cycles(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, mem_completion_cycle - current_cycle() + 1, mem_event_info);
+    OP_add_event_using_cycles(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, 
+                                mem_completion_cycle - current_cycle() + 1,
+                                mem_event_info);
 
     COMPUTE_EVENT_INFO cmp_event_info;
     cmp_event_info.mem_accessed_qubit = req.qubit;
-    cmp_event_info.mem_victim_qubit = victim;
-    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, cmp_completion_cycle - GL_CMP->current_cycle(), cmp_event_info);
+    cmp_event_info.mem_victim_qubit = req.victim;
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 
+                                        cmp_completion_cycle - GL_CMP->current_cycle(), 
+                                        cmp_event_info);
 
+    // update EPR generator -- if this is a decoupled store, then we get a loaded qubit popped off
+    // the `decoupled_loads_` FIFO
+    QUBIT dstore_loaded_qubit;
     if (is_remote_module_)
     {
-        epr_generator_->consume_epr_pairs(2);
+        if (is_coupled_memory_instruction(req.inst->type))
+            epr_generator_->consume_epr_pairs(epr_pairs_needed);
+        else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+            epr_generator_->alloc_decoupled_load(req.qubit);
+        else
+            dstore_loaded_qubit = epr_generator_->free_decoupled_load();
+
         s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
     }
-    s_memory_requests++;
-    if (req.is_prefetch)
-        s_memory_prefetch_requests++;
+
+    // update qubit states:
+    if (is_coupled_memory_instruction(req.inst->type))
+        GL_CMP->update_state_after_memory_access(req.qubit, req.victim, cmp_completion_cycle, req.is_prefetch);
+    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+        GL_CMP->update_state_after_memory_access(req.qubit, QUBIT{-1,-1}, cmp_completion_cycle, false);
+    else
+        GL_CMP->update_state_after_memory_access(req.qubit, req.qubit, cmp_completion_cycle, req.is_prefetch);
 
 #if defined(MEMORY_VERBOSE)
     std::cout << "\tserved memory request for qubit " << req.qubit << " in bank " << bank_idx 
@@ -266,6 +299,11 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     for (size_t i = 0; i < banks_[bank_idx].contents.size(); i++)
         std::cout << "\t\t" << i << " : " << banks_[bank_idx].contents[i] << "\n";
 #endif
+
+    // update stats:
+    s_memory_requests++;
+    if (req.is_prefetch)
+        s_memory_prefetch_requests++;
 
     return true;
 }
@@ -278,18 +316,6 @@ MEMORY_MODULE::find_request_for_qubit(QUBIT qubit)
 {
     return std::find_if(request_buffer_.begin(), request_buffer_.end(),
                         [qubit] (const auto& req) { return req.qubit == qubit; });
-}
-
-std::vector<MEMORY_MODULE::request_type>::iterator
-MEMORY_MODULE::find_request_for_bank(size_t idx, std::vector<request_type>::iterator search_from_req_it)
-{
-    auto target_b_it = banks_.begin() + idx;
-    return std::find_if(search_from_req_it, request_buffer_.end(),
-                        [this, target_b_it] (const auto& req)
-                        {
-                            auto [found, b_it, q_it] = this->find_qubit(req.qubit);
-                            return found && (b_it == target_b_it);
-                        });
 }
 
 ////////////////////////////////////////////////////////////

@@ -65,11 +65,6 @@ public:
         uint64_t   cycles_until_done{std::numeric_limits<uint64_t>::max()};
     };
 
-    // first: whether or not a victim was found
-    // second: the victim
-    // third: the time taken for the access (ns)
-    using memory_route_result_type = std::tuple<bool, QUBIT, uint64_t>;
-
     // statistics:
     uint64_t s_evictions_no_uses_{0};
     uint64_t s_evictions_prefetch_no_uses_{0};
@@ -113,13 +108,9 @@ public:
             std::vector<T_FACTORY*>,
             std::vector<MEMORY_MODULE*>);
 
-    // returns how long it takes to complete the memory access
-    // `extra_mem_access_latency_post_routing_ns` is used to set qubit availability times for the qubits involved in the memory access
-    memory_route_result_type route_memory_access(size_t mem_patch_idx,
-                                                QUBIT incoming_qubit,
-                                                bool is_prefetch,
-                                                QUBIT victim,
-                                                uint64_t extra_mem_access_latency_post_routing_ns);
+    // returns how long it takes to complete the memory access (ns)
+    uint64_t route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module_cycle_free);
+    void update_state_after_memory_access(QUBIT loaded, QUBIT stored, uint64_t cycle_done, bool is_prefetch);
 
     void OP_init() override;
 
@@ -179,7 +170,6 @@ void update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_typ
                                             uint64_t cmp_cycle_free_bulk, 
                                             uint64_t cmp_cycle_free_endpoints);
 
-bool is_software_instruction(INSTRUCTION::TYPE);
 bool is_t_like_instruction(INSTRUCTION::TYPE);
 
 ////////////////////////////////////////////////////////////

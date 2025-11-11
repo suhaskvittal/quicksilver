@@ -91,7 +91,9 @@ T_FACTORY::consume_state(size_t num_consumed)
 
     bool buffer_was_full = (buffer_occu_ >= buffer_capacity_);
     buffer_occu_ -= num_consumed;
-    OP_add_event_using_cycles(FACTORY_EVENT_TYPE::STEP_PRODUCTION, 1);
+
+    if (buffer_was_full && buffer_occu_ < buffer_capacity_)
+        OP_add_event_using_cycles(FACTORY_EVENT_TYPE::STEP_PRODUCTION, 1);
 }
 
 ////////////////////////////////////////////////////////////

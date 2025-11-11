@@ -67,10 +67,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
         for (size_t i = 0; i < pending_inst_buffer_.size(); i++)
         {
             inst_ptr inst = pending_inst_buffer_[i];
-            bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
-                                    || inst->type == INSTRUCTION::TYPE::Y
-                                    || inst->type == INSTRUCTION::TYPE::Z
-                                    || inst->type == INSTRUCTION::TYPE::SWAP;
+            bool is_software_inst = is_software_instruction(inst->type);
             bool is_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
                                         [this, inst] (qubit_type q) { return this->inst_windows_[q].front() == inst; });
             bool all_qubits_are_avail = std::all_of(inst->qubits.begin(), inst->qubits.end(),
@@ -121,7 +118,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
                 size_t num_mem{0}, num_mprefetch{0};
                 for (auto* inst : outgoing_inst_buffer_)
                 {
-                    num_mem += (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                    num_mem += is_coupled_memory_instruction(inst->type);
                     num_mprefetch += (inst->type == INSTRUCTION::TYPE::MPREFETCH);
                 }
 
@@ -192,7 +189,7 @@ MEMOPT::drain_outgoing_buffer(generic_strm_type& ostrm, std::vector<inst_ptr>::i
                     auto enc = inst->serialize();
                     enc.read_write([&ostrm] (void* buf, size_t size) { return generic_strm_write(ostrm, buf, size); });
 
-                    this->s_memory_instructions_added += (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                    this->s_memory_instructions_added += is_coupled_memory_instruction(inst->type);
                     this->s_memory_prefetches_added += (inst->type == INSTRUCTION::TYPE::MPREFETCH);
 
                     delete inst;
@@ -256,7 +253,7 @@ read_instructions(generic_strm_type& istrm, inst_schedule_type& inst_windows, si
         enc.read_write([&istrm] (void* buf, size_t size) { return generic_strm_read(istrm, buf, size); });
         std::shared_ptr<INSTRUCTION> inst{new INSTRUCTION(std::move(enc))};
 
-        if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
+        if (is_coupled_memory_instruction(inst->type))
         {
             // make sure that the qubits are in the correct places:
             if (check_memory_access_validity)
@@ -286,10 +283,7 @@ read_instructions(generic_strm_type& istrm, inst_schedule_type& inst_windows, si
             continue;
         }
 
-        bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
-                                || inst->type == INSTRUCTION::TYPE::Y
-                                || inst->type == INSTRUCTION::TYPE::Z
-                                || inst->type == INSTRUCTION::TYPE::SWAP;
+        bool is_software_inst = is_software_instruction(inst->type);
 
         if (check_memory_access_validity && !is_software_inst)
         {
