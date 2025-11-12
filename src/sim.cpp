@@ -125,8 +125,12 @@ print_stats(std::ostream& out)
     uint64_t total_forwards = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
                                                     std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_forwards; });
-    double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
+    uint64_t total_mem_access_latency = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_total_memory_access_latency_in_compute_cycles; });
 
+    double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
+    double mean_mem_access_latency = _fpdiv(total_mem_access_latency, total_memory_requests);
 
     out << "MEMORY\n";
     print_stat_line(out, "ALL_REQUESTS", total_memory_requests);
@@ -134,6 +138,7 @@ print_stats(std::ostream& out)
     print_stat_line(out, "CACHED_STORES", total_cached_stores);
     print_stat_line(out, "LOADS_FROM_CACHE", total_loads_from_cache);
     print_stat_line(out, "REQUEST_FORWARDS", total_forwards);
+    print_stat_line(out, "MEAN_MEM_ACCESS_LATENCY", mean_mem_access_latency);
     print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
 
     size_t bin_size = GL_EPR->buffer_capacity_ < GL_EPR->s_occu_hist.size() 

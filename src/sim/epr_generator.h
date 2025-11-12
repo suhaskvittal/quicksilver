@@ -67,8 +67,7 @@ public:
     bool has_capacity() const           { return buffer_occu_ + cached_qubits_.size() < buffer_capacity_; }
 
     bool store_is_cacheable() const { return cached_qubits_.size() < max_cacheable_stores_
-                                                && has_capacity()
-                                                && buffer_occu_ > 2; }
+                                                && has_capacity(); }
 
     const std::unordered_set<QUBIT>& get_cached_qubits() const { return cached_qubits_; }
 protected:
