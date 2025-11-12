@@ -209,7 +209,29 @@ MEMOPT::emit_memory_instructions()
     if (working_set_.size() != cmp_count_)
         throw std::runtime_error("working set size does not match number of qubits");
 
-    outgoing_inst_buffer_.insert(outgoing_inst_buffer_.end(), result.memory_instructions.begin(), result.memory_instructions.end());
+    outgoing_inst_buffer_.insert(outgoing_inst_buffer_.end(), 
+                                    result.memory_instructions.begin(), 
+                                    result.memory_instructions.end());
+    // update re-reference stats:
+    for (auto* inst : result.memory_instructions)
+    {
+        // a re-reference is a load after a store
+        auto ld = inst->qubits[0],
+             st = inst->qubits[1];
+
+        if (last_rref_.count(ld))
+        {
+            uint64_t rr  = s_emission_calls - last_rref_[ld];
+            s_total_rref += rr;
+            s_num_rref++;
+
+            size_t hist_idx = std::min(size_t{8}, static_cast<size_t>(rr)) - 1;
+            s_rref_histogram[hist_idx]++;
+        }
+
+        last_rref_[st] = s_emission_calls;
+    }
+
     s_unused_bandwidth += result.unused_bandwidth;
     s_emission_calls++;
 }

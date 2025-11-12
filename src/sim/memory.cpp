@@ -85,6 +85,25 @@ MEMORY_MODULE::find_uninitialized_qubit()
     return find_qubit(QUBIT{-1,-1});
 }
 
+std::vector<QUBIT>
+MEMORY_MODULE::get_all_stored_qubits() const
+{
+    std::vector<QUBIT> all_qubits;
+
+    for (const auto& bank : banks_)
+    {
+        for (const auto& qubit : bank.contents)
+        {
+            if (qubit.qubit_id >= 0)  // Valid qubit (not {-1,-1})
+            {
+                all_qubits.push_back(qubit);
+            }
+        }
+    }
+
+    return all_qubits;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -104,7 +123,7 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT vict
 
     // otherwise, create a new request:
     request_type req{inst, requested, victim, is_prefetch};
-    if (!serve_memory_request(req))
+    if (!request_buffer_.empty() || !serve_memory_request(req))
         request_buffer_.push_back(req);
 }
 
@@ -125,6 +144,23 @@ MEMORY_MODULE::dump_contents()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+MEMORY_MODULE::can_serve_request() const
+{
+    return cycle_free_ <= current_cycle();
+}
+
+bool
+MEMORY_MODULE::has_pending_store_for_qubit(QUBIT q) const
+{
+    auto it = std::find_if(request_buffer_.begin(), request_buffer_.end(),
+                            [q] (const auto& req) { return req.qubit == q && req.inst->type == INSTRUCTION::TYPE::DSTORE; });
+    return it != request_buffer_.end();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 MEMORY_MODULE::OP_init()
 {
@@ -138,6 +174,9 @@ MEMORY_MODULE::OP_init()
 void
 MEMORY_MODULE::OP_handle_event(event_type event)
 {
+    if (current_cycle() < cycle_free_ || request_buffer_.empty())
+        return;
+
 #if defined(MEMORY_VERBOSE)
     std::cout << "[ MEMORY patch = " << output_patch_idx_ << " ] request queue contents:\n";
     for (const auto& req : request_buffer_)
@@ -160,11 +199,14 @@ MEMORY_MODULE::OP_handle_event(event_type event)
 
     if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED || event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
+        /*
         auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
                                 [this] (const auto& req) 
                                 { 
                                     return req.inst->type == INSTRUCTION::TYPE::DLOAD && serve_memory_request(req);
                                 });
+                                */
+        auto it = request_buffer_.end();
 
         if (it == request_buffer_.end())
         {
@@ -187,28 +229,44 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     {
         std::cout << "[ MEMORY ] initiated memswap between " 
                         << req.qubit << " and " << req.victim
-                        << " @ cycle " << current_cycle() << "\n";
+                        << " @ cycle " << current_cycle() 
+                        << " (GL_CMP cycle = " << GL_CMP->current_cycle() << ")\n";
     }
     else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
     {
         std::cout << "[ MEMORY ] initiated decoupled load for " 
-                        << req.qubit << " @ cycle " << current_cycle() << "\n";
+                        << req.qubit << " @ cycle " << current_cycle() 
+                        << " (GL_CMP cycle = " << GL_CMP->current_cycle()
+                        << "\n";
     }
     else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
     {
         std::cout << "[ MEMORY ] initiated decoupled store for " 
-                        << req.qubit << " @ cycle " << current_cycle() << "\n";
+                        << req.qubit << " @ cycle " << current_cycle() 
+                        << " (GL_CMP cycle = " << GL_CMP->current_cycle()
+                        << "\n";
     }
 #endif
 
     // check if this channel is free:
     if (cycle_free_ > current_cycle())
+    {
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tchannel not free (cycle_free = " << cycle_free_ << "), retrying later\n";
+#endif
         return false;
+    }
 
     // if there aren't enough EPR pairs, then we also have to exit:
     const size_t epr_pairs_needed = is_coupled_memory_instruction(req.inst->type) ? 2 : 1;
     if (is_remote_module_ && epr_generator_->get_occupancy() < epr_pairs_needed)
+    {
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tnot enough EPR pairs (need " << epr_pairs_needed 
+            << ", have " << epr_generator_->get_occupancy() << "), retrying later\n";
+#endif
         return false;
+    }
 
     // validate that we are not getting a decoupled load/store on a non-remote module
     if (!is_remote_module_ && !is_coupled_memory_instruction(req.inst->type))
@@ -246,6 +304,9 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     else
         rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.qubit);
 
+    // just assume it can be prefetched
+    rotation_cycles = 0;
+
     // perform routing + memory access operations:
     uint64_t post_routing_cycles{rotation_cycles};
     if (is_coupled_memory_instruction(req.inst->type))
@@ -268,6 +329,14 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     uint64_t completion_time_ns = GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns;
     uint64_t mem_completion_cycle = convert_ns_to_cycles(completion_time_ns, OP_freq_khz),
              cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
+
+#if defined(MEMORY_VERBOSE)
+    std::cout << "[ MEMORY ] mem access for " << req.qubit << " will complete @ cycle = " << mem_completion_cycle
+                << " (cmp cycle = " << cmp_completion_cycle << ")\n"
+                << "\tpost_routing_cycles = " << post_routing_cycles
+                << ", access_cycles = " << convert_ns_to_cycles(access_time_ns, OP_freq_khz)
+                << "\n";
+#endif
     
     // update when bank is free
     cycle_free_ = mem_completion_cycle;
@@ -312,6 +381,9 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
             dstore_loaded_qubit = epr_generator_->free_decoupled_load();
 
         s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
+
+        size_t hist_idx = std::min(size_t{7}, epr_generator_->get_occupancy());
+        s_epr_occu_histogram[hist_idx]++;
     }
 
     // update qubit states:

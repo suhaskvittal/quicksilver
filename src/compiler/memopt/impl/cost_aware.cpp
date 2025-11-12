@@ -40,8 +40,6 @@ COST_AWARE::emit_memory_instructions(const ws_type& current_working_set, const i
     std::tie(new_working_set, ws_score, qubit_scores) = compute_best_working_set(entry_points);
 
     INSTRUCTION::TYPE inst_type = INSTRUCTION::TYPE::MSWAP;
-    if (num_scores > 12.0 && ws_score < 0.5*(tot_score/num_scores))
-        inst_type = INSTRUCTION::TYPE::MSWAP_D;
 
     num_scores += 1.0;
     tot_score += ws_score;

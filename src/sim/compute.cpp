@@ -568,59 +568,10 @@ COMPUTE::client_schedule(client_ptr& c)
         if (visited.count(inst) || inst->is_scheduled)
             continue;
 
-        if (GL_IMPL_DECOUPLED_LOAD_STORE 
-                && is_decouplable_memory_instruction(inst->type))
+        if (GL_IMPL_DECOUPLED_LOAD_STORE && is_decouplable_memory_instruction(inst->type))
         {
-            // check if `q` is the loaded qubit:
             if (inst->qubits[0] == qid)
-            {
-                // find memory module containing `q`:
-                auto module_it = find_memory_module_containing_qubit(q);
-                if (module_it == mem_modules_.end())
-                {
-                    std::cerr << "compute patches:\n";
-                    for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-                        std::cerr << "\t" << patches_[i].contents << "\n";
-                    throw std::runtime_error("decoupled load for inst `" + inst->to_string()  
-                            + " : qubit " + q.to_string() + " not found in any memory module");
-                }
-
-                MEMORY_MODULE* m = *module_it;
-                EPR_GENERATOR* eg = m->get_epr_generator();
-                if (eg->can_store_decoupled_load() && eg->get_occupancy() >= eg->buffer_capacity_/2)
-                {
-                    qubit_type vid = inst->qubits[1];
-
-                    // create a new decoupled load instruction:
-                    inst_ptr dload = new INSTRUCTION(INSTRUCTION::TYPE::DLOAD, {qid});
-
-                    // transform the other instruction (on the stored qubit) into a decoupled store:
-                    QUBIT victim{c->id, vid};
-                    auto& v_win = inst_windows_[victim];
-                    inst_ptr dstore = new INSTRUCTION(INSTRUCTION::TYPE::DSTORE, {vid});
-
-                    dload->inst_number = inst->inst_number;
-                    dstore->inst_number = inst->inst_number;
-                    
-                    // replace instances of `inst`
-                    win[0] = dload;
-                    auto v_it = std::find(v_win.begin(), v_win.end(), inst);
-                    *v_it = dstore;
-
-#if defined(COMPUTE_VERBOSE)
-                    std::cout << "\tclient " << static_cast<int>(c->id) 
-                                << " instruction \"" << *inst << "\" transformed into decoupled load/store pair"
-                                << " -- dload = " << *dload << ", dstore = " << *dstore << "\n";
-#endif
-
-                    // delete `inst`:
-                    delete inst;
-                    inst = dload;
-
-                    // indicate that this is an inflight decoupled load:
-                    eg->mark_inflight_decoupled_load();
-                }
-            }
+                inst = try_decoupling_load_store(inst, c->id);
         }
 
         visited.insert(inst);
@@ -722,7 +673,7 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
             else
                 c->s_unrolled_inst_done++;
         }
-        else if (inst->type == INSTRUCTION::TYPE::MSWAP)
+        else if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MSWAP_D)
         {
             c->s_mswap_count++;
         }
@@ -1243,6 +1194,7 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
         (*module_it)->initiate_memory_access(inst, requested, QUBIT{-1,-1}, false);
     else
         (*module_it)->initiate_memory_access(inst, victim, QUBIT{-1,-1}, false);
+
     result.is_memory_stall = true;
     return result;
 }
@@ -1340,6 +1292,13 @@ COMPUTE::find_memory_module_containing_qubit(QUBIT q)
                         [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
 }
 
+std::vector<MEMORY_MODULE*>::iterator
+COMPUTE::find_memory_module_with_pending_store_for_qubit(QUBIT q)
+{
+    return std::find_if(mem_modules_.begin(), mem_modules_.end(),
+                        [q] (MEMORY_MODULE* m) { return m->has_pending_store_for_qubit(q); });
+}
+
 std::vector<PATCH>::iterator
 COMPUTE::find_epr_generator_containing_qubit(QUBIT q)
 {
@@ -1351,6 +1310,150 @@ COMPUTE::find_epr_generator_containing_qubit(QUBIT q)
     }
 
     return patches_.end();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE::inst_ptr
+COMPUTE::try_decoupling_load_store(inst_ptr inst, int8_t client_id)
+{
+    qubit_type ld_id = inst->qubits[0],
+                st_id = inst->qubits[1];
+
+    QUBIT ld{client_id, ld_id};
+    QUBIT st{client_id, st_id};
+
+    // if instruction is already ready, then no point:
+    bool is_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
+                                [this, client_id, inst] (qubit_type qid) 
+                                {
+                                    QUBIT q{client_id, qid};
+                                    const auto& w = this->inst_windows_[q];
+                                    bool at_head = (!w.empty() && w.front() == inst);
+                                    return at_head;
+                                });
+    if (is_ready)
+        return inst;
+
+    auto& ld_win = inst_windows_[ld];
+    auto& st_win = inst_windows_[st];
+
+    // if we cannot immediately execute the load, then no point:
+    if (ld_win[0] != inst)
+        return inst;
+    
+    // find memory module containing `ld_id`:
+    auto module_it = find_memory_module_containing_qubit(ld);
+    if (module_it == mem_modules_.end())
+    {
+        std::cerr << "compute patches:\n";
+        for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+            std::cerr << "\t" << patches_[i].contents << "\n";
+        throw std::runtime_error("decoupled load for inst `" + inst->to_string()  
+                + " : qubit " + ld.to_string() + " not found in any memory module");
+    }
+
+    MEMORY_MODULE* m = *module_it;
+    EPR_GENERATOR* eg = m->get_epr_generator();
+    if (m->can_serve_request()
+            && !m->has_pending_requests()
+            && eg->can_store_decoupled_load() 
+            && eg->get_occupancy() >= eg->buffer_capacity_/2)
+    {
+        inst_ptr dload = new INSTRUCTION(INSTRUCTION::TYPE::DLOAD, {ld_id});
+        inst_ptr dstore = new INSTRUCTION(INSTRUCTION::TYPE::DSTORE, {st_id});
+
+        dload->inst_number = inst->inst_number;
+        dstore->inst_number = inst->inst_number;
+
+        // update `ld_win`
+        ld_win[0] = dload;
+
+        // update `st_win`
+        auto w_it = std::find(st_win.begin(), st_win.end(), inst);
+        *w_it = dstore;
+
+#if defined(COMPUTE_VERBOSE)
+        std::cout << "\tclient " << static_cast<int>(client_id) 
+                    << " instruction \"" << *inst << "\" transformed into decoupled load/store pair"
+                    << " -- dload = " << *dload << ", dstore = " << *dstore << "\n";
+#endif
+
+        // delete `inst`:
+        delete inst;
+
+        // indicate that this is an inflight decoupled load:
+        eg->mark_inflight_decoupled_load();
+
+        return dload;
+    }
+    else
+    {
+        return inst;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE::check_for_duplicates() const
+{
+    std::unordered_set<QUBIT> seen_qubits;
+
+    // Check compute patches
+    for (const auto& patch : patches_)
+    {
+        if (patch.contents.qubit_id >= 0)  // Valid qubit (not {-1,-1})
+        {
+            if (seen_qubits.find(patch.contents) != seen_qubits.end())
+            {
+                std::cerr << "DUPLICATE QUBIT FOUND: " << patch.contents
+                         << " appears in multiple compute patches" << std::endl;
+                return true;
+            }
+            seen_qubits.insert(patch.contents);
+        }
+    }
+
+    // Check memory banks and decoupled loads
+    for (const auto* mem_module : mem_modules_)
+    {
+        // Check memory banks
+        std::vector<QUBIT> memory_qubits = mem_module->get_all_stored_qubits();
+        for (const auto& qubit : memory_qubits)
+        {
+            if (seen_qubits.find(qubit) != seen_qubits.end())
+            {
+                std::cerr << "DUPLICATE QUBIT FOUND: " << qubit
+                         << " appears in both compute patches and memory banks, or multiple memory locations" << std::endl;
+                return true;
+            }
+            seen_qubits.insert(qubit);
+        }
+
+        // Check decoupled loads in EPR generator
+        if (mem_module->get_epr_generator() != nullptr)
+        {
+            const auto& decoupled_loads = mem_module->get_epr_generator()->get_decoupled_loads();
+            for (const auto& qubit : decoupled_loads)
+            {
+                if (qubit.qubit_id >= 0)  // Valid qubit (not {-1,-1})
+                {
+                    if (seen_qubits.find(qubit) != seen_qubits.end())
+                    {
+                        std::cerr << "DUPLICATE QUBIT FOUND: " << qubit
+                                 << " appears in both compute/memory and decoupled loads" << std::endl;
+                        return true;
+                    }
+                    seen_qubits.insert(qubit);
+                }
+            }
+        }
+    }
+
+    return false;  // No duplicates found
 }
 
 ////////////////////////////////////////////////////////////
@@ -1372,8 +1475,6 @@ update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_type>& p
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-
 
 bool
 is_t_like_instruction(INSTRUCTION::TYPE type)

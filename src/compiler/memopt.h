@@ -46,7 +46,11 @@ public:
     uint64_t s_unused_bandwidth{0};
     uint64_t s_emission_calls{0};
 
+    uint64_t s_total_rref{0};
+    uint64_t s_num_rref{0};
     uint64_t s_timestep{0};
+
+    std::array<uint64_t, 8> s_rref_histogram{};
 
     uint32_t num_qubits_;
     const size_t cmp_count_;
@@ -62,6 +66,9 @@ private:
 
     // memory instruction emit implementation:
     std::unique_ptr<memopt::IMPL_BASE> emit_impl_;
+
+    // for tracking re-references:
+    std::unordered_map<qubit_type, uint64_t> last_rref_;
 
     const uint64_t print_progress_freq_;
 public:

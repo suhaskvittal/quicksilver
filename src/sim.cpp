@@ -102,17 +102,22 @@ print_stats(std::ostream& out)
     // print memory stats:
     
     // accumulate any client-level stats:
-    uint64_t total_memory_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+    uint64_t total_memory_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_memory_requests; });
-    uint64_t total_memory_prefetch_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+    uint64_t total_memory_prefetch_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_memory_prefetch_requests; });
-    uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+    uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), 
+                                                    uint64_t{0}, std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request; });
     double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
 
-    uint64_t total_decoupled_loads = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+    uint64_t total_decoupled_loads = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_decoupled_loads; });
-    uint64_t total_decoupled_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, std::plus<uint64_t>(),
+    uint64_t total_decoupled_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_decoupled_stores; });
 
     out << "MEMORY\n";
@@ -121,6 +126,18 @@ print_stats(std::ostream& out)
     print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
     print_stat_line(out, "DECOUPLED_LOADS", total_decoupled_loads);
     print_stat_line(out, "DECOUPLED_STORES", total_decoupled_stores);
+
+    std::array<uint64_t, 8> total_epr_occu_histogram{};
+    for (size_t i = 0; i < 8; i++)
+    {
+        total_epr_occu_histogram[i] = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
+                                                    [i] (auto* m) { return m->s_epr_occu_histogram[i]; });
+    }
+
+    out << "EPR_BUFFER_OCCU_HISTOGRAM\n";
+    for (size_t i = 0; i < 8; i++)
+        print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(i), total_epr_occu_histogram[i], false);
 }
 
 ////////////////////////////////////////////////////////////

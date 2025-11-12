@@ -118,9 +118,12 @@ public:
 
     void dump_deadlock_info();
 
-    void reassign_decoupled_store(INSTRUCTION*, QUBIT);  // this occurs when there are no locations to 
+    void reassign_decoupled_store(INSTRUCTION*, QUBIT);  // this occurs when there are no locations to
                                                          // perform a decoupled store
     bool has_any_empty_program_patches() const;
+
+    // Check for duplicate qubits across compute patches, memory banks, and decoupled loads
+    bool check_for_duplicates() const;
 
     // exposing some data to user:
     const std::vector<client_ptr>& get_clients() const { return clients_; }
@@ -168,7 +171,11 @@ private:
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
 
+    std::vector<MEMORY_MODULE*>::iterator find_memory_module_with_pending_store_for_qubit(QUBIT);
+
     std::vector<PATCH>::iterator find_epr_generator_containing_qubit(QUBIT);
+
+    inst_ptr try_decoupling_load_store(inst_ptr, int8_t client_id);
 };
 
 ////////////////////////////////////////////////////////////
