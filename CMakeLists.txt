@@ -179,3 +179,15 @@ target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
+
+# program analysis and reporting tool:
+add_executable(qs_report main/qs_report.cpp
+                src/argparse.cpp
+                src/generic_io.cpp
+                src/instruction.cpp)
+target_compile_options(qs_report PRIVATE ${COMPILE_OPTIONS})
+target_include_directories(qs_report PRIVATE "src")
+target_link_libraries(qs_report PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
+
+###################################################
+###################################################

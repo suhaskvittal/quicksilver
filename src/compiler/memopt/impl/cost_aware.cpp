@@ -149,7 +149,7 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
     int64_t best_compute_value{0};
     int64_t best_memory_cost{0};
     double best_score{-1.0};  // higher score is better
-    for (size_t k = cmp_count; k >= cmp_count/2; k--)
+    for (size_t k = cmp_count; k > 0; k--)
     {
         for (const auto* x : nodes_by_ws_size[k-1])
         {
@@ -196,6 +196,9 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
         std::cout << q << " ";
     std::cout << ", score = " << best_score << ", compute value = " << best_compute_value << ", memory cost = " << best_memory_cost << "\n";
     */
+
+    if (best_working_set.empty())
+        throw std::runtime_error("best working set is empty");
 
     std::vector<double> qubit_scores(num_qubits, 0.0);
     return working_set_search_result_type{best_working_set, qubit_scores};
