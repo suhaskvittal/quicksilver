@@ -27,8 +27,8 @@ MEMOPT::MEMOPT(size_t cmp_count, EMIT_IMPL_ID emit_impl_id, uint64_t print_progr
     // initialize the emit implementation:
     if (emit_impl_id == EMIT_IMPL_ID::VISZLAI)
         emit_impl_ = std::make_unique<memopt::impl::VISZLAI>(cmp_count);
-    else if (emit_impl_id == EMIT_IMPL_ID::COST_AWARE)
-        emit_impl_ = std::make_unique<memopt::impl::COST_AWARE>(cmp_count);
+    else if (emit_impl_id == EMIT_IMPL_ID::HINT_SIMPLE || emit_impl_id == EMIT_IMPL_ID::HINT_DISJOINT)
+        emit_impl_ = std::make_unique<memopt::impl::COST_AWARE>(cmp_count, emit_impl_id == EMIT_IMPL_ID::HINT_SIMPLE);
     else
         throw std::runtime_error("invalid emit implementation");
 }
@@ -67,10 +67,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
         for (size_t i = 0; i < pending_inst_buffer_.size(); i++)
         {
             inst_ptr inst = pending_inst_buffer_[i];
-            bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
-                                    || inst->type == INSTRUCTION::TYPE::Y
-                                    || inst->type == INSTRUCTION::TYPE::Z
-                                    || inst->type == INSTRUCTION::TYPE::SWAP;
+            bool is_software_inst = is_software_instruction(inst->type);
             bool is_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
                                         [this, inst] (qubit_type q) { return this->inst_windows_[q].front() == inst; });
             bool all_qubits_are_avail = std::all_of(inst->qubits.begin(), inst->qubits.end(),
@@ -121,7 +118,7 @@ MEMOPT::run(generic_strm_type& istrm, generic_strm_type& ostrm, uint64_t stop_af
                 size_t num_mem{0}, num_mprefetch{0};
                 for (auto* inst : outgoing_inst_buffer_)
                 {
-                    num_mem += (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                    num_mem += is_memory_instruction(inst->type);
                     num_mprefetch += (inst->type == INSTRUCTION::TYPE::MPREFETCH);
                 }
 
@@ -192,7 +189,7 @@ MEMOPT::drain_outgoing_buffer(generic_strm_type& ostrm, std::vector<inst_ptr>::i
                     auto enc = inst->serialize();
                     enc.read_write([&ostrm] (void* buf, size_t size) { return generic_strm_write(ostrm, buf, size); });
 
-                    this->s_memory_instructions_added += (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH);
+                    this->s_memory_instructions_added += is_memory_instruction(inst->type);
                     this->s_memory_prefetches_added += (inst->type == INSTRUCTION::TYPE::MPREFETCH);
 
                     delete inst;
@@ -212,7 +209,34 @@ MEMOPT::emit_memory_instructions()
     if (working_set_.size() != cmp_count_)
         throw std::runtime_error("working set size does not match number of qubits");
 
-    outgoing_inst_buffer_.insert(outgoing_inst_buffer_.end(), result.memory_instructions.begin(), result.memory_instructions.end());
+    outgoing_inst_buffer_.insert(outgoing_inst_buffer_.end(), 
+                                    result.memory_instructions.begin(), 
+                                    result.memory_instructions.end());
+    // update re-reference stats:
+    for (auto* inst : result.memory_instructions)
+    {
+        // a re-reference is a load after a store
+        auto ld = inst->qubits[0],
+             st = inst->qubits[1];
+
+        if (last_rref_.count(ld))
+        {
+            uint64_t rr  = s_emission_calls - last_rref_[ld];
+            s_total_rref += rr;
+            s_num_rref++;
+
+            size_t hist_idx = std::min(size_t{8}, static_cast<size_t>(rr)) - 1;
+            s_rref_histogram[hist_idx]++;
+
+            // update memswap to indicate a re-reference:
+            if (rr <= 4)
+                last_storing_inst_[ld]->type = INSTRUCTION::TYPE::MSWAP_C;
+        }
+
+        last_rref_[st] = s_emission_calls;
+        last_storing_inst_[st] = inst;
+    }
+
     s_unused_bandwidth += result.unused_bandwidth;
     s_emission_calls++;
 }
@@ -256,7 +280,7 @@ read_instructions(generic_strm_type& istrm, inst_schedule_type& inst_windows, si
         enc.read_write([&istrm] (void* buf, size_t size) { return generic_strm_read(istrm, buf, size); });
         std::shared_ptr<INSTRUCTION> inst{new INSTRUCTION(std::move(enc))};
 
-        if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MPREFETCH)
+        if (is_memory_instruction(inst->type))
         {
             // make sure that the qubits are in the correct places:
             if (check_memory_access_validity)
@@ -286,10 +310,7 @@ read_instructions(generic_strm_type& istrm, inst_schedule_type& inst_windows, si
             continue;
         }
 
-        bool is_software_inst = inst->type == INSTRUCTION::TYPE::X 
-                                || inst->type == INSTRUCTION::TYPE::Y
-                                || inst->type == INSTRUCTION::TYPE::Z
-                                || inst->type == INSTRUCTION::TYPE::SWAP;
+        bool is_software_inst = is_software_instruction(inst->type);
 
         if (check_memory_access_validity && !is_software_inst)
         {

@@ -16,7 +16,7 @@ MEM_BB_NUM_MODULES = 2
 ##############################################
 
 def get_epr_generation_frequency(mem_round_ns: int):
-    return 4 * MEM_BB_ROUND_NS / mem_round_ns
+    return 18 * MEM_BB_ROUND_NS / mem_round_ns # 2 memory cycles
 
 ##############################################
 ##############################################
@@ -53,8 +53,14 @@ def stats_file_path(workload: int, policy: str, cmp_count: int) -> str:
 
 policy = argv[1]
 cmp_count = int(argv[2])
+
 mem_slowdown = int(argv[3])
 compiler_policy = argv[4]
+
+# other knobs:
+epr_buffer_capacity = int(argv[5])
+epr_generation_rate = float(argv[6])
+other_flags = ' '.join(argv[7:])
 
 os.system(f'mkdir -p out/dms/simulation_results/{policy}')
 
@@ -71,7 +77,8 @@ for (i,w) in enumerate(WORKLOADS):
             + f' --mem-bb-num-modules {MEM_BB_NUM_MODULES}'\
             + f' --mem-bb-round-ns {mem_bb_round_ns}'\
             + f' --mem-is-remote'\
-            + f' --mem-epr-generation-frequency {mem_epr_generation_frequency_khz} &> {stats_output_path}'
+            + f' --mem-epr-buffer-capacity {epr_buffer_capacity}'\
+            + f' --mem-epr-generation-frequency {epr_generation_rate} {other_flags} &> {stats_output_path}'
     print(cmd)
 
 ##############################################

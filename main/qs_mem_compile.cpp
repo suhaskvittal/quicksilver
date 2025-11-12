@@ -78,6 +78,11 @@ main(int argc, char** argv)
 
     double compute_intensity = static_cast<double>(compiler.s_unrolled_inst_done) 
                                     / static_cast<double>(compiler.s_memory_instructions_added);
+    double mean_rref_interval = static_cast<double>(compiler.s_total_rref) / static_cast<double>(compiler.s_num_rref);
+
+    uint64_t near_rref = std::reduce(compiler.s_rref_histogram.begin(), 
+                                        compiler.s_rref_histogram.begin()+4, 
+                                        uint64_t{0});
 
     print_stat_line(std::cout, "INST_DONE", compiler.s_inst_done);
     print_stat_line(std::cout, "UNROLLED_INST_DONE", compiler.s_unrolled_inst_done);
@@ -86,8 +91,17 @@ main(int argc, char** argv)
     print_stat_line(std::cout, "EMISSION_CALLS", compiler.s_emission_calls);
     print_stat_line(std::cout, "TOTAL_TIMESTEPS", compiler.s_timestep);
 
-    print_stat_line(std::cout, "COMPUTE_INTENSITY", compute_intensity);
     print_stat_line(std::cout, "COMPILE_TIME", compile_time_seconds);
+    print_stat_line(std::cout, "COMPUTE_INTENSITY", compute_intensity);
+
+    print_stat_line(std::cout, "MEAN_RREF_INTERVAL", mean_rref_interval);
+    print_stat_line(std::cout, "NEAR_IMMEDIATE_RREF", near_rref);
+
+    std::cout << "RREF_HISTOGRAM\n";
+    for (size_t i = 0; i < compiler.s_rref_histogram.size(); i++)
+    {
+        print_stat_line(std::cout, "\tRREF=" + std::to_string(i+1), compiler.s_rref_histogram[i]);
+    }
     
     // validate schedule:
     if (validate)

@@ -40,13 +40,21 @@ public:
     using IMPL_BASE::result_type;
     using IMPL_BASE::inst_window_type;
     using IMPL_BASE::inst_window_map;
+
+    const bool use_simple_version;
+private:
+    double tot_score{0.0};
+    double num_scores{0.0};
 public:
-    COST_AWARE(size_t cmp_count) : IMPL_BASE(cmp_count) {}
+    COST_AWARE(size_t cmp_count, bool _use_simple_version=false) 
+        : IMPL_BASE(cmp_count), use_simple_version(_use_simple_version) 
+    {}
 
     result_type emit_memory_instructions(const ws_type& current_working_set, const inst_array& pending_inst, 
                                         const inst_window_map& inst_windows) override;
 private:
-    using working_set_search_result_type = std::pair<ws_type, std::vector<double>>;
+    // working set, compute intensity, qubit scores
+    using working_set_search_result_type = std::tuple<ws_type, double, std::vector<double>>;
 
     void update_dp_tree(std::vector<WORKING_SET_TREE_NODE*>& entry_points, inst_ptr inst);
     working_set_search_result_type compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& entry_points);

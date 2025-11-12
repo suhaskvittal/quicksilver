@@ -40,10 +40,16 @@ public:
 public:
     IMPL_BASE(size_t cmp_count);
 
-    virtual result_type emit_memory_instructions(const ws_type& current_working_set, const inst_array& pending_inst, const inst_window_map& inst_windows) =0;
+    virtual result_type emit_memory_instructions(
+                            const ws_type& current_working_set, 
+                            const inst_array& pending_inst, 
+                            const inst_window_map& inst_windows) =0;
 protected:
     // a lower score means the qubit should be evicted
-    result_type transform_working_set_into(const ws_type& curr, const ws_type& target, const std::vector<double>& qubit_score);
+    result_type transform_working_set_into(const ws_type& curr, 
+                                            const ws_type& target, 
+                                            const std::vector<double>& qubit_score,
+                                            INSTRUCTION::TYPE inst_type=INSTRUCTION::TYPE::MSWAP);
 };
 
 ////////////////////////////////////////////////////////////

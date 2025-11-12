@@ -65,14 +65,11 @@ public:
         uint64_t   cycles_until_done{std::numeric_limits<uint64_t>::max()};
     };
 
-    // first: whether or not a victim was found
-    // second: the victim
-    // third: the time taken for the access (ns)
-    using memory_route_result_type = std::tuple<bool, QUBIT, uint64_t>;
-
     // statistics:
-    uint64_t s_evictions_no_uses_{0};
-    uint64_t s_evictions_prefetch_no_uses_{0};
+    uint64_t s_evictions_no_uses{0};
+    uint64_t s_evictions_prefetch_no_uses{0};
+
+    uint64_t s_operations_with_decoupled_loads{0};
 
     const size_t target_t_fact_level_;
     const size_t num_rows_;
@@ -113,17 +110,20 @@ public:
             std::vector<T_FACTORY*>,
             std::vector<MEMORY_MODULE*>);
 
-    // returns how long it takes to complete the memory access
-    // `extra_mem_access_latency_post_routing_ns` is used to set qubit availability times for the qubits involved in the memory access
-    memory_route_result_type route_memory_access(size_t mem_patch_idx,
-                                                QUBIT incoming_qubit,
-                                                bool is_prefetch,
-                                                QUBIT victim,
-                                                uint64_t extra_mem_access_latency_post_routing_ns);
+    // returns how long it takes to complete the memory access (ns)
+    uint64_t route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module_cycle_free);
+    void update_state_after_memory_access(QUBIT loaded, QUBIT stored, uint64_t cycle_done, bool is_prefetch);
 
     void OP_init() override;
 
     void dump_deadlock_info();
+
+    void reassign_decoupled_store(INSTRUCTION*, QUBIT);  // this occurs when there are no locations to
+                                                         // perform a decoupled store
+    bool has_any_empty_program_patches() const;
+
+    // Check for duplicate qubits across compute patches, memory banks, and decoupled loads
+    bool check_for_duplicates() const;
 
     // exposing some data to user:
     const std::vector<client_ptr>& get_clients() const { return clients_; }
@@ -161,7 +161,7 @@ private:
     exec_result_type do_rz_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     exec_result_type do_ccx_gate(client_ptr&, inst_ptr, std::vector<PATCH*>);
     
-    exec_result_type do_mswap_or_mprefetch(client_ptr&, inst_ptr);
+    exec_result_type do_memory_instruction(client_ptr&, inst_ptr);
     
     // retries the execution of instructions in the given buffer provided the appropriate resources are available
     void retry_memory_stalled_instructions(COMPUTE_EVENT_INFO);
@@ -179,7 +179,6 @@ void update_free_times_along_routing_path(std::vector<ROUTING_COMPONENT::ptr_typ
                                             uint64_t cmp_cycle_free_bulk, 
                                             uint64_t cmp_cycle_free_endpoints);
 
-bool is_software_instruction(INSTRUCTION::TYPE);
 bool is_t_like_instruction(INSTRUCTION::TYPE);
 
 ////////////////////////////////////////////////////////////

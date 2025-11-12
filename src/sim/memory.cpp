@@ -14,6 +14,24 @@ namespace sim
 {
 
 extern COMPUTE* GL_CMP;
+extern EPR_GENERATOR* GL_EPR;
+
+extern bool GL_IMPL_CACHEABLE_STORES;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint64_t
+MEMORY_MODULE::bank_type::rotate_to_location_and_store(std::vector<QUBIT>::iterator target_it, QUBIT stored)
+{
+    uint64_t left_rotation_cycles = std::distance(contents.begin(), target_it),
+             right_rotation_cycles = std::distance(target_it, contents.end());
+    uint64_t rotation_cycles = std::min(left_rotation_cycles, right_rotation_cycles);
+
+    *target_it = stored;
+    std::rotate(contents.begin(), target_it, contents.end());
+    return rotation_cycles;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -29,25 +47,13 @@ MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
     capacity_per_bank_(capacity_per_bank),
     banks_(num_banks, bank_type(capacity_per_bank)),
     is_remote_module_(is_remote_module)
-{
-    request_buffer_.reserve(128);
-
-    // Create EPR generator for remote modules
-    if (is_remote_module_)
-    {
-        // Convert mean generation cycle time to frequency for EPR_GENERATOR
-        double epr_freq_khz = freq_khz / mean_epr_generation_cycle_time;
-        epr_generator_ = new EPR_GENERATOR(epr_freq_khz, this, epr_buffer_capacity);
-    }
-}
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 MEMORY_MODULE::~MEMORY_MODULE()
 {
-    if (epr_generator_ != nullptr)
-        delete epr_generator_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -72,6 +78,25 @@ MEMORY_MODULE::find_uninitialized_qubit()
     return find_qubit(QUBIT{-1,-1});
 }
 
+std::vector<QUBIT>
+MEMORY_MODULE::get_all_stored_qubits() const
+{
+    std::vector<QUBIT> all_qubits;
+
+    for (const auto& bank : banks_)
+    {
+        for (const auto& qubit : bank.contents)
+        {
+            if (qubit.qubit_id >= 0)  // Valid qubit (not {-1,-1})
+            {
+                all_qubits.push_back(qubit);
+            }
+        }
+    }
+
+    return all_qubits;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -83,9 +108,7 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT vict
     auto req_it = find_request_for_qubit(requested);
     if (req_it != request_buffer_.end())
     {
-        s_num_prefetch_promoted_to_demand[requested.client_id] += (req_it->is_prefetch && !is_prefetch);
-        req_it->is_prefetch &= is_prefetch;
-        return;
+        throw std::runtime_error("qubit " + requested.to_string() + " already has a pending request");
     }
 
     if (is_prefetch)
@@ -93,7 +116,7 @@ MEMORY_MODULE::initiate_memory_access(inst_ptr inst, QUBIT requested, QUBIT vict
 
     // otherwise, create a new request:
     request_type req{inst, requested, victim, is_prefetch};
-    if (!serve_memory_request(req))
+    if (!request_buffer_.empty() || !serve_memory_request(req))
         request_buffer_.push_back(req);
 }
 
@@ -114,11 +137,18 @@ MEMORY_MODULE::dump_contents()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+MEMORY_MODULE::can_serve_request() const
+{
+    return cycle_free_ <= current_cycle();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 MEMORY_MODULE::OP_init()
 {
-    if (is_remote_module_)
-        epr_generator_->OP_init();
 }
 
 ////////////////////////////////////////////////////////////
@@ -127,50 +157,40 @@ MEMORY_MODULE::OP_init()
 void
 MEMORY_MODULE::OP_handle_event(event_type event)
 {
+    if (current_cycle() < cycle_free_ || request_buffer_.empty())
+        return;
+
 #if defined(MEMORY_VERBOSE)
-    std::cout << "[ MEMORY ] request queue contents:\n";
+    std::cout << "[ MEMORY patch = " << output_patch_idx_ << " ] request queue contents:\n";
     for (const auto& req : request_buffer_)
     {
         auto [found, b_it, q_it] = this->find_qubit(req.qubit);
         size_t bank_idx = std::distance(banks_.begin(), b_it);
-        std::cout << "\t\t" << req.qubit << ", bank = " << bank_idx << "\n";
+        std::cout << "\t\t" << *req.inst << ", bank = " << bank_idx << "\n";
+    }
+
+    if (is_remote_module_)
+    {
+        std::cout << "\tEPR cached qubits:";
+        for (const auto& q : GL_EPR->get_cached_qubits())
+            std::cout << " " << q;
+        std::cout << ", epr buffer occu: " << GL_EPR->get_occupancy() 
+            << ", has capacity = " << GL_EPR->has_capacity()
+            << "\n";
     }
 #endif
 
-    if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED)
+    if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED || event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
-        size_t free_bank_idx = event.info.bank_with_completed_request;
-        // find a request mapping to this bank and issue it
-        auto req_it = find_request_for_bank(free_bank_idx, request_buffer_.begin());
+        auto it = request_buffer_.end();
 
-#if defined(MEMORY_VERBOSE)
-        std::cout << "\tmemory access completed for bank " << free_bank_idx << ", cycle = " << current_cycle() << "\n";
-        if (req_it != request_buffer_.end())
-            std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
-        else
-            std::cout << "\tno request found for bank " << free_bank_idx << "\n";
-#endif
-
-        while (req_it != request_buffer_.end() && !serve_memory_request(*req_it))
+        if (it == request_buffer_.end())
         {
-#if defined(MEMORY_VERBOSE)
-            if (req_it != request_buffer_.end())
-                std::cout << "\tfound request for qubit " << req_it->qubit << "\n"; 
-            else
-                std::cout << "\tno request found for bank " << free_bank_idx << "\n";
-#endif
-            req_it = find_request_for_bank(free_bank_idx, req_it+1);
+            it = std::find_if(request_buffer_.begin(), request_buffer_.end(),
+                                [this] (const auto& req) { return serve_memory_request(req); });
         }
-
-        if (req_it != request_buffer_.end())
-            request_buffer_.erase(req_it);
-    }
-    else if (event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
-    {
-        // then, retry all pending requests
-        auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
-                                [this] (const auto& req) { return this->serve_memory_request(req); });
-        request_buffer_.erase(it, request_buffer_.end());
+        if (it != request_buffer_.end())
+            request_buffer_.erase(it);
     }
 }
 
@@ -180,94 +200,184 @@ MEMORY_MODULE::OP_handle_event(event_type event)
 bool
 MEMORY_MODULE::serve_memory_request(const request_type& req)
 {
-    constexpr uint64_t MSWAP_MEM_CYCLES = 3;  // note that these are memory cycles
-
 #if defined(MEMORY_VERBOSE)
-    std::cout << "[ MEMORY ] initiated memory access to qubit " << req.qubit << " cycle " << current_cycle() << "\n";
+    std::cout << "[ MEMORY ] initiated " << *req.inst 
+                    << " @ cycle " << current_cycle() 
+                    << " (GL_CMP cycle = " << GL_CMP->current_cycle() << ")\n";
 #endif
 
-    auto [found, b_it, q_it] = find_qubit(req.qubit);
-    if (!found)
-        throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
+    // both of these variables determine where the memory access goes
+    bool load_is_cached{false};
+    bool will_cache_store{false};
 
-    if (b_it->cycle_free > current_cycle())
-        return false;
+    if (GL_IMPL_CACHEABLE_STORES && is_remote_module_)
+    {
+        load_is_cached = GL_EPR->qubit_is_cached(req.qubit);
+        will_cache_store = is_cacheable_memory_instruction(req.inst->type) && GL_EPR->store_is_cacheable();
 
-    // if there aren't enough EPR pairs, then we also have to exit:
-    if (is_remote_module_ && epr_generator_->get_occupancy() < 2)
-        return false;
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tload_is_cached = " << load_is_cached 
+                    << ", will_cache_store = " << will_cache_store << "\n";
+#endif
 
-    [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
+        if (load_is_cached && will_cache_store)
+        {
+            cache_store_into_cached_load(req);
+            return true;
+        }
+    }
 
-    // first determine how long it will take to rotate the qubit to the head of the bank
-    uint64_t left_rotation_cycles = std::distance(b_it->contents.begin(), q_it);
-    uint64_t right_rotation_cycles = std::distance(q_it, b_it->contents.end());
-    uint64_t rotation_cycles = std::min(left_rotation_cycles, right_rotation_cycles);
-
-    uint64_t post_routing_cycles = rotation_cycles + MSWAP_MEM_CYCLES;
-    uint64_t post_routing_time_ns = convert_cycles_to_ns(post_routing_cycles, OP_freq_khz);
-
-    // perform the memory swap and convert to compute cycles
-    auto [victim_found, victim, access_time_ns] = GL_CMP->route_memory_access(
-                                                                output_patch_idx_,
-                                                                req.qubit,
-                                                                req.is_prefetch,
-                                                                req.victim,
-                                                                post_routing_time_ns);
-
-    // Since victim is now required, victim_found should always be true
-    // This check is kept for safety but should never fail
-    if (!victim_found)
+    // check if this channel is free:
+    if (cycle_free_ > current_cycle())
     {
 #if defined(MEMORY_VERBOSE)
-        std::cout << "\tfailed to find victim for qubit " << req.qubit << "\n";
+        std::cout << "\tchannel not free (cycle_free = " << cycle_free_ << "), retrying later\n";
 #endif
         return false;
     }
 
-    // update memory:
-    *q_it = victim;
-    // complete the rotation now that we have assigned `*q_it`
-    std::rotate(b_it->contents.begin(), q_it, b_it->contents.end());
+    // if there aren't enough EPR pairs, then we also have to exit:
+    size_t epr_pairs_needed{2 - load_is_cached - will_cache_store};
+    if (is_remote_module_ && GL_EPR->get_occupancy() < epr_pairs_needed)
+    {
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tnot enough EPR pairs (need " << epr_pairs_needed 
+            << ", have " << GL_EPR->get_occupancy() << "), retrying later\n";
+#endif
+        return false;
+    }
+
+
+    // first determine how long it will take to rotate the qubit to the head of the bank
+    uint64_t rotation_cycles;
+
+    // find appropriate memory locatino:
+    if (load_is_cached)
+    {
+        auto [found, b_it, q_it] = find_uninitialized_qubit();            
+        if (!found)
+        {
+            // we are foced to cache this store:
+            cache_store_into_cached_load(req);
+            return true;
+        }
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.victim);
+    }
+    else
+    {
+        auto [found, b_it, q_it] = find_qubit(req.qubit);
+        if (!found)
+            throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
+
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, will_cache_store ? QUBIT{-1,-1} : req.victim);
+    }
+
+    // perform routing + memory access operations:
+    uint64_t post_routing_cycles{rotation_cycles};
+    if (!load_is_cached)
+        post_routing_cycles += LOAD_CYCLES;
+    if (!will_cache_store)
+        post_routing_cycles += STORE_CYCLES;
+
+    uint64_t post_routing_time_ns = convert_cycles_to_ns(post_routing_cycles, OP_freq_khz);
+    uint64_t access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.victim, cycle_free_);
 
     // final completion time is `GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns`
     uint64_t completion_time_ns = GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns;
-    uint64_t mem_completion_cycle = convert_ns_to_cycles(completion_time_ns, OP_freq_khz);
-    uint64_t cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
+    uint64_t mem_completion_cycle = convert_ns_to_cycles(completion_time_ns, OP_freq_khz),
+             cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
+
+    if (load_is_cached)  // compute only cares about how long the load takes
+        cmp_completion_cycle = GL_CMP->current_cycle() + 2;
+
+#if defined(MEMORY_VERBOSE)
+    std::cout << "[ MEMORY ] mem access for " << req.qubit << " <--> " << req.victim 
+                << " will complete @ cycle = " << mem_completion_cycle
+                << " (cmp cycle = " << cmp_completion_cycle << ")\n"
+                << "\tpost_routing_cycles = " << post_routing_cycles
+                << ", access_cycles = " << convert_ns_to_cycles(access_time_ns, OP_freq_khz)
+                << "\n";
+#endif
     
     // update when bank is free
-    b_it->cycle_free = mem_completion_cycle;
+    cycle_free_ = mem_completion_cycle;
 
     // submit completion events
     MEMORY_EVENT_INFO mem_event_info;
-    mem_event_info.bank_with_completed_request = bank_idx;
-    OP_add_event_using_cycles(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, mem_completion_cycle - current_cycle() + 1, mem_event_info);
+    OP_add_event_using_cycles(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, 
+                                mem_completion_cycle - current_cycle() + 1,
+                                mem_event_info);
 
     COMPUTE_EVENT_INFO cmp_event_info;
     cmp_event_info.mem_accessed_qubit = req.qubit;
-    cmp_event_info.mem_victim_qubit = victim;
-    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, cmp_completion_cycle - GL_CMP->current_cycle(), cmp_event_info);
+    cmp_event_info.mem_victim_qubit = req.victim;
 
+    // `cmp_cycles_from_now` corresponds to the completion of the load
+    uint64_t cmp_cycles_from_now = (cmp_completion_cycle - GL_CMP->current_cycle());
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, cmp_cycles_from_now, cmp_event_info);
+
+    // update EPR generator:
     if (is_remote_module_)
     {
-        epr_generator_->consume_epr_pairs(2);
-        s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
+        GL_EPR->consume_epr_pairs(epr_pairs_needed);
+        if (will_cache_store)
+            GL_EPR->cache_qubit(req.victim);
+        else if (load_is_cached)
+            GL_EPR->remove_qubit(req.qubit);
+
+        size_t occu = GL_EPR->get_occupancy();
+        s_total_epr_buffer_occupancy_post_request += occu;
     }
+
+    // update qubit states:
+    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, cmp_completion_cycle, req.is_prefetch);
+
+    // update stats:
     s_memory_requests++;
     if (req.is_prefetch)
         s_memory_prefetch_requests++;
 
-#if defined(MEMORY_VERBOSE)
-    std::cout << "\tserved memory request for qubit " << req.qubit << " in bank " << bank_idx 
-                << "\n\t\tcompletion cycle = " << mem_access_done_cycle
-                << "\n\t\tvictim = " << victim
-                << "\n";
-    std::cout << "\tbank " << bank_idx << " state:\n";
-    for (size_t i = 0; i < banks_[bank_idx].contents.size(); i++)
-        std::cout << "\t\t" << i << " : " << banks_[bank_idx].contents[i] << "\n";
-#endif
+    if (load_is_cached)
+        s_loads_from_cache++;
+    if (will_cache_store)
+        s_cached_stores++;
+
+    s_total_memory_access_latency_in_compute_cycles += cmp_cycles_from_now;
 
     return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_MODULE::cache_store_into_cached_load(const request_type& req)
+{
+    // both are cached -- complete immediately as this is at EPR generator
+    GL_EPR->swap_qubit_for(req.qubit, req.victim);
+
+    // send memory event:
+    MEMORY_EVENT_INFO mem_event_info;
+    OP_add_event(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, 0, mem_event_info);
+
+    // send compute event:
+    COMPUTE_EVENT_INFO cmp_event_info;
+    cmp_event_info.mem_accessed_qubit = req.qubit;
+    cmp_event_info.mem_victim_qubit = req.victim;
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 2, cmp_event_info);
+
+    // update status in events:
+    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, 2, req.is_prefetch);
+
+    // update stats:
+    s_memory_requests++;
+    if (req.is_prefetch)
+        s_memory_prefetch_requests++;
+    s_cached_stores++;
+    s_loads_from_cache++;
+    s_forwards++;
+
+    s_total_memory_access_latency_in_compute_cycles += 2;
 }
 
 ////////////////////////////////////////////////////////////
@@ -278,18 +388,6 @@ MEMORY_MODULE::find_request_for_qubit(QUBIT qubit)
 {
     return std::find_if(request_buffer_.begin(), request_buffer_.end(),
                         [qubit] (const auto& req) { return req.qubit == qubit; });
-}
-
-std::vector<MEMORY_MODULE::request_type>::iterator
-MEMORY_MODULE::find_request_for_bank(size_t idx, std::vector<request_type>::iterator search_from_req_it)
-{
-    auto target_b_it = banks_.begin() + idx;
-    return std::find_if(search_from_req_it, request_buffer_.end(),
-                        [this, target_b_it] (const auto& req)
-                        {
-                            auto [found, b_it, q_it] = this->find_qubit(req.qubit);
-                            return found && (b_it == target_b_it);
-                        });
 }
 
 ////////////////////////////////////////////////////////////

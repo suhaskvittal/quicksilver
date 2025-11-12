@@ -27,17 +27,6 @@ print_stat_line(std::ostream& out, std::string name, T value)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool is_software_instruction(INSTRUCTION::TYPE type)
-{
-    return type == INSTRUCTION::TYPE::X
-        || type == INSTRUCTION::TYPE::Y
-        || type == INSTRUCTION::TYPE::Z
-        || type == INSTRUCTION::TYPE::SWAP;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 struct ProgramStats
 {
     uint32_t num_qubits{0};
@@ -83,6 +72,10 @@ ProgramStats analyze_binary_file(const std::string& input_file)
             
         // Create instruction from encoding
         INSTRUCTION inst(std::move(enc));
+        
+        if (is_software_instruction(inst.type))
+            continue;
+
         stats.total_instructions++;
 
         // Count different gate types
@@ -92,8 +85,6 @@ ProgramStats analyze_binary_file(const std::string& input_file)
             case INSTRUCTION::TYPE::TDG:
             case INSTRUCTION::TYPE::TX:
             case INSTRUCTION::TYPE::TXDG:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 stats.unrolled_t_gates++;
                 break;
 
@@ -101,32 +92,23 @@ ProgramStats analyze_binary_file(const std::string& input_file)
             case INSTRUCTION::TYPE::SDG:
             case INSTRUCTION::TYPE::SX:
             case INSTRUCTION::TYPE::SXDG:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 stats.s_gates++;
                 break;
 
             case INSTRUCTION::TYPE::H:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 stats.h_gates++;
                 break;
 
             case INSTRUCTION::TYPE::CX:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 stats.cx_gates++;
                 break;
 
             case INSTRUCTION::TYPE::MSWAP:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
+            case INSTRUCTION::TYPE::MSWAP_C:
                 stats.mswap_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::MPREFETCH:
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 stats.mprefetch_instructions++;
                 break;
 
@@ -135,9 +117,6 @@ ProgramStats analyze_binary_file(const std::string& input_file)
                 // For rotation gates, count only non-software gates in the unrolled sequence
                 for (auto gate_type : inst.urotseq)
                 {
-                    if (!is_software_instruction(gate_type))
-                        stats.unrolled_instructions++;
-
                     if (gate_type == INSTRUCTION::TYPE::T ||
                         gate_type == INSTRUCTION::TYPE::TDG ||
                         gate_type == INSTRUCTION::TYPE::TX ||
@@ -156,25 +135,17 @@ ProgramStats analyze_binary_file(const std::string& input_file)
                     {
                         stats.h_gates++;
                     }
-                    else if (gate_type == INSTRUCTION::TYPE::CX)
-                    {
-                        stats.cx_gates++;
-                    }
                 }
+                stats.unrolled_instructions += inst.urotseq.size();
                 break;
 
             default:
-                // Other gates count as 1 unrolled instruction if not software
-                if (!is_software_instruction(inst.type))
-                    stats.unrolled_instructions++;
                 break;
         }
         
         // Print progress every 1M instructions
         if (stats.total_instructions % 1000000 == 0)
-        {
             std::cout << "[ QS_REPORT ] Processed " << stats.total_instructions << " instructions..." << std::endl;
-        }
     }
     
     generic_strm_close(istrm);

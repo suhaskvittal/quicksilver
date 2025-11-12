@@ -35,13 +35,19 @@ COST_AWARE::emit_memory_instructions(const ws_type& current_working_set, const i
 
     // with the DP tree built, we can now compute the best working set
     ws_type new_working_set;
+    double ws_score;
     std::vector<double> qubit_scores;
-    std::tie(new_working_set, qubit_scores) = compute_best_working_set(entry_points);
+    std::tie(new_working_set, ws_score, qubit_scores) = compute_best_working_set(entry_points);
+
+    INSTRUCTION::TYPE inst_type = INSTRUCTION::TYPE::MSWAP;
+
+    num_scores += 1.0;
+    tot_score += ws_score;
 
     // deallocate the DP tree:
     working_set_tree_free(std::move(entry_points));
 
-    return transform_working_set_into(current_working_set, new_working_set, qubit_scores);
+    return transform_working_set_into(current_working_set, new_working_set, qubit_scores, inst_type);
 }
 
 ////////////////////////////////////////////////////////////
@@ -163,7 +169,7 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
                 best_memory_cost = x->memory_cost;
             }
 
-            if (k == cmp_count)
+            if (k == cmp_count || use_simple_version)
                 continue;
 
             for (const auto* y : nodes_by_ws_size[cmp_count-k-1])
@@ -201,7 +207,7 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
         throw std::runtime_error("best working set is empty");
 
     std::vector<double> qubit_scores(num_qubits, 0.0);
-    return working_set_search_result_type{best_working_set, qubit_scores};
+    return working_set_search_result_type{best_working_set, best_score, qubit_scores};
 }
 
 ////////////////////////////////////////////////////////////
