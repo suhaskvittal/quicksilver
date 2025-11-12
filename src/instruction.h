@@ -31,9 +31,7 @@ constexpr std::string_view BASIS_GATES[] =
     // memory instruction:
     "mswap",
     "mprefetch",
-    "dload",
-    "dstore",
-    "mswap_d",
+    "mswap_c",
 
     "nil"
 };
@@ -83,9 +81,7 @@ struct INSTRUCTION
                     //          -- "mswap q0, q1" means move q0 to compute and q1 to memory (q0 is requested, q1 is victim)
                     //          -- throws error in simulation if q0 is not in memory or q1 is not in compute
         MPREFETCH,  // programmer-directed prefetch (same semantics as `MSWAP`)
-        DLOAD,      // decoupled load
-        DSTORE,     // decoupled store
-        MSWAP_D,    // mswap with decoupled hint
+        MSWAP_C,    // mswap with cacheable hint
 
         NIL
     };
@@ -203,23 +199,21 @@ is_memory_instruction(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::MSWAP
         || t == INSTRUCTION::TYPE::MPREFETCH
-        || t == INSTRUCTION::TYPE::MSWAP_D
-        || t == INSTRUCTION::TYPE::DLOAD
-        || t == INSTRUCTION::TYPE::DSTORE;
+        || t == INSTRUCTION::TYPE::MSWAP_C;
 }
 
 inline bool
-is_coupled_memory_instruction(INSTRUCTION::TYPE t)
+is_normal_memory_instruction(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::MSWAP
         || t == INSTRUCTION::TYPE::MPREFETCH
-        || t == INSTRUCTION::TYPE::MSWAP_D;
+        || t == INSTRUCTION::TYPE::MSWAP_C;
 }
 
 inline bool
-is_decouplable_memory_instruction(INSTRUCTION::TYPE t)
+is_cacheable_memory_instruction(INSTRUCTION::TYPE t)
 {
-    return t == INSTRUCTION::TYPE::MSWAP_D;
+    return t == INSTRUCTION::TYPE::MSWAP_C;
 }
 
 ////////////////////////////////////////////////////////////

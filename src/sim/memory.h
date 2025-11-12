@@ -85,12 +85,10 @@ public:
     client_stats_type s_num_prefetch_promoted_to_demand{};
     uint64_t s_memory_requests{0};
     uint64_t s_memory_prefetch_requests{0};
+    uint64_t s_cached_stores{0};
+    uint64_t s_loads_from_cache{0};
+    uint64_t s_forwards{0};
     uint64_t s_total_epr_buffer_occupancy_post_request{0};
-
-    std::array<uint64_t, 8> s_epr_occu_histogram{};
-
-    uint64_t s_decoupled_loads{0};
-    uint64_t s_decoupled_stores{0};
 
     const size_t num_banks_;
     const size_t capacity_per_bank_;
@@ -100,9 +98,6 @@ protected:
     std::vector<request_type> request_buffer_;
 
     uint64_t cycle_free_{0};
-
-    // EPR generator for remote modules (owned by this MEMORY_MODULE)
-    EPR_GENERATOR* epr_generator_{nullptr};
 public:
     MEMORY_MODULE(double freq_khz,
                     size_t num_banks,
@@ -120,13 +115,10 @@ public:
     void dump_contents();
 
     bool can_serve_request() const;
-    bool has_pending_store_for_qubit(QUBIT) const;
 
     // Access to EPR generator for COMPUTE (shared access, not ownership transfer)
 
     void OP_init() override;
-
-    EPR_GENERATOR* get_epr_generator() const { return epr_generator_; }
     bool has_pending_requests() const { return !request_buffer_.empty(); }
 
     // Get all qubits stored in memory banks (for duplicate checking)
@@ -135,6 +127,7 @@ protected:
     void OP_handle_event(event_type) override;
 
     virtual bool serve_memory_request(const request_type&);
+    void cache_store_into_cached_load(const request_type&);
 
     std::vector<request_type>::iterator find_request_for_qubit(QUBIT);
 

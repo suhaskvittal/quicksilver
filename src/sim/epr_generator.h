@@ -9,7 +9,8 @@
 #include "sim/operable.h"
 #include "sim/client.h"  // for QUBIT type
 
-#include <deque>
+#include <unordered_set>
+#include <vector>
 
 namespace sim
 {
@@ -36,38 +37,40 @@ class EPR_GENERATOR : public OPERABLE<EG_EVENT_TYPE, EG_EVENT_INFO>
 public:
     using typename OPERABLE<EG_EVENT_TYPE, EG_EVENT_INFO>::event_type;
 
+    std::array<uint64_t, 8> s_occu_hist{};
+
     const size_t buffer_capacity_;
-    const size_t max_decoupled_loads_;
+    const size_t max_cacheable_stores_;
 private:
-    size_t             epr_buffer_occu_{0};
-    std::deque<QUBIT>  decoupled_loads_{};
+    size_t buffer_occu_{0};
+    std::unordered_set<QUBIT> cached_qubits_;
 
-    size_t inflight_decoupled_loads_{0};
-
-    MEMORY_MODULE* owner_;
+    std::vector<MEMORY_MODULE*> memory_modules_;
 
     bool has_inflight_epr_generation_event_{false};
 public:
-    EPR_GENERATOR(double freq_khz, MEMORY_MODULE*, size_t buffer_cap);
+    EPR_GENERATOR(double freq_khz, std::vector<MEMORY_MODULE*> memory_modules, size_t buffer_cap);
 
     void OP_init() override;
 
+    void set_memory_modules(std::vector<MEMORY_MODULE*> memory_modules);
+
     void consume_epr_pairs(size_t count);
-    void alloc_decoupled_load(QUBIT);
-    void exchange_decoupled_load(QUBIT, QUBIT);
-    void remove_decoupled_load(QUBIT);
-    QUBIT free_decoupled_load();
-
-    bool contains_loaded_qubit(QUBIT) const;
-
-    void mark_inflight_decoupled_load();
-    size_t get_occupancy() const;
-    bool has_capacity() const;
-    bool can_store_decoupled_load() const;
+    void cache_qubit(QUBIT);
+    void remove_qubit(QUBIT);
+    void swap_qubit_for(QUBIT, QUBIT);
 
     void dump_deadlock_info();
 
-    const std::deque<QUBIT>& get_decoupled_loads() const { return decoupled_loads_; }
+    bool qubit_is_cached(QUBIT q) const { return cached_qubits_.find(q) != cached_qubits_.end(); }
+    size_t get_occupancy() const        { return buffer_occu_; }
+    bool has_capacity() const           { return buffer_occu_ + cached_qubits_.size() < buffer_capacity_; }
+
+    bool store_is_cacheable() const { return cached_qubits_.size() < max_cacheable_stores_
+                                                && has_capacity()
+                                                && buffer_occu_ > 2; }
+
+    const std::unordered_set<QUBIT>& get_cached_qubits() const { return cached_qubits_; }
 protected:
     void OP_handle_event(event_type) override;
 };

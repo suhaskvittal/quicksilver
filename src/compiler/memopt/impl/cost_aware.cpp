@@ -169,7 +169,7 @@ COST_AWARE::compute_best_working_set(const std::vector<WORKING_SET_TREE_NODE*>& 
                 best_memory_cost = x->memory_cost;
             }
 
-            if (k == cmp_count)
+            if (k == cmp_count || use_simple_version)
                 continue;
 
             for (const auto* y : nodes_by_ws_size[cmp_count-k-1])

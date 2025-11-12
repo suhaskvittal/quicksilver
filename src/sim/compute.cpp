@@ -18,6 +18,8 @@
 namespace sim
 {
 
+extern EPR_GENERATOR* GL_EPR;
+
 constexpr size_t NUM_CCZ_UOPS = 13;
 constexpr size_t NUM_CCX_UOPS = NUM_CCZ_UOPS+2;
 
@@ -63,23 +65,17 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
     auto v_patch_it = find_patch_containing_qubit(victim);
     if (v_patch_it == patches_.end())
     {
-        if (GL_IMPL_DECOUPLED_LOAD_STORE)
-            v_patch_it = find_epr_generator_containing_qubit(victim);
+        std::cerr << "compute patches:\n";
+        for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
+            std::cerr << "\t" << patches_[i].contents << "\n";
 
-        if (v_patch_it == patches_.end())
+        for (size_t i = 0; i < mem_modules_.size(); i++)
         {
-            std::cerr << "compute patches:\n";
-            for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-                std::cerr << "\t" << patches_[i].contents << "\n";
-
-            for (size_t i = 0; i < mem_modules_.size(); i++)
-            {
-                std::cerr << "memory module " << i << "------------------\n";
-                mem_modules_[i]->dump_contents();
-            }
-
-            throw std::runtime_error("victim qubit " + victim.to_string() + " not found in compute patches");
+            std::cerr << "memory module " << i << "------------------\n";
+            mem_modules_[i]->dump_contents();
         }
+
+        throw std::runtime_error("victim qubit " + victim.to_string() + " not found in compute patches");
     }
 
     PATCH& v_patch = *v_patch_it;
@@ -88,11 +84,10 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
     auto v_bus_it = find_next_available_bus(v_patch);
     auto m_bus_it = find_next_available_bus(m_patch);
 
-//  uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
-//  cycle_routing_start = std::max(cycle_routing_start, module_cycle_free);
-//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
-//  cycle_routing_start = std::max(cycle_routing_start, current_cycle());
-    uint64_t cycle_routing_start = current_cycle();
+    uint64_t cycle_routing_start = std::max(v_bus_it->cycle_free, m_bus_it->cycle_free);
+    cycle_routing_start = std::max(cycle_routing_start, module_cycle_free);
+    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[victim]);
+    cycle_routing_start = std::max(cycle_routing_start, current_cycle());
 
 #if defined(DISABLE_MEMORY_ROUTING_STALL)
     uint64_t routing_alloc_cycle = cycle_routing_start;
@@ -115,37 +110,15 @@ COMPUTE::route_memory_access(size_t mem_patch_idx, QUBIT victim, uint64_t module
 void
 COMPUTE::update_state_after_memory_access(QUBIT loaded, QUBIT stored, uint64_t cycle_done, bool is_prefetch)
 {
-    if (loaded.qubit_id >= 0)
-        qubit_available_cycle_[loaded] = cycle_done;
+    qubit_available_cycle_[loaded] = cycle_done;
+    qubit_available_cycle_[stored] = cycle_done;
 
-    if (stored.qubit_id >= 0)
-        qubit_available_cycle_[stored] = cycle_done;
-
-    if (has_any_empty_program_patches() || stored.qubit_id >= 0)
-    {
-        auto p_it = find_patch_containing_qubit(stored);
-        if (p_it != patches_.end())
-        {
-            p_it->num_uses = 0;
-            p_it->contents = loaded;
-            p_it->is_prefetched = is_prefetch;
-        }
-        else
-        {
-            for (auto* m : mem_modules_)
-            {
-                auto eg = m->get_epr_generator();
-                if (eg->contains_loaded_qubit(stored))
-                {
-                    if (loaded.qubit_id < 0)
-                        eg->remove_decoupled_load(stored);
-                    else
-                        eg->exchange_decoupled_load(stored, loaded);
-                    return;
-                }
-            }
-        }
-    }
+    auto p_it = find_patch_containing_qubit(stored);
+    if (p_it == patches_.end())
+        throw std::runtime_error("qubit " + stored.to_string() + " not found in compute patches");
+    p_it->num_uses = 0;
+    p_it->contents = loaded;
+    p_it->is_prefetched = is_prefetch;
 }
 
 ////////////////////////////////////////////////////////////
@@ -568,12 +541,6 @@ COMPUTE::client_schedule(client_ptr& c)
         if (visited.count(inst) || inst->is_scheduled)
             continue;
 
-        if (GL_IMPL_DECOUPLED_LOAD_STORE && is_decouplable_memory_instruction(inst->type))
-        {
-            if (inst->qubits[0] == qid)
-                inst = try_decoupling_load_store(inst, c->id);
-        }
-
         visited.insert(inst);
 
         // verify two things:
@@ -673,9 +640,11 @@ COMPUTE::client_retire(client_ptr& c, inst_ptr inst)
             else
                 c->s_unrolled_inst_done++;
         }
-        else if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MSWAP_D)
+        else if (inst->type == INSTRUCTION::TYPE::MSWAP || inst->type == INSTRUCTION::TYPE::MSWAP_C)
         {
             c->s_mswap_count++;
+            if (inst->type == INSTRUCTION::TYPE::MSWAP_C)
+                c->s_cacheable_mswap_count++;
         }
         else if (inst->type == INSTRUCTION::TYPE::MPREFETCH)
         {
@@ -741,14 +710,6 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
         auto patch_it = find_patch_containing_qubit(q);
         if (patch_it == patches_.end())
         {
-            // check if one of the EPR generators has this qubit:
-            if (GL_IMPL_DECOUPLED_LOAD_STORE)
-            {
-                patch_it = find_epr_generator_containing_qubit(q);
-                if (patch_it != patches_.end())
-                    ++s_operations_with_decoupled_loads;
-            }
-
             // if we reach this point -- error has occurred, print out contents of compute patches
             // and epr generator decoupled qubits:
             if (patch_it == patches_.end())
@@ -757,15 +718,6 @@ COMPUTE::execute_instruction(client_ptr& c, inst_ptr inst)
                 std::cerr << "compute patches:\n";
                 for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
                     std::cerr << "\t" << patches_[i].contents << "\n";
-
-                std::cerr << "epr generator decoupled qubits:\n";
-                for (size_t i = 0; i < mem_modules_.size(); i++)
-                {
-                    auto eg = mem_modules_[i]->get_epr_generator();
-                    std::cerr << "EG " << i << ":\n";
-                    for (auto q : eg->get_decoupled_loads())
-                        std::cerr << "\t" << q << "\n";
-                }
 
                 std::cerr << "memory contents:\n";
                 for (size_t i = 0; i < mem_modules_.size(); i++)
@@ -949,9 +901,8 @@ COMPUTE::do_h_or_s_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_
     auto bus_it = find_next_available_bus(q_patch);
     
     // get earliest start time for gate:
-//  uint64_t cycle_routing_start = std::max(bus_it->cycle_free, current_cycle());
-//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
-    uint64_t cycle_routing_start = current_cycle();
+    uint64_t cycle_routing_start = std::max(bus_it->cycle_free, current_cycle());
+    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
     
     // compute amount of time spent in routing stall:
     uint64_t latency = (cycle_routing_start - current_cycle()) + 2;
@@ -997,9 +948,8 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
             auto f_bus_it = find_next_available_bus(f_patch);
 
             // three way max to determine when to start routing
-//          uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
-//          cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
-            uint64_t cycle_routing_start = current_cycle();
+            uint64_t cycle_routing_start = std::max(std::max(q_bus_it->cycle_free, f_bus_it->cycle_free), current_cycle());
+            cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q_patch.contents]);
 
 #if defined(DISABLE_MEMORY_ROUTING_STALL)
             uint64_t routing_alloc_cycle = cycle_routing_start;
@@ -1038,10 +988,9 @@ COMPUTE::do_cx_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patc
     auto q0_bus_it = find_next_available_bus(q0_patch);
     auto q1_bus_it = find_next_available_bus(q1_patch);
 
-//  uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
-//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q0_patch.contents]);
-//  cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q1_patch.contents]);
-    uint64_t cycle_routing_start = current_cycle();
+    uint64_t cycle_routing_start = std::max(std::max(q0_bus_it->cycle_free, q1_bus_it->cycle_free), current_cycle());
+    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q0_patch.contents]);
+    cycle_routing_start = std::max(cycle_routing_start, qubit_available_cycle_[q1_patch.contents]);
 
 #if defined(DISABLE_MEMORY_ROUTING_STALL)
     uint64_t routing_alloc_cycle = cycle_routing_start;
@@ -1149,27 +1098,20 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
     if (GL_ELIDE_MSWAP_INSTRUCTIONS || (inst->type == INSTRUCTION::TYPE::MPREFETCH && GL_ELIDE_MPREFETCH_INSTRUCTIONS))
         return result;
 
-    QUBIT requested{-1,-1}, victim{-1,-1};
-    if (is_coupled_memory_instruction(inst->type))
-    {
-        qubit_type q_requested = inst->qubits[0];
-        qubit_type q_victim = inst->qubits[1];
+    qubit_type q_requested = inst->qubits[0];
+    qubit_type q_victim = inst->qubits[1];
 
-        requested = QUBIT{c->id, q_requested};
-        victim = QUBIT{c->id, q_victim};
-    }
-    else if (inst->type == INSTRUCTION::TYPE::DLOAD)
-    {
-        requested = QUBIT{c->id, inst->qubits[0]};
-    }
+    QUBIT requested{c->id, q_requested};
+    QUBIT victim{c->id, q_victim};
+
+    // first check `requested` is cached at the communication interface:
+    std::vector<MEMORY_MODULE*>::iterator module_it;
+    if (GL_EPR->qubit_is_cached(requested))
+        module_it = find_memory_module_containing_qubit(QUBIT{-1,-1});
     else
-    {
-        victim = QUBIT{c->id, inst->qubits[0]};
-    }
+        module_it = find_memory_module_containing_qubit(requested);
 
-    // check if the operands are in memory
-    auto module_it = find_memory_module_containing_qubit(requested);
-    if (module_it == mem_modules_.end())
+    if (check_for_duplicates() || module_it == mem_modules_.end())
     {
         std::cerr << "compute patches:\n";
         for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
@@ -1181,6 +1123,11 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
             mem_modules_[i]->dump_contents();
         }
 
+        std::cerr << "EPR:";
+        for (auto q : GL_EPR->get_cached_qubits())
+            std::cerr << " " << q;
+        std::cerr << "\n";
+
         throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() 
                                     + " not found in any memory module -- inst: " 
                                     + inst->to_string());
@@ -1188,12 +1135,7 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
 
     // mark this as a memory stall -- eventually, this should be served
     // submit memory request:
-    if (is_coupled_memory_instruction(inst->type))
-        (*module_it)->initiate_memory_access(inst, requested, victim, inst->type == INSTRUCTION::TYPE::MPREFETCH);
-    else if (inst->type == INSTRUCTION::TYPE::DLOAD)
-        (*module_it)->initiate_memory_access(inst, requested, QUBIT{-1,-1}, false);
-    else
-        (*module_it)->initiate_memory_access(inst, victim, QUBIT{-1,-1}, false);
+    (*module_it)->initiate_memory_access(inst, requested, victim, inst->type == INSTRUCTION::TYPE::MPREFETCH);
 
     result.is_memory_stall = true;
     return result;
@@ -1212,25 +1154,8 @@ COMPUTE::retry_memory_stalled_instructions(COMPUTE_EVENT_INFO event_info)
     {
         auto [inst, client_id] = inst_waiting_for_memory_[i];
 
-        bool client_match;
-        bool qubit_match;
-        if (q_victim.qubit_id < 0)
-        {
-            client_match = client_id == q_accessed.client_id;
-            qubit_match = (inst->qubits[0] == q_accessed.qubit_id) && (inst->type == INSTRUCTION::TYPE::DLOAD);
-        }
-        else if (q_accessed.qubit_id < 0)
-        {
-            client_match = client_id == q_victim.client_id;
-            qubit_match = (inst->qubits[0] == q_victim.qubit_id) && (inst->type == INSTRUCTION::TYPE::DSTORE);
-        }
-        else
-        {
-            client_match = client_id == q_accessed.client_id;
-            qubit_match = (inst->qubits[0] == q_accessed.qubit_id) 
-                            && (inst->qubits[1] == q_victim.qubit_id) 
-                            && is_coupled_memory_instruction(inst->type);
-        }
+        bool client_match = client_id == q_accessed.client_id,
+             qubit_match = (inst->qubits[0] == q_accessed.qubit_id) && (inst->qubits[1] == q_victim.qubit_id) ;
 
         if (client_match && qubit_match)
         {
@@ -1289,109 +1214,10 @@ std::vector<MEMORY_MODULE*>::iterator
 COMPUTE::find_memory_module_containing_qubit(QUBIT q)
 {
     return std::find_if(mem_modules_.begin(), mem_modules_.end(),
-                        [q] (MEMORY_MODULE* m) { return std::get<0>(m->find_qubit(q)); });
-}
-
-std::vector<MEMORY_MODULE*>::iterator
-COMPUTE::find_memory_module_with_pending_store_for_qubit(QUBIT q)
-{
-    return std::find_if(mem_modules_.begin(), mem_modules_.end(),
-                        [q] (MEMORY_MODULE* m) { return m->has_pending_store_for_qubit(q); });
-}
-
-std::vector<PATCH>::iterator
-COMPUTE::find_epr_generator_containing_qubit(QUBIT q)
-{
-    for (auto* m : mem_modules_)
-    {
-        auto eg = m->get_epr_generator();
-        if (eg->contains_loaded_qubit(q))
-            return patches_.begin() + m->output_patch_idx_;
-    }
-
-    return patches_.end();
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-COMPUTE::inst_ptr
-COMPUTE::try_decoupling_load_store(inst_ptr inst, int8_t client_id)
-{
-    qubit_type ld_id = inst->qubits[0],
-                st_id = inst->qubits[1];
-
-    QUBIT ld{client_id, ld_id};
-    QUBIT st{client_id, st_id};
-
-    // if instruction is already ready, then no point:
-    bool is_ready = std::all_of(inst->qubits.begin(), inst->qubits.end(),
-                                [this, client_id, inst] (qubit_type qid) 
-                                {
-                                    QUBIT q{client_id, qid};
-                                    const auto& w = this->inst_windows_[q];
-                                    bool at_head = (!w.empty() && w.front() == inst);
-                                    return at_head;
-                                });
-    if (is_ready)
-        return inst;
-
-    auto& ld_win = inst_windows_[ld];
-    auto& st_win = inst_windows_[st];
-
-    // if we cannot immediately execute the load, then no point:
-    if (ld_win[0] != inst)
-        return inst;
-    
-    // find memory module containing `ld_id`:
-    auto module_it = find_memory_module_containing_qubit(ld);
-    if (module_it == mem_modules_.end())
-    {
-        std::cerr << "compute patches:\n";
-        for (size_t i = compute_start_idx_; i < memory_start_idx_; i++)
-            std::cerr << "\t" << patches_[i].contents << "\n";
-        throw std::runtime_error("decoupled load for inst `" + inst->to_string()  
-                + " : qubit " + ld.to_string() + " not found in any memory module");
-    }
-
-    MEMORY_MODULE* m = *module_it;
-    EPR_GENERATOR* eg = m->get_epr_generator();
-    if (m->can_serve_request()
-            && !m->has_pending_requests()
-            && eg->can_store_decoupled_load() 
-            && eg->get_occupancy() >= eg->buffer_capacity_/2)
-    {
-        inst_ptr dload = new INSTRUCTION(INSTRUCTION::TYPE::DLOAD, {ld_id});
-        inst_ptr dstore = new INSTRUCTION(INSTRUCTION::TYPE::DSTORE, {st_id});
-
-        dload->inst_number = inst->inst_number;
-        dstore->inst_number = inst->inst_number;
-
-        // update `ld_win`
-        ld_win[0] = dload;
-
-        // update `st_win`
-        auto w_it = std::find(st_win.begin(), st_win.end(), inst);
-        *w_it = dstore;
-
-#if defined(COMPUTE_VERBOSE)
-        std::cout << "\tclient " << static_cast<int>(client_id) 
-                    << " instruction \"" << *inst << "\" transformed into decoupled load/store pair"
-                    << " -- dload = " << *dload << ", dstore = " << *dstore << "\n";
-#endif
-
-        // delete `inst`:
-        delete inst;
-
-        // indicate that this is an inflight decoupled load:
-        eg->mark_inflight_decoupled_load();
-
-        return dload;
-    }
-    else
-    {
-        return inst;
-    }
+                        [q] (MEMORY_MODULE* m) 
+                        { 
+                            return std::get<0>(m->find_qubit(q));
+                        });
 }
 
 ////////////////////////////////////////////////////////////
@@ -1433,23 +1259,20 @@ COMPUTE::check_for_duplicates() const
             seen_qubits.insert(qubit);
         }
 
-        // Check decoupled loads in EPR generator
-        if (mem_module->get_epr_generator() != nullptr)
+    }
+
+    // check stored qubits in EPR generator
+    if (GL_EPR != nullptr)
+    {
+        for (const auto& qubit : GL_EPR->get_cached_qubits())
         {
-            const auto& decoupled_loads = mem_module->get_epr_generator()->get_decoupled_loads();
-            for (const auto& qubit : decoupled_loads)
+            if (seen_qubits.find(qubit) != seen_qubits.end())
             {
-                if (qubit.qubit_id >= 0)  // Valid qubit (not {-1,-1})
-                {
-                    if (seen_qubits.find(qubit) != seen_qubits.end())
-                    {
-                        std::cerr << "DUPLICATE QUBIT FOUND: " << qubit
-                                 << " appears in both compute/memory and decoupled loads" << std::endl;
-                        return true;
-                    }
-                    seen_qubits.insert(qubit);
-                }
+                std::cerr << "DUPLICATE QUBIT FOUND: " << qubit
+                         << " appears in both compute patches and EPR generator" << std::endl;
+                return true;
             }
+            seen_qubits.insert(qubit);
         }
     }
 

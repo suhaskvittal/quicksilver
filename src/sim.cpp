@@ -14,6 +14,7 @@ namespace sim
 {
 
 COMPUTE* GL_CMP;
+EPR_GENERATOR* GL_EPR;
 
 std::mt19937 GL_RNG{0};
 std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
@@ -29,7 +30,10 @@ int64_t GL_PRINT_PROGRESS_FREQ{-1};
 bool GL_ELIDE_MSWAP_INSTRUCTIONS{false};
 bool GL_ELIDE_MPREFETCH_INSTRUCTIONS{false};
 
-bool GL_IMPL_DECOUPLED_LOAD_STORE{false};
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool GL_IMPL_CACHEABLE_STORES{false};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -69,6 +73,7 @@ print_stats(std::ostream& out)
 //      print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
 //      print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
         print_stat_line(out, "MEMORY_SWAPS", c->s_mswap_count);
+        print_stat_line(out, "CACHEABLE_MEMORY_SWAPS", c->s_cacheable_mswap_count);
         print_stat_line(out, "MEMORY_PREFETCHES", c->s_mprefetch_count);
         print_stat_line(out, "T_GATE_COUNT", c->s_t_gate_count);
         print_stat_line(out, "T_TOTAL_ERROR", c->s_total_t_error);
@@ -111,33 +116,39 @@ print_stats(std::ostream& out)
     uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), 
                                                     uint64_t{0}, std::plus<uint64_t>(),
                                                     [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request; });
+    uint64_t total_cached_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_cached_stores; });
+    uint64_t total_loads_from_cache = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_loads_from_cache; });
+    uint64_t total_forwards = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
+                                                    std::plus<uint64_t>(),
+                                                    [] (auto* m) { return m->s_forwards; });
     double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
 
-    uint64_t total_decoupled_loads = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_decoupled_loads; });
-    uint64_t total_decoupled_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_decoupled_stores; });
 
     out << "MEMORY\n";
     print_stat_line(out, "ALL_REQUESTS", total_memory_requests);
     print_stat_line(out, "PREFETCH_REQUESTS", total_memory_prefetch_requests);
+    print_stat_line(out, "CACHED_STORES", total_cached_stores);
+    print_stat_line(out, "LOADS_FROM_CACHE", total_loads_from_cache);
+    print_stat_line(out, "REQUEST_FORWARDS", total_forwards);
     print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
-    print_stat_line(out, "DECOUPLED_LOADS", total_decoupled_loads);
-    print_stat_line(out, "DECOUPLED_STORES", total_decoupled_stores);
 
-    std::array<uint64_t, 8> total_epr_occu_histogram{};
-    for (size_t i = 0; i < 8; i++)
-    {
-        total_epr_occu_histogram[i] = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [i] (auto* m) { return m->s_epr_occu_histogram[i]; });
-    }
-
+    size_t bin_size = GL_EPR->buffer_capacity_ < GL_EPR->s_occu_hist.size() 
+                                ? 1 
+                                : GL_EPR->buffer_capacity_ / GL_EPR->s_occu_hist.size();
+    bin_size = std::min(bin_size, GL_EPR->s_occu_hist.size()-1);
     out << "EPR_BUFFER_OCCU_HISTOGRAM\n";
-    for (size_t i = 0; i < 8; i++)
-        print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(i), total_epr_occu_histogram[i], false);
+    for (size_t i = 0; i < GL_EPR->s_occu_hist.size(); i++)
+    {
+        size_t bin_min = i * bin_size,
+               bin_max = (i+1) * bin_size;
+        print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(bin_min) + "_" + std::to_string(bin_max),
+                            GL_EPR->s_occu_hist[i],
+                            false);
+    }
 }
 
 ////////////////////////////////////////////////////////////

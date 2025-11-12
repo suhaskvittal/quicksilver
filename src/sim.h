@@ -11,6 +11,7 @@
 #include "sim/client.h"
 #include "sim/clock.h"
 #include "sim/compute.h"
+#include "sim/epr_generator.h"
 #include "sim/factory.h"
 #include "sim/memory.h"
 
@@ -34,6 +35,9 @@ extern std::chrono::steady_clock::time_point GL_SIM_WALL_START;
 // global pointer to the compute module
 extern COMPUTE* GL_CMP;
 
+// global pointer to the shared EPR generator
+extern EPR_GENERATOR* GL_EPR;
+
 // random number generators:
 extern std::mt19937 GL_RNG;
 extern std::uniform_real_distribution<double> FP_RAND;
@@ -49,7 +53,7 @@ extern bool    GL_ELIDE_MPREFETCH_INSTRUCTIONS;
 ////////////////////////////////////////////////////////////
 
 // implementation flags -- use this to setup your own designs
-extern bool GL_IMPL_DECOUPLED_LOAD_STORE;
+extern bool GL_IMPL_CACHEABLE_STORES;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

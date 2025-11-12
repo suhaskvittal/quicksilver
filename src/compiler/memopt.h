@@ -31,7 +31,8 @@ public:
     enum class EMIT_IMPL_ID
     {
         VISZLAI,
-        COST_AWARE
+        HINT_SIMPLE,
+        HINT_DISJOINT
     };
 
     constexpr static size_t PENDING_INST_BUFFER_SIZE{16384};
@@ -69,6 +70,7 @@ private:
 
     // for tracking re-references:
     std::unordered_map<qubit_type, uint64_t> last_rref_;
+    std::unordered_map<qubit_type, inst_ptr> last_storing_inst_;
 
     const uint64_t print_progress_freq_;
 public:

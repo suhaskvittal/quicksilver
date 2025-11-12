@@ -170,12 +170,6 @@ private:
     std::vector<PATCH>::iterator find_patch_containing_qubit(QUBIT);
     std::vector<PATCH>::const_iterator find_patch_containing_qubit_c(QUBIT) const;
     std::vector<MEMORY_MODULE*>::iterator find_memory_module_containing_qubit(QUBIT);
-
-    std::vector<MEMORY_MODULE*>::iterator find_memory_module_with_pending_store_for_qubit(QUBIT);
-
-    std::vector<PATCH>::iterator find_epr_generator_containing_qubit(QUBIT);
-
-    inst_ptr try_decoupling_load_store(inst_ptr, int8_t client_id);
 };
 
 ////////////////////////////////////////////////////////////

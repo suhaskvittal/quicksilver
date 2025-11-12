@@ -59,6 +59,7 @@ struct CLIENT
     uint64_t s_inst_memory_stall_cycles{0};
 
     uint64_t s_mswap_count{0};
+    uint64_t s_cacheable_mswap_count{0};
     uint64_t s_mprefetch_count{0};
 
     uint64_t s_t_gate_count{0};

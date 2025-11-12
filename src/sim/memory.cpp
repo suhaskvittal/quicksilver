@@ -14,6 +14,9 @@ namespace sim
 {
 
 extern COMPUTE* GL_CMP;
+extern EPR_GENERATOR* GL_EPR;
+
+extern bool GL_IMPL_CACHEABLE_STORES;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -44,23 +47,13 @@ MEMORY_MODULE::MEMORY_MODULE(double freq_khz,
     capacity_per_bank_(capacity_per_bank),
     banks_(num_banks, bank_type(capacity_per_bank)),
     is_remote_module_(is_remote_module)
-{
-    // Create EPR generator for remote modules
-    if (is_remote_module_)
-    {
-        // Convert mean generation cycle time to frequency for EPR_GENERATOR
-        double epr_freq_khz = freq_khz / mean_epr_generation_cycle_time;
-        epr_generator_ = new EPR_GENERATOR(epr_freq_khz, this, epr_buffer_capacity);
-    }
-}
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 MEMORY_MODULE::~MEMORY_MODULE()
 {
-    if (epr_generator_ != nullptr)
-        delete epr_generator_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -150,22 +143,12 @@ MEMORY_MODULE::can_serve_request() const
     return cycle_free_ <= current_cycle();
 }
 
-bool
-MEMORY_MODULE::has_pending_store_for_qubit(QUBIT q) const
-{
-    auto it = std::find_if(request_buffer_.begin(), request_buffer_.end(),
-                            [q] (const auto& req) { return req.qubit == q && req.inst->type == INSTRUCTION::TYPE::DSTORE; });
-    return it != request_buffer_.end();
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
 MEMORY_MODULE::OP_init()
 {
-    if (is_remote_module_)
-        epr_generator_->OP_init();
 }
 
 ////////////////////////////////////////////////////////////
@@ -188,24 +171,17 @@ MEMORY_MODULE::OP_handle_event(event_type event)
 
     if (is_remote_module_)
     {
-        std::cout << "[ MEMORY ] decoupled loads:";
-        for (const auto& q : epr_generator_->get_decoupled_loads())
+        std::cout << "\tEPR cached qubits:";
+        for (const auto& q : GL_EPR->get_cached_qubits())
             std::cout << " " << q;
-        std::cout << ", epr buffer occu: " << epr_generator_->get_occupancy() 
-            << ", has capacity = " << epr_generator_->has_capacity()
+        std::cout << ", epr buffer occu: " << GL_EPR->get_occupancy() 
+            << ", has capacity = " << GL_EPR->has_capacity()
             << "\n";
     }
 #endif
 
     if (event.id == MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED || event.id == MEMORY_EVENT_TYPE::RETRY_MEMORY_ACCESS)
     {
-        /*
-        auto it = std::remove_if(request_buffer_.begin(), request_buffer_.end(),
-                                [this] (const auto& req) 
-                                { 
-                                    return req.inst->type == INSTRUCTION::TYPE::DLOAD && serve_memory_request(req);
-                                });
-                                */
         auto it = request_buffer_.end();
 
         if (it == request_buffer_.end())
@@ -225,28 +201,31 @@ bool
 MEMORY_MODULE::serve_memory_request(const request_type& req)
 {
 #if defined(MEMORY_VERBOSE)
-    if (is_coupled_memory_instruction(req.inst->type))
-    {
-        std::cout << "[ MEMORY ] initiated memswap between " 
-                        << req.qubit << " and " << req.victim
-                        << " @ cycle " << current_cycle() 
-                        << " (GL_CMP cycle = " << GL_CMP->current_cycle() << ")\n";
-    }
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-    {
-        std::cout << "[ MEMORY ] initiated decoupled load for " 
-                        << req.qubit << " @ cycle " << current_cycle() 
-                        << " (GL_CMP cycle = " << GL_CMP->current_cycle()
-                        << "\n";
-    }
-    else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
-    {
-        std::cout << "[ MEMORY ] initiated decoupled store for " 
-                        << req.qubit << " @ cycle " << current_cycle() 
-                        << " (GL_CMP cycle = " << GL_CMP->current_cycle()
-                        << "\n";
-    }
+    std::cout << "[ MEMORY ] initiated " << *req.inst 
+                    << " @ cycle " << current_cycle() 
+                    << " (GL_CMP cycle = " << GL_CMP->current_cycle() << ")\n";
 #endif
+
+    // both of these variables determine where the memory access goes
+    bool load_is_cached{false};
+    bool will_cache_store{false};
+
+    if (GL_IMPL_CACHEABLE_STORES && is_remote_module_)
+    {
+        load_is_cached = GL_EPR->qubit_is_cached(req.qubit);
+        will_cache_store = is_cacheable_memory_instruction(req.inst->type) && GL_EPR->store_is_cacheable();
+
+#if defined(MEMORY_VERBOSE)
+        std::cout << "\tload_is_cached = " << load_is_cached 
+                    << ", will_cache_store = " << will_cache_store << "\n";
+#endif
+
+        if (load_is_cached && will_cache_store)
+        {
+            cache_store_into_cached_load(req);
+            return true;
+        }
+    }
 
     // check if this channel is free:
     if (cycle_free_ > current_cycle())
@@ -258,72 +237,50 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
     }
 
     // if there aren't enough EPR pairs, then we also have to exit:
-    const size_t epr_pairs_needed = is_coupled_memory_instruction(req.inst->type) ? 2 : 1;
-    if (is_remote_module_ && epr_generator_->get_occupancy() < epr_pairs_needed)
+    size_t epr_pairs_needed{2 - load_is_cached - will_cache_store};
+    if (is_remote_module_ && GL_EPR->get_occupancy() < epr_pairs_needed)
     {
 #if defined(MEMORY_VERBOSE)
         std::cout << "\tnot enough EPR pairs (need " << epr_pairs_needed 
-            << ", have " << epr_generator_->get_occupancy() << "), retrying later\n";
+            << ", have " << GL_EPR->get_occupancy() << "), retrying later\n";
 #endif
         return false;
     }
 
-    // validate that we are not getting a decoupled load/store on a non-remote module
-    if (!is_remote_module_ && !is_coupled_memory_instruction(req.inst->type))
-        throw std::runtime_error("decoupled load/store on non-remote memory module");
-
-    // find appropriate memory locatino:
-    bool found;
-    std::vector<bank_type>::iterator b_it;
-    std::vector<QUBIT>::iterator q_it;
-
-    if (is_coupled_memory_instruction(req.inst->type) || req.inst->type == INSTRUCTION::TYPE::DLOAD)
-    {
-        std::tie(found, b_it, q_it) = find_qubit(req.qubit);
-        if (!found)
-            throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
-    }
-    else
-    {
-        std::tie(found, b_it, q_it) = find_uninitialized_qubit();
-        if (!found)
-        {
-            GL_CMP->reassign_decoupled_store(req.inst, req.qubit);
-            return true;  // return true so this instruction is removed from the request buffer
-        }
-    }
-
-    [[maybe_unused]] size_t bank_idx = std::distance(banks_.begin(), b_it);
 
     // first determine how long it will take to rotate the qubit to the head of the bank
     uint64_t rotation_cycles;
-    if (is_coupled_memory_instruction(req.inst->type))
-        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.victim);
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-        rotation_cycles = b_it->rotate_to_location_and_store(q_it, QUBIT{-1,-1});
-    else
-        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.qubit);
 
-    // just assume it can be prefetched
-    rotation_cycles = 0;
+    // find appropriate memory locatino:
+    if (load_is_cached)
+    {
+        auto [found, b_it, q_it] = find_uninitialized_qubit();            
+        if (!found)
+        {
+            // we are foced to cache this store:
+            cache_store_into_cached_load(req);
+            return true;
+        }
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, req.victim);
+    }
+    else
+    {
+        auto [found, b_it, q_it] = find_qubit(req.qubit);
+        if (!found)
+            throw std::runtime_error("qubit " + req.qubit.to_string() + " not found in memory");
+
+        rotation_cycles = b_it->rotate_to_location_and_store(q_it, will_cache_store ? QUBIT{-1,-1} : req.victim);
+    }
 
     // perform routing + memory access operations:
     uint64_t post_routing_cycles{rotation_cycles};
-    if (is_coupled_memory_instruction(req.inst->type))
-        post_routing_cycles += MSWAP_CYCLES;
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
+    if (!load_is_cached)
         post_routing_cycles += LOAD_CYCLES;
-    else
+    if (!will_cache_store)
         post_routing_cycles += STORE_CYCLES;
 
     uint64_t post_routing_time_ns = convert_cycles_to_ns(post_routing_cycles, OP_freq_khz);
-    uint64_t access_time_ns;
-    if (is_coupled_memory_instruction(req.inst->type))
-        access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.victim, cycle_free_);
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-        access_time_ns = 0;  // no routing required (storing in EPR pair)
-    else
-        access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.qubit, cycle_free_);
+    uint64_t access_time_ns = GL_CMP->route_memory_access(output_patch_idx_, req.victim, cycle_free_);
 
     // final completion time is `GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns`
     uint64_t completion_time_ns = GL_CURRENT_TIME_NS + access_time_ns + post_routing_time_ns;
@@ -331,7 +288,8 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
              cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
 
 #if defined(MEMORY_VERBOSE)
-    std::cout << "[ MEMORY ] mem access for " << req.qubit << " will complete @ cycle = " << mem_completion_cycle
+    std::cout << "[ MEMORY ] mem access for " << req.qubit << " <--> " << req.victim 
+                << " will complete @ cycle = " << mem_completion_cycle
                 << " (cmp cycle = " << cmp_completion_cycle << ")\n"
                 << "\tpost_routing_cycles = " << post_routing_cycles
                 << ", access_cycles = " << convert_ns_to_cycles(access_time_ns, OP_freq_khz)
@@ -348,70 +306,72 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
                                 mem_event_info);
 
     COMPUTE_EVENT_INFO cmp_event_info;
-    if (is_coupled_memory_instruction(req.inst->type))
-    {
-        cmp_event_info.mem_accessed_qubit = req.qubit;
-        cmp_event_info.mem_victim_qubit = req.victim;
-    }
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-    {
-        cmp_event_info.mem_accessed_qubit = req.qubit;
-        cmp_event_info.mem_victim_qubit = QUBIT{-1,-1};
-    }
-    else
-    {
-        cmp_event_info.mem_accessed_qubit = QUBIT{-1,-1};
-        cmp_event_info.mem_victim_qubit = req.qubit;
-    }
-    uint64_t cmp_cycles_from_now = cmp_completion_cycle - GL_CMP->current_cycle();
-    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 
-                                        cmp_cycles_from_now,
-                                        cmp_event_info);
+    cmp_event_info.mem_accessed_qubit = req.qubit;
+    cmp_event_info.mem_victim_qubit = req.victim;
 
-    // update EPR generator -- if this is a decoupled store, then we get a loaded qubit popped off
-    // the `decoupled_loads_` FIFO
-    QUBIT dstore_loaded_qubit;
+    // `cmp_cycles_from_now` corresponds to the completion of the load
+    uint64_t cmp_cycles_from_now = (load_is_cached || will_cache_store) 
+                                    ? 1 : (cmp_completion_cycle - GL_CMP->current_cycle());
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, cmp_cycles_from_now, cmp_event_info);
+
+    // update EPR generator:
     if (is_remote_module_)
     {
-        if (is_coupled_memory_instruction(req.inst->type))
-            epr_generator_->consume_epr_pairs(epr_pairs_needed);
-        else if (req.inst->type == INSTRUCTION::TYPE::DLOAD && !GL_CMP->has_any_empty_program_patches())
-            epr_generator_->alloc_decoupled_load(req.qubit);
-        else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
-            dstore_loaded_qubit = epr_generator_->free_decoupled_load();
+        GL_EPR->consume_epr_pairs(epr_pairs_needed);
+        if (will_cache_store)
+            GL_EPR->cache_qubit(req.victim);
+        else if (load_is_cached)
+            GL_EPR->remove_qubit(req.qubit);
 
-        s_total_epr_buffer_occupancy_post_request += epr_generator_->get_occupancy();
-
-        size_t hist_idx = std::min(size_t{7}, epr_generator_->get_occupancy());
-        s_epr_occu_histogram[hist_idx]++;
+        size_t occu = GL_EPR->get_occupancy();
+        s_total_epr_buffer_occupancy_post_request += occu;
     }
 
     // update qubit states:
-    if (is_coupled_memory_instruction(req.inst->type))
-        GL_CMP->update_state_after_memory_access(req.qubit, req.victim, cmp_completion_cycle, req.is_prefetch);
-    else if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-        GL_CMP->update_state_after_memory_access(req.qubit, QUBIT{-1,-1}, cmp_completion_cycle, false);
-    else
-        GL_CMP->update_state_after_memory_access(dstore_loaded_qubit, req.qubit, cmp_completion_cycle, false);
-
-#if defined(MEMORY_VERBOSE)
-    std::cout << "\tserved memory request for inst = " << *req.inst << "\n";
-    std::cout << "\tbank " << bank_idx << " state:\n";
-    for (size_t i = 0; i < banks_[bank_idx].contents.size(); i++)
-        std::cout << "\t\t" << i << " : " << banks_[bank_idx].contents[i] << "\n";
-#endif
+    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, cmp_completion_cycle, req.is_prefetch);
 
     // update stats:
     s_memory_requests++;
     if (req.is_prefetch)
         s_memory_prefetch_requests++;
 
-    if (req.inst->type == INSTRUCTION::TYPE::DLOAD)
-        s_decoupled_loads++;
-    else if (req.inst->type == INSTRUCTION::TYPE::DSTORE)
-        s_decoupled_stores++;
+    if (load_is_cached)
+        s_loads_from_cache++;
+    if (will_cache_store)
+        s_cached_stores++;
 
     return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_MODULE::cache_store_into_cached_load(const request_type& req)
+{
+    // both are cached -- complete immediately as this is at EPR generator
+    GL_EPR->swap_qubit_for(req.qubit, req.victim);
+
+    // send memory event:
+    MEMORY_EVENT_INFO mem_event_info;
+    OP_add_event(MEMORY_EVENT_TYPE::MEMORY_ACCESS_COMPLETED, 0, mem_event_info);
+
+    // send compute event:
+    COMPUTE_EVENT_INFO cmp_event_info;
+    cmp_event_info.mem_accessed_qubit = req.qubit;
+    cmp_event_info.mem_victim_qubit = req.victim;
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 0, cmp_event_info);
+
+    // update status in events:
+    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, 1, req.is_prefetch);
+
+    // update stats:
+    s_memory_requests++;
+    if (req.is_prefetch)
+        s_memory_prefetch_requests++;
+    s_cached_stores++;
+    s_loads_from_cache++;
+    s_forwards++;
 }
 
 ////////////////////////////////////////////////////////////
