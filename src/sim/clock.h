@@ -7,6 +7,7 @@
 #define SIM_CLOCK_h
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 
 namespace sim
