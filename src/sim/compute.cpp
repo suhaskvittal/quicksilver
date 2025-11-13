@@ -13,7 +13,7 @@
 #include <unordered_set>
 
 //#define COMPUTE_VERBOSE
-#define DISABLE_MEMORY_ROUTING_STALL
+//#define DISABLE_MEMORY_ROUTING_STALL
 
 namespace sim
 {
