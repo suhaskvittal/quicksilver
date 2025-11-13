@@ -271,6 +271,7 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
 
         rotation_cycles = b_it->rotate_to_location_and_store(q_it, will_cache_store ? QUBIT{-1,-1} : req.victim);
     }
+    rotation_cycles = 0;
 
     // perform routing + memory access operations:
     uint64_t post_routing_cycles{rotation_cycles};
@@ -288,7 +289,7 @@ MEMORY_MODULE::serve_memory_request(const request_type& req)
              cmp_completion_cycle = convert_ns_to_cycles(completion_time_ns, GL_CMP->OP_freq_khz);
 
     if (load_is_cached)  // compute only cares about how long the load takes
-        cmp_completion_cycle = GL_CMP->current_cycle() + 2;
+        cmp_completion_cycle = GL_CMP->current_cycle() + 1;
 
 #if defined(MEMORY_VERBOSE)
     std::cout << "[ MEMORY ] mem access for " << req.qubit << " <--> " << req.victim 
@@ -364,10 +365,10 @@ MEMORY_MODULE::cache_store_into_cached_load(const request_type& req)
     COMPUTE_EVENT_INFO cmp_event_info;
     cmp_event_info.mem_accessed_qubit = req.qubit;
     cmp_event_info.mem_victim_qubit = req.victim;
-    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 2, cmp_event_info);
+    GL_CMP->OP_add_event_using_cycles(COMPUTE_EVENT_TYPE::MEMORY_ACCESS_DONE, 1, cmp_event_info);
 
     // update status in events:
-    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, 2, req.is_prefetch);
+    GL_CMP->update_state_after_memory_access(req.qubit, req.victim, 1, req.is_prefetch);
 
     // update stats:
     s_memory_requests++;
@@ -377,7 +378,7 @@ MEMORY_MODULE::cache_store_into_cached_load(const request_type& req)
     s_loads_from_cache++;
     s_forwards++;
 
-    s_total_memory_access_latency_in_compute_cycles += 2;
+    s_total_memory_access_latency_in_compute_cycles += 1;
 }
 
 ////////////////////////////////////////////////////////////
