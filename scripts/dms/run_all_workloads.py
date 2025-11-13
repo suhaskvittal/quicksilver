@@ -9,8 +9,8 @@ PRINT_PROGRESS = SIM_INST_COUNT // 10
 
 FACT_PHYS_QUBITS_PER_PROGRAM_QUBIT = 100
 
-MEM_BB_ROUND_NS = 1300
-MEM_BB_NUM_MODULES = 2
+MEM_BB_ROUND_NS = 1250
+MEM_BB_NUM_MODULES = 4
 
 ##############################################
 ##############################################
