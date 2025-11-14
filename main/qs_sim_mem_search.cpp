@@ -190,8 +190,16 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     sim::print_stat_line(std::cout, "FACT_L1_TYPE", factory_conf[0].which, false);
     sim::print_stat_line(std::cout, "FACT_L1_FREQUENCY_KHZ", fact_l1_freq_khz, false);
     sim::print_stat_line(std::cout, "FACT_L2_COUNT", fact_l2_count, false);
-    sim::print_stat_line(std::cout, "FACT_L2_TYPE", factory_conf[1].which, false);
-    sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", fact_l2_freq_khz, false);
+    if (factory_conf.size() > 1)
+    {
+        sim::print_stat_line(std::cout, "FACT_L2_TYPE", factory_conf[1].which, false);
+        sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", fact_l2_freq_khz, false);
+    }
+    else
+    {
+        sim::print_stat_line(std::cout, "FACT_L2_TYPE", "NONE", false);
+        sim::print_stat_line(std::cout, "FACT_L2_FREQUENCY_KHZ", 0, false);
+    }
 
     sim::print_stat_line(std::cout, "MEM_BB_CODE_DISTANCE", mem_bb_code_distance, false);
     sim::print_stat_line(std::cout, "MEM_BB_BANKS_PER_MODULE", mem_bb_banks_per_module, false);
@@ -209,7 +217,8 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
         m->OP_init();
     for (auto* f : t_factories)
         f->OP_init();
-    sim::GL_EPR->OP_init();
+    if (sim::GL_EPR != nullptr)
+        sim::GL_EPR->OP_init();
 
     // 5.3. loop until `inst_sim` is reached
     bool done;
@@ -245,10 +254,10 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
 
             std::cerr << "L1 factories:\n";
             for (auto* f : l1_factories)
-                std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
+                std::cerr << "\tbuffer occu = " << f->get_occupancy() << ", step = " << f->get_step() << "\n";
             std::cerr << "L2 factories:\n";
             for (auto* f : l2_factories)
-                std::cerr << "\tbuffer occu = " << f->buffer_occu_ << ", step = " << f->get_step() << "\n";
+                std::cerr << "\tbuffer occu = " << f->get_occupancy() << ", step = " << f->get_step() << "\n";
 
             std::cerr << "EPR:\n";
             sim::GL_EPR->dump_deadlock_info();
@@ -334,6 +343,8 @@ main(int argc, char* argv[])
     int64_t inst_sim;
     int64_t inst_assume_total;
 
+    double initial_target_error_rate;
+
     bool jit;
     
     // compute budget can be allocated absolutely (`cmp_num_surface_codes`) or as a proportion of the total number of program qubits (`cmp_surface_code_fraction`)
@@ -357,18 +368,24 @@ main(int argc, char* argv[])
         .required("trace", "path to trace file", trace)
         .required("inst-sim", "number of instructions to simulate", inst_sim)
         .required("inst-assume-total", "number of instructions assumed to be in the larger program", inst_assume_total)
+
         // simulator verbosity:
         .optional("-p", "--print-progress", "print progress frequency", sim::GL_PRINT_PROGRESS_FREQ, -1)
+
         // just in time compilation (limited qubit count):
         .optional("-jit", "--just-in-time-compilation", "enable just in time compilation for limited qubit count", jit, false)
+
         // setup:
         .optional("-ems", "--elide-mswap-instructions", "elide mswap instructions", sim::GL_ELIDE_MSWAP_INSTRUCTIONS, false)
+        .optional("-e", "--initial-target-error-rate", "initial target error rate", initial_target_error_rate, 1e-12)
+        
         // configuration:
         .optional("", "--cmp-sc-count", "number of surface codes to allocate to compute", cmp_sc_count, 4)
         .optional("", "--cmp-sc-round-ns", "round time for surface code", cmp_sc_round_ns, 1200)
 
         .optional("", "--fact-phys-qubits-per-program-qubit", "number of physical qubits to allocate to factories", 
                     fact_phys_qubits_per_program_qubit, 50)
+        .optional("-cult", "--cultivation", "prefer cultivation over distillation", sim::GL_PREF_CULTIVATION, false)
 
         .optional("", "--mem-bb-num-modules", "number of memory banks per module", mem_bb_num_modules, 2)
         .optional("", "--mem-bb-qubits-per-bank", "number of qubits per bank", mem_bb_qubits_per_bank, 12)
@@ -443,9 +460,9 @@ main(int argc, char* argv[])
     ITERATION_CONFIG conf;
 
     // initialize config:
-    conf.cmp_target_error_rate_per_cycle = 1e-12;
-    conf.mem_bb_target_error_rate_per_cycle = 1e-12;
-    conf.fact_target_error_rate_per_gate = 1e-12;
+    conf.cmp_target_error_rate_per_cycle = initial_target_error_rate;
+    conf.mem_bb_target_error_rate_per_cycle = initial_target_error_rate;
+    conf.fact_target_error_rate_per_gate = initial_target_error_rate;
 
     conf.num_program_qubits = num_program_qubits;
     conf.trace = trace;

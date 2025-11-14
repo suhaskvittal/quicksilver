@@ -928,7 +928,7 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
     // find a factory with a resource state
     std::vector<T_FACTORY*> producers;
     std::copy_if(t_fact_.begin(), t_fact_.end(), std::back_inserter(producers),
-                [this] (T_FACTORY* f) { return f->level_ >= this->target_t_fact_level_ && f->buffer_occu_ > 0; });
+                [this] (T_FACTORY* f) { return f->level_ >= this->target_t_fact_level_ && f->get_occupancy() > 0; });
     if (producers.empty())
     {
         result.is_resource_stall = true;
@@ -1106,7 +1106,7 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
 
     // first check `requested` is cached at the communication interface:
     std::vector<MEMORY_MODULE*>::iterator module_it;
-    if (GL_EPR->qubit_is_cached(requested))
+    if (GL_EPR != nullptr && GL_EPR->qubit_is_cached(requested))
         module_it = find_memory_module_containing_qubit(QUBIT{-1,-1});
     else
         module_it = find_memory_module_containing_qubit(requested);
@@ -1123,10 +1123,13 @@ COMPUTE::do_memory_instruction(client_ptr& c, inst_ptr inst)
             mem_modules_[i]->dump_contents();
         }
 
-        std::cerr << "EPR:";
-        for (auto q : GL_EPR->get_cached_qubits())
-            std::cerr << " " << q;
-        std::cerr << "\n";
+        if (GL_EPR != nullptr)
+        {
+            std::cerr << "EPR:";
+            for (auto q : GL_EPR->get_cached_qubits())
+                std::cerr << " " << q;
+            std::cerr << "\n";
+        }
 
         throw std::runtime_error("mswap/mprefetch: qubit " + requested.to_string() 
                                     + " not found in any memory module -- inst: " 

@@ -23,16 +23,10 @@ extern std::uniform_real_distribution<double> FP_RAND;
 
 T_FACTORY::T_FACTORY(double freq_khz, 
                     double output_error_prob, 
-                    size_t initial_input_count,
-                    size_t output_count,
-                    size_t num_rotation_steps,
                     size_t buffer_capacity,
                     size_t level)
     :OPERABLE(freq_khz),
      output_error_prob_(output_error_prob),
-     initial_input_count_(initial_input_count),
-     output_count_(output_count),
-     num_rotation_steps_(num_rotation_steps),
      buffer_capacity_(buffer_capacity),
      level_(level)
 {}
@@ -99,12 +93,58 @@ T_FACTORY::consume_state(size_t num_consumed)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+T_CULTIVATION::T_CULTIVATION(double freq_khz, 
+                    double output_error_prob, 
+                    double probability_of_success,
+                    size_t buffer_capacity,
+                    size_t level)
+    :T_FACTORY(freq_khz, output_error_prob, buffer_capacity, level),
+    probability_of_success_(probability_of_success)
+{}
+
 void
-T_FACTORY::production_step()
+T_CULTIVATION::production_step()
 {
-    // avoid calling `production_step` multiple times in the same cycle
-    int64_t i_curr_cycle = static_cast<int64_t>(current_cycle());
-    if (i_curr_cycle < last_production_cycle_)
+    if (!can_do_step())
+        return;
+
+    uint64_t t_until_done{1};
+
+    // we can compute time to completion easily:
+    while (FP_RAND(GL_RNG) > probability_of_success_)
+    {
+        s_prod_tries++;
+        s_failures++;
+
+        t_until_done++; 
+    }
+
+    s_prod_tries++;
+    OP_add_event_using_cycles(FACTORY_EVENT_TYPE::MAGIC_STATE_PRODUCED, t_until_done);
+
+    update_last_production_cycle();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+T_DISTILLATION::T_DISTILLATION(double freq_khz, 
+                    double output_error_prob, 
+                    size_t initial_input_count,
+                    size_t output_count,
+                    size_t num_rotation_steps,
+                    size_t buffer_capacity,
+                    size_t level)
+    :T_FACTORY(freq_khz, output_error_prob, buffer_capacity, level),
+     initial_input_count_(initial_input_count),
+     output_count_(output_count),
+     num_rotation_steps_(num_rotation_steps)
+{}
+
+void
+T_DISTILLATION::production_step()
+{
+    if (!can_do_step())
         return;
 
     if (level_ == 0)
@@ -115,26 +155,23 @@ T_FACTORY::production_step()
         production_step_level_1_step_x();
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 void
-T_FACTORY::production_step_level_0()
+T_DISTILLATION::production_step_level_0()
 {
     // as this is a first level factory, we can predict when the magic state will
     // be produced as we have no dependences
     uint64_t t_until_done = 1 + num_rotation_steps_;
 
     // `prob_fail` is the probability that the factory will fail before it is done
-    s_prod_tries_++;
     double prob_fail = static_cast<double>(initial_input_count_+num_rotation_steps_) * INJECTED_STATE_FAILURE_PROB;
     while (FP_RAND(GL_RNG) < prob_fail)
     {
-        s_prod_tries_++;
-        s_failures_++;
+        s_prod_tries++;
+        s_failures++;
         t_until_done += (1+num_rotation_steps_) / 2;  // assume that the factory will fail in the middle (on average)
     }
 
+    s_prod_tries++;
     OP_add_event_using_cycles(FACTORY_EVENT_TYPE::MAGIC_STATE_PRODUCED, t_until_done);
     
     // need to increment by `t_until_done` to avoid calling `production_step` while the state is being produced
@@ -145,14 +182,14 @@ T_FACTORY::production_step_level_0()
 ////////////////////////////////////////////////////////////
 
 void
-T_FACTORY::production_step_level_1_step_0()
+T_DISTILLATION::production_step_level_1_step_0()
 {
-    s_prod_tries_++;
+    s_prod_tries++;
 
     size_t total_resources_avail = std::transform_reduce(previous_level_.begin(), previous_level_.end(), 
                                                     size_t{0},
                                                     std::plus<size_t>(),
-                                                    [] (auto* f) { return f->buffer_occu_; });
+                                                    [] (auto* f) { return f->get_occupancy(); });
 
     if (total_resources_avail < initial_input_count_)
         return;
@@ -165,7 +202,7 @@ T_FACTORY::production_step_level_1_step_0()
         for (size_t i = 0; i < previous_level_.size() && required_resources > 0; i++)
         {
             auto* f = previous_level_[i];
-            if (f->buffer_occu_ > 0)
+            if (f->get_occupancy() > 0)
             {
                 required_resources--;
                 f->consume_state();
@@ -177,7 +214,7 @@ T_FACTORY::production_step_level_1_step_0()
     // check if the factory fails:
     if (FP_RAND(GL_RNG) < prob_fail)
     {
-        s_failures_++;
+        s_failures++;
         step_ = 0;
     }
     else
@@ -193,10 +230,10 @@ T_FACTORY::production_step_level_1_step_0()
 ////////////////////////////////////////////////////////////
 
 void
-T_FACTORY::production_step_level_1_step_x()
+T_DISTILLATION::production_step_level_1_step_x()
 {
     auto f_it = std::find_if(previous_level_.begin(), previous_level_.end(),
-                            [] (auto* f_p) { return f_p->buffer_occu_ > 0; });
+                            [] (auto* f_p) { return f_p->get_occupancy() > 0; });
 
     if (f_it != previous_level_.end())
     {
@@ -206,7 +243,7 @@ T_FACTORY::production_step_level_1_step_x()
         // check if the factory fails:
         if (FP_RAND(GL_RNG) < f->output_error_prob_)
         {
-            s_failures_++;
+            s_failures++;
             step_ = 0;
             OP_add_event_using_cycles(FACTORY_EVENT_TYPE::STEP_PRODUCTION, 1);
         }
@@ -216,7 +253,7 @@ T_FACTORY::production_step_level_1_step_x()
             if (step_ == 1+num_rotation_steps_)
             {
                 step_ = 0;
-                OP_add_event_using_cycles(FACTORY_EVENT_TYPE::MAGIC_STATE_PRODUCED, 1);
+                OP_add_event_using_cycles(FACTORY_EVENT_TYPE::MAGIC_STATE_PRODUCED, output_count_);
             }
             else
             {

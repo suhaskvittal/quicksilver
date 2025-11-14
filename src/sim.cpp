@@ -96,8 +96,8 @@ print_stats(std::ostream& out)
                  tot_failures{0};
         for (auto* f : factory_level_map[i])
         {
-            tot_prod_tries += f->s_prod_tries_;
-            tot_failures += f->s_failures_;
+            tot_prod_tries += f->s_prod_tries;
+            tot_failures += f->s_failures;
         }
 
         print_stat_line(out, "PROD_TRIES", tot_prod_tries);
@@ -139,20 +139,24 @@ print_stats(std::ostream& out)
     print_stat_line(out, "LOADS_FROM_CACHE", total_loads_from_cache);
     print_stat_line(out, "REQUEST_FORWARDS", total_forwards);
     print_stat_line(out, "MEAN_MEM_ACCESS_LATENCY", mean_mem_access_latency);
-    print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
 
-    size_t bin_size = GL_EPR->buffer_capacity_ < GL_EPR->s_occu_hist.size() 
-                                ? 1 
-                                : GL_EPR->buffer_capacity_ / GL_EPR->s_occu_hist.size();
-    bin_size = std::min(bin_size, GL_EPR->s_occu_hist.size()-1);
-    out << "EPR_BUFFER_OCCU_HISTOGRAM\n";
-    for (size_t i = 0; i < GL_EPR->s_occu_hist.size(); i++)
+    if (GL_EPR != nullptr)
     {
-        size_t bin_min = i * bin_size,
-               bin_max = (i+1) * bin_size;
-        print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(bin_min) + "_" + std::to_string(bin_max),
-                            GL_EPR->s_occu_hist[i],
-                            false);
+        print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
+
+        size_t bin_size = GL_EPR->buffer_capacity_ < GL_EPR->s_occu_hist.size() 
+                                    ? 1 
+                                    : GL_EPR->buffer_capacity_ / GL_EPR->s_occu_hist.size();
+        bin_size = std::min(bin_size, GL_EPR->s_occu_hist.size()-1);
+        out << "EPR_BUFFER_OCCU_HISTOGRAM\n";
+        for (size_t i = 0; i < GL_EPR->s_occu_hist.size(); i++)
+        {
+            size_t bin_min = i * bin_size,
+                   bin_max = (i+1) * bin_size;
+            print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(bin_min) + "_" + std::to_string(bin_max),
+                                GL_EPR->s_occu_hist[i],
+                                false);
+        }
     }
 }
 

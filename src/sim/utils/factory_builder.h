@@ -13,6 +13,9 @@
 
 namespace sim
 {
+
+extern bool GL_PREF_CULTIVATION;
+
 namespace util
 {
 
@@ -22,10 +25,31 @@ namespace util
 struct FACTORY_INFO
 {
     std::string which;
+    double      e_out;
+
+    // only used by distillation:
     size_t      sc_dx;
     size_t      sc_dz;
     size_t      sc_dm;
-    double      e_out;
+
+    // only used by cultivation
+    double      probability_of_success;
+    size_t      cult_d;
+    size_t      num_rounds;
+
+    bool is_cultivation() const { return which == "c3" || which == "c5"; }
+
+    constexpr static FACTORY_INFO 
+    distillation(std::string which, double e_out, size_t sc_dx, size_t sc_dz, size_t sc_dm)
+    {
+        return {.which=which, .e_out=e_out, .sc_dx=sc_dx, .sc_dz=sc_dz, .sc_dm=sc_dm};
+    }
+
+    constexpr static FACTORY_INFO 
+    cultivation(std::string which, double e_out, double probability_of_success, size_t cult_d, size_t num_rounds)
+    {
+        return {.which=which, .e_out=e_out, .probability_of_success=probability_of_success, .cult_d=cult_d, .num_rounds=num_rounds};
+    }
 };
 
 ////////////////////////////////////////////////////////////////
@@ -35,9 +59,11 @@ using factory_build_result_type = std::tuple<std::vector<T_FACTORY*>, size_t, st
 
 std::vector<FACTORY_INFO> make_factory_config(double target_error_rate);
 T_FACTORY*                create_factory_from_info(const FACTORY_INFO&, 
-                                                        double freq_khz, 
+                                                        uint64_t round_ns,
                                                         size_t level,
                                                         size_t buffer_capacity=16);
+
+size_t get_factory_qubit_count(const FACTORY_INFO& fi);
 
 // returns the factory vector and the actual qubits used
 factory_build_result_type factory_build(double target_error_rate, 
