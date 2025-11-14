@@ -7,6 +7,7 @@
 #define SIM_COMPUTE_REPLACEMENT_h
 
 #include "sim/client.h"
+#include <optional>
 
 namespace sim
 {

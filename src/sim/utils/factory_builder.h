@@ -8,6 +8,9 @@
 
 #include "sim/factory.h"
 
+#include <tuple>
+#include <vector>
+
 namespace sim
 {
 namespace util
