@@ -69,17 +69,17 @@ struct ITERATION_CONFIG
     int64_t fact_phys_qubits_per_program_qubit;
 
     // other:
-    int64_t qht_latency_reduce_which;
-    double  qht_reduction_fraction;
+    int64_t qoc_latency_reduce_which;
+    double  qoc_reduction_fraction;
 
     // output of an iteration:
     double application_success_rate;
 };
 
 int64_t
-qht_scale_round_ns(int64_t round_ns, double reduction_fraction)
+qoc_scale_round_ns(int64_t round_ns, double reduction_fraction)
 {
-    return static_cast<int64_t>(round_ns * (1-reduction_fraction));
+    return static_cast<int64_t>(round_ns * (1-0.8*reduction_fraction));
 }
 
 ITERATION_CONFIG
@@ -104,12 +104,12 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
 
     int64_t fact_phys_qubits_per_program_qubit = conf.fact_phys_qubits_per_program_qubit;
 
-    int64_t qht_latency_reduce_which = conf.qht_latency_reduce_which;
-    double  qht_reduction_fraction = conf.qht_reduction_fraction;
+    int64_t qoc_latency_reduce_which = conf.qoc_latency_reduce_which;
+    double  qoc_reduction_fraction = conf.qoc_reduction_fraction;
 
     // 1. determine number of surface code qubits
-    int64_t cmp_sc_adjusted_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_COMPUTE)
-                                            ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
+    int64_t cmp_sc_adjusted_round_ns = (qoc_latency_reduce_which & sim::QOC_LATENCY_REDUCTION_TARGET_COMPUTE)
+                                            ? qoc_scale_round_ns(cmp_sc_round_ns, qoc_reduction_fraction)
                                             : cmp_sc_round_ns;
     size_t cmp_sc_code_distance = sim::est::sc_distance_for_target_logical_error_rate(conf.cmp_target_error_rate_per_cycle);
     double cmp_sc_freq_khz = sim::compute_freq_khz(cmp_sc_adjusted_round_ns, cmp_sc_code_distance);
@@ -119,8 +119,8 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     size_t cmp_sc_num_rows = ceil(_fpdiv(cmp_sc_count, cmp_sc_num_patches_per_row));
 
     // 2. determine memory config:
-    int64_t mem_bb_adjusted_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_MEMORY)
-                                            ? qht_scale_round_ns(mem_bb_round_ns, qht_reduction_fraction)
+    int64_t mem_bb_adjusted_round_ns = (qoc_latency_reduce_which & sim::QOC_LATENCY_REDUCTION_TARGET_MEMORY)
+                                            ? qoc_scale_round_ns(mem_bb_round_ns, qoc_reduction_fraction)
                                             : mem_bb_round_ns;
     size_t mem_bb_banks_per_module = (num_program_qubits > cmp_sc_count) 
                                     ? ceil(_fpdiv(num_program_qubits - cmp_sc_count, mem_bb_num_modules * mem_bb_qubits_per_bank)) 
@@ -149,11 +149,11 @@ sim_iteration(ITERATION_CONFIG conf, size_t sim_iter)
     }
 
     // 3. determine factory config:
-    int64_t l1_sc_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
-                                ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
+    int64_t l1_sc_round_ns = (qoc_latency_reduce_which & sim::QOC_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
+                                ? qoc_scale_round_ns(cmp_sc_round_ns, qoc_reduction_fraction)
                                 : cmp_sc_round_ns;
-    int64_t l2_sc_round_ns = (qht_latency_reduce_which & sim::QHT_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
-                                ? qht_scale_round_ns(cmp_sc_round_ns, qht_reduction_fraction)
+    int64_t l2_sc_round_ns = (qoc_latency_reduce_which & sim::QOC_LATENCY_REDUCTION_TARGET_ALL_FACTORY)
+                                ? qoc_scale_round_ns(cmp_sc_round_ns, qoc_reduction_fraction)
                                 : cmp_sc_round_ns;
 
     size_t fact_max_phys_qubits = num_program_qubits * fact_phys_qubits_per_program_qubit;
@@ -361,8 +361,8 @@ main(int argc, char* argv[])
     int64_t mem_epr_buffer_capacity;
     double  mem_epr_generation_frequency_khz;
 
-    int64_t qht_latency_reduce_which;
-    double  qht_reduction_fraction;
+    int64_t qoc_latency_reduce_which;
+    double  qoc_reduction_fraction;
 
     ARGPARSE()
         .required("trace", "path to trace file", trace)
@@ -399,8 +399,8 @@ main(int argc, char* argv[])
         .optional("-cs", "--impl-cacheable-stores", "enable cacheable stores", sim::GL_IMPL_CACHEABLE_STORES, false)
 
         // quantum hyperthreading parameters:
-        .optional("-qht", "--qht-reduce-which", "QHT latency reduction target", qht_latency_reduce_which, 0)
-        .optional("", "--qht-reduction-fraction", "fraction of syndrome extraction time to reduce", qht_reduction_fraction, 0.2)
+        .optional("-qoc", "--qoc-reduce-which", "QOC latency reduction target", qoc_latency_reduce_which, 0)
+        .optional("", "--qoc-reduction-fraction", "fraction of syndrome extraction time to reduce", qoc_reduction_fraction, 0.2)
         .parse(argc, argv);
 
     sim::GL_PRINT_PROGRESS = (sim::GL_PRINT_PROGRESS_FREQ > 0);
@@ -437,9 +437,10 @@ main(int argc, char* argv[])
 
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
-        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::HINT_SIMPLE, sim::GL_PRINT_PROGRESS_FREQ);
-//      MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
-        mc.run(istrm, ostrm, 2*inst_sim);
+//      MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::HINT_SIMPLE, sim::GL_PRINT_PROGRESS_FREQ);
+        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
+        int64_t compile_inst_count = 1.2*inst_sim;
+        mc.run(istrm, ostrm, compile_inst_count);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);
 
@@ -481,8 +482,8 @@ main(int argc, char* argv[])
 
     conf.fact_phys_qubits_per_program_qubit = fact_phys_qubits_per_program_qubit;
 
-    conf.qht_latency_reduce_which = qht_latency_reduce_which;
-    conf.qht_reduction_fraction = qht_reduction_fraction;
+    conf.qoc_latency_reduce_which = qoc_latency_reduce_which;
+    conf.qoc_reduction_fraction = qoc_reduction_fraction;
 
     size_t sim_iter{0};
     bool converged{false};
