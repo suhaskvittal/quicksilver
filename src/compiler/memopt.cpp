@@ -11,6 +11,8 @@
 #include <numeric>
 #include <unordered_set>
 
+#define SHOW_FIRST_EPOCH_ONLY
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -199,10 +201,52 @@ MEMOPT::drain_outgoing_buffer(generic_strm_type& ostrm, std::vector<inst_ptr>::i
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+static size_t epoch_number{0};
+
 void
 MEMOPT::emit_memory_instructions()
 {
+#if defined(SHOW_FIRST_EPOCH_ONLY)
+    epoch_number++;
+    if (epoch_number == 50)
+    {
+        std::cout << "[ MEMOPT ] first epoch ------------------\n";
+
+        std::cout << "compute subsystem:";
+        for (auto q : working_set_)
+            std::cout << " " << q;
+        std::cout << "\n";
+
+        std::cout << "instruction windows:";
+        for (const auto& [q, win] : inst_windows_)
+        {
+            if (win.empty())
+                continue;
+            std::cout << "\tqubit " << q << ":\t";
+            for (size_t i = 0; i < 3 && i < win.size(); i++)
+                std::cout << std::setw(64) << std::left << win[i]->to_string();
+            std::cout << "\n";
+        }
+    }
+#endif
+
     auto result = emit_impl_->emit_memory_instructions(working_set_, pending_inst_buffer_, inst_windows_);
+
+#if defined(SHOW_FIRST_EPOCH_ONLY)
+    if (epoch_number == 50)
+    {
+        std::cout << "new working set:";
+        for (auto q : result.working_set)
+            std::cout << " " << q;
+        std::cout << "\n";
+
+        std::cout << "memory instructions:\n";
+        for (auto* inst : result.memory_instructions)
+            std::cout << "\t" << *inst << "\n";
+        
+        exit(0);
+    }
+#endif
 
     working_set_ = std::move(result.working_set);
 

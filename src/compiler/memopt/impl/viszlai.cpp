@@ -5,6 +5,8 @@
 
 #include "compiler/memopt/impl/viszlai.h"
 
+#include <map>
+
 namespace memopt
 {
 namespace impl
@@ -14,7 +16,7 @@ namespace impl
 ////////////////////////////////////////////////////////////
 
 VISZLAI::result_type
-VISZLAI::emit_memory_instructions(const ws_type& current_working_set, const inst_array& pending_inst, const inst_window_map& inst_windows)
+VISZLAI::emit_memory_instructions(const ws_type& current_working_set, const inst_array& pending_inst, const inst_window_map& _inst_windows)
 {
     inst_array memory_instructions;
     ws_type new_working_set;
@@ -24,6 +26,9 @@ VISZLAI::emit_memory_instructions(const ws_type& current_working_set, const inst
     std::vector<inst_ptr> head_instructions;
     priority_instructions.reserve(current_working_set.size());
     head_instructions.reserve(num_qubits);
+
+    std::map<qubit_type, inst_window_type> inst_windows(_inst_windows.begin(), _inst_windows.end());
+
     for (const auto& [q, win] : inst_windows)
     {
         if (visited[q])

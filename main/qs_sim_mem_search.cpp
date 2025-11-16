@@ -437,9 +437,9 @@ main(int argc, char* argv[])
 
         generic_strm_open(istrm, trace, "rb");
         generic_strm_open(ostrm, new_trace, "wb");
-//      MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::HINT_SIMPLE, sim::GL_PRINT_PROGRESS_FREQ);
-        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
-        int64_t compile_inst_count = 1.2*inst_sim;
+        MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::HINT_SIMPLE, sim::GL_PRINT_PROGRESS_FREQ);
+//      MEMOPT mc(cmp_sc_count, MEMOPT::EMIT_IMPL_ID::VISZLAI, sim::GL_PRINT_PROGRESS_FREQ);
+        int64_t compile_inst_count = 2*inst_sim;
         mc.run(istrm, ostrm, compile_inst_count);
         generic_strm_close(istrm);
         generic_strm_close(ostrm);

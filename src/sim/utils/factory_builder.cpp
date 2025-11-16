@@ -148,8 +148,7 @@ factory_build(double target_error_rate,
     std::vector<T_FACTORY*> l1_fact, l2_fact;
     size_t qubit_count{0};
 
-    while ((qubit_count < max_phys_qubits || l1_fact.empty() || (l2_factory_exists && l2_fact.empty()))
-            && ((!l2_factory_exists && l1_fact.size() <= pin_limit) || (l2_factory_exists && l2_fact.size() <= pin_limit)))
+    while (qubit_count < max_phys_qubits || l1_fact.empty() || (l2_factory_exists && l2_fact.empty()))
     {
         // check if there is an L2 factory in our spec. If so, make one
         if (l2_factory_exists)

@@ -32,6 +32,9 @@ def trotter_expand_pauli_string(ctrl: str, qr: str, term: list[(str, int)], c: f
         out += f'cx {qr}[{q}], {qr}[{lq}];\n'
     # do RZ from control to final qubit here: 
     out += f'crz({c}) {ctrl}, {qr}[{lq}];\n'
+    _, lq = t[-1]
+    for (_,q) in t[:-1][::-1]:
+        out += f'cx {qr}[{q}], {qr}[{lq}];\n'
     # undo any basis transformations:
     for (p,q) in t:
         if p == 'X':
