@@ -11,7 +11,7 @@
 #include <numeric>
 #include <unordered_set>
 
-#define SHOW_FIRST_EPOCH_ONLY
+//#define SHOW_FIRST_EPOCH_ONLY
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -208,7 +208,7 @@ MEMOPT::emit_memory_instructions()
 {
 #if defined(SHOW_FIRST_EPOCH_ONLY)
     epoch_number++;
-    if (epoch_number == 50)
+    if (epoch_number == 1)
     {
         std::cout << "[ MEMOPT ] first epoch ------------------\n";
 
@@ -216,6 +216,14 @@ MEMOPT::emit_memory_instructions()
         for (auto q : working_set_)
             std::cout << " " << q;
         std::cout << "\n";
+
+        std::cout << "pending instructions:";
+        for (size_t i = 0; i < 8; i++)
+        {
+            if (i >= pending_inst_buffer_.size())
+                break;
+            std::cout << "\t" << pending_inst_buffer_[i]->to_string() << "\n";
+        }
 
         std::cout << "instruction windows:";
         for (const auto& [q, win] : inst_windows_)
@@ -233,7 +241,7 @@ MEMOPT::emit_memory_instructions()
     auto result = emit_impl_->emit_memory_instructions(working_set_, pending_inst_buffer_, inst_windows_);
 
 #if defined(SHOW_FIRST_EPOCH_ONLY)
-    if (epoch_number == 50)
+    if (epoch_number == 1)
     {
         std::cout << "new working set:";
         for (auto q : result.working_set)
