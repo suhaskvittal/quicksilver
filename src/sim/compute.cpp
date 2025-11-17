@@ -955,7 +955,7 @@ COMPUTE::do_t_gate(client_ptr& c, inst_ptr inst, std::vector<PATCH*> qubit_patch
             uint64_t routing_alloc_cycle = cycle_routing_start;
 #else
             auto [path, routing_alloc_cycle] = route_path_from_src_to_dst(q_bus_it, f_bus_it, cycle_routing_start);
-            update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+latency);
+            update_free_times_along_routing_path(path, routing_alloc_cycle+2, routing_alloc_cycle+2);
 #endif
 
             // note that `routing_alloc_cycle - current_cycle()` is number of cycles spent waiting for routing space

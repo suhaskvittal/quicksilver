@@ -86,6 +86,7 @@ ProgramStats analyze_binary_file(const std::string& input_file)
             case INSTRUCTION::TYPE::TX:
             case INSTRUCTION::TYPE::TXDG:
                 stats.unrolled_t_gates++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::S:
@@ -93,23 +94,28 @@ ProgramStats analyze_binary_file(const std::string& input_file)
             case INSTRUCTION::TYPE::SX:
             case INSTRUCTION::TYPE::SXDG:
                 stats.s_gates++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::H:
                 stats.h_gates++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::CX:
                 stats.cx_gates++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::MSWAP:
             case INSTRUCTION::TYPE::MSWAP_C:
                 stats.mswap_instructions++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::MPREFETCH:
                 stats.mprefetch_instructions++;
+                stats.unrolled_instructions++;
                 break;
 
             case INSTRUCTION::TYPE::RX:
@@ -117,6 +123,9 @@ ProgramStats analyze_binary_file(const std::string& input_file)
                 // For rotation gates, count only non-software gates in the unrolled sequence
                 for (auto gate_type : inst.urotseq)
                 {
+                    if (is_software_instruction(gate_type))
+                        continue;
+
                     if (gate_type == INSTRUCTION::TYPE::T ||
                         gate_type == INSTRUCTION::TYPE::TDG ||
                         gate_type == INSTRUCTION::TYPE::TX ||
@@ -135,8 +144,15 @@ ProgramStats analyze_binary_file(const std::string& input_file)
                     {
                         stats.h_gates++;
                     }
+                    stats.unrolled_instructions++;
                 }
-                stats.unrolled_instructions += inst.urotseq.size();
+                break;
+
+            case INSTRUCTION::TYPE::CCX:
+            case INSTRUCTION::TYPE::CCZ:
+                stats.unrolled_instructions += 13;  // 15 uops for CCX, 13 for CCZ
+                stats.cx_gates += 6;
+                stats.unrolled_t_gates += 7;
                 break;
 
             default:
