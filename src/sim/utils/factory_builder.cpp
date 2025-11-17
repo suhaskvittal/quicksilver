@@ -161,9 +161,7 @@ factory_build(double target_error_rate,
             qubit_count += get_factory_qubit_count(l2_fact_conf);
         }
 
-        for (size_t i = 0; i < l2_l1_ratio 
-                            && (qubit_count < max_phys_qubits || l1_fact.empty()) 
-                            && (l2_factory_exists || l1_fact.size() <= pin_limit); i++)
+        for (size_t i = 0; i < l2_l1_ratio && (qubit_count < max_phys_qubits || l1_fact.empty()); i++)
         {
             T_FACTORY* f = create_factory_from_info(l1_fact_conf, l1_round_ns, 0);
             l1_fact.push_back(f);
