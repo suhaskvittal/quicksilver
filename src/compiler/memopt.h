@@ -36,7 +36,7 @@ public:
     };
 
     constexpr static size_t PENDING_INST_BUFFER_SIZE{16384};
-    constexpr static size_t OUTGOING_INST_BUFFER_SIZE{16384};
+    constexpr static size_t OUTGOING_INST_BUFFER_SIZE{1024*1024};
     constexpr static size_t READ_LIMIT{2048};
 
     uint64_t s_inst_read{0};
