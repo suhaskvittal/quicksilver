@@ -18,59 +18,199 @@
 #include <unordered_map>
 #include <vector>
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Helper functions and useful types:
+ * */
+
+namespace prog
+{
+namespace
+{
+
+struct comparable_float_type
+{
+    double value;
+    ssize_t precision;
+
+    bool
+    operator==(const comparable_float_type& other) const
+    {
+        return -log10(fabsl(value - other.value))
+                > std::max(static_cast<double>(precision), static_cast<double>(other.precision))-2;
+    }
+};
+
+}  // anonymous namespace
+}  // namespace prog
+
+
+/*
+ * Hash specialization for `comparable_float_type` and `fpa_type`
+ * */
+
+namespace std
+{
+
+template <>
+struct hash<INSTRUCTION::fpa_type>
+{
+    using value_type = INSTRUCTION::fpa_type;
+
+    size_t
+    operator()(const value_type& x) const
+    {
+        const auto& words = x.get_words();
+        uint64_t out = std::reduce(words.begin(), words.end(), uint64_t{0},
+                            [] (uint64_t acc, uint64_t word) { return acc ^ word; });
+        return out;
+    }
+};
+
+template <>
+struct hash<comparable_float_type>
+{
+    size_t
+    operator()(const comparable_float_type& x) const
+    {
+        return std::hash<double>{}(x.value) ^ std::hash<ssize_t>{}(x.precision);
+    }
+};
+
+}  // namespace std
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 namespace prog
 {
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-//#define ANGLE_USE_CFLOAT
+namespace
+{
 
 #if defined(ANGLE_USE_CFLOAT)
-using ANGLE_TYPE = COMPARABLE_FLOAT;
+using angle_type = comparable_float_type;
 #else
-using ANGLE_TYPE = INSTRUCTION::fpa_type;
+using angle_type = INSTRUCTION::fpa_type;
 #endif
 
-ANGLE_TYPE
-make_angle(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
-{
-#if defined(ANGLE_USE_CFLOAT)
-    return COMPARABLE_FLOAT{convert_fpa_to_float(rotation), precision};
-#else
-    return INSTRUCTION::fpa_type(rotation);
-#endif
-}
+enum BASIS_TYPE { X, Z, NONE };
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-struct PROMISE
+/*
+ * `promise_type` stores the outcome of a scheduled synthesis.
+ * Once `ready` is set, `urotseq` is valid. A promise is deleted
+ * once `ref_count == 0`
+ * */
+struct promise_type
 {
-    using ptr = std::unique_ptr<PROMISE>;
+    using ptr = std::unique_ptr<promise_type>;
 
     bool                            ready{false};
     size_t                          ref_count{1};
     std::vector<INSTRUCTION::TYPE>  urotseq;
 };
 
-struct PENDING_ENTRY
+/*
+ * `pending_type` is a pending synthesis request.
+ * This is consumed by a thread once it hits the head
+ * of `RM_PENDING` (see below).
+ * */
+struct pending_type
 {
-    using ptr = std::unique_ptr<PENDING_ENTRY>;
+    using ptr = std::unique_ptr<pending_type>;
 
     INSTRUCTION::fpa_type rotation;
     ssize_t precision;
 };
 
-static std::deque<PENDING_ENTRY::ptr>                           RM_PENDING;
-static std::unordered_map<ANGLE_TYPE, PROMISE::ptr>             RM_READY_MAP;
-static std::mutex                                               RM_SCHED_LOCK;
-static std::condition_variable                                  RM_PENDING_UPDATED;
-static std::condition_variable                                  RM_VALUE_READY;
+/*
+ * Explanation of data structures:
+ *  `RM_PENDING`: pending synthesis requests
+ *  `RM_READY_MAP` a map of promises
+ *  `RM_SCHED_LOCK`: mutex on all scheduling data structures shown
+ *  `RM_PENDING_UPDATED` and `RM_VALUE_READY` are two condition variables for `RM_SCHED_LOCK`
+ *  `RM_SIG_DONE` is used to kill all threads when cleanup starts.
+ *  `THREAD_ID_TO_LOCK` is used for debugging.
+ * */
+static std::deque<pending_type::ptr>                        RM_PENDING;
+static std::unordered_map<angle_type, promise_type::ptr>    RM_READY_MAP;
+static std::mutex                                           RM_SCHED_LOCK;
+static std::condition_variable                              RM_PENDING_UPDATED;
+static std::condition_variable                              RM_VALUE_READY;
+static std::atomic<bool>                                    RM_SIG_DONE{false};
+static std::unordered_map<std::thread::id, size_t>          THREAD_ID_TO_INDEX;
 
-static std::unordered_map<std::thread::id, size_t> THREAD_ID_TO_INDEX;
+/*
+ * Gridsynth debug info is printed periodically according to `GS_CALL_PRINT_FREQUENCY`
+ * */
+constexpr size_t           GS_CALL_PRINT_FREQUENCY = 100'000;
+static std::atomic<size_t> GS_CALL_COUNT{0};
 
-static std::atomic<bool> RM_SIG_DONE{false};
+/*
+ * Converts the given FPA to either (1) an FPA, or (2) a float (see `angle_type` above).
+ * */
+angle_type _make_angle(const INSTRUCTION::fpa_type&, ssize_t precision);
+
+/*
+ * Returns the basis (X or Z or None) for the given gate.
+ * */
+constexpr BASIS_TYPE _get_basis_type(INSTRUCTION::TYPE g);
+
+/*
+ * Flips the basis of the given gate. For example, T --> TX or vice versa.
+ * */
+constexpr INSTRUCTION::TYPE _flip_basis(INSTRUCTION::TYPE g);
+
+/*
+ * `_get_rotation_value` quantizes the "rotation" of `g` to a 3-bit value.
+ * 1 = pi/4 rotation (T-like gates),
+ * 2 = pi/2 rotation (S-like gates)
+ * 4 = pi rotations (X or Z)
+ * */
+constexpr int8_t _get_rotation_value(INSTRUCTION::TYPE g);
+
+/*
+ * In `_thread_iteration`, a thread will start synthesizing some pending
+ * synthesis request.
+ * */
+void _thread_iteration();
+
+/*
+ * Converts a rotation gate into a Clifford+T gate sequence.
+ * */
+std::vector<INSTRUCTION::TYPE> _synthesize_rotation(const INSTRUCTION::fpa_type&, ssize_t precision);
+
+/*
+ * Flips the basis of all gates sandwiched by two H gates. For example, H*T*S*H --> TX*SX
+ * */
+void _flip_h_subsequences(std::vector<INSTRUCTION::TYPE>&);
+
+/*
+ * Consolidation involves merging gates in the same basis into one or two gates (at most
+ * one non-software gate).
+ * */
+void _consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>&);
+
+/*
+ * This function overwrites the data starting from `begin` inplace (by modifying the gate types).
+ * Then, it returns an iterator right after the last modified entry.
+ * */
+std::vector<INSTRUCTION::TYPE>::iterator _consolidate_gate(BASIS_TYPE, 
+                                                            int8_t rotation_sum,
+                                                            std::vector<INSTRUCTION::TYPE>::iterator begin);
+
+/*
+ * This is just a utility function for printing information
+ * */
+template <class ITERABLE>
+std::string _urotseq_to_string(ITERABLE iterable);
+
+}  // anonymous namespace
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -84,7 +224,7 @@ rotation_manager_init(size_t num_threads)
         std::thread th{ [] ()
         {
             while (!RM_SIG_DONE.load())
-                rm_thread_iteration();
+                _thread_iteration();
         }};
         THREAD_ID_TO_INDEX[th.get_id()] = i;
         th.detach();
@@ -109,31 +249,30 @@ rotation_manager_end()
 ////////////////////////////////////////////////////////////
 
 void
-rm_schedule_synthesis(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
+rotation_manager_schedule_synthesis(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
 {
     std::lock_guard<std::mutex> sched_lock(RM_SCHED_LOCK);
-    PENDING_ENTRY::ptr p = std::make_unique<PENDING_ENTRY>(rotation, precision);
+    pending_type::ptr p = std::make_unique<pending_type>(rotation, precision);
     RM_PENDING.push_back(std::move(p));
     RM_PENDING_UPDATED.notify_one();
 }
 
 std::vector<INSTRUCTION::TYPE>
-rm_find(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
+rotation_manager_find(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
 {
-    auto k = make_angle(rotation, precision);
+    auto k = _make_angle(rotation, precision);
 
     std::unique_lock<std::mutex> sched_lock(RM_SCHED_LOCK);
-    
+
 rm_get_entry:
     auto it = RM_READY_MAP.find(k);
     if (it == RM_READY_MAP.end() || !it->second->ready)
     {
-//      std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " waiting for rotation " << fpa::to_string(rotation) << ", precision = " << precision << "\n";
         RM_VALUE_READY.wait(sched_lock);
         goto rm_get_entry;
     }
 
-    PROMISE::ptr& p = it->second;
+    promise_type::ptr& p = it->second;
     auto urotseq = p->urotseq;
 
     p->ref_count--;
@@ -147,8 +286,114 @@ rm_get_entry:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+/* HELPER FUNCTIONS START HERE */
+
+namespace
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+angle_type
+_make_angle(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
+{
+#if defined(ANGLE_USE_CFLOAT)
+    return comparable_float_type{convert_fpa_to_float(rotation), precision};
+#else
+    return INSTRUCTION::fpa_type(rotation);
+#endif
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+constexpr BASIS_TYPE
+_get_basis_type(INSTRUCTION::TYPE g)
+{
+    switch (g)
+    {
+    case INSTRUCTION::TYPE::X:
+    case INSTRUCTION::TYPE::SX:
+    case INSTRUCTION::TYPE::SXDG:
+    case INSTRUCTION::TYPE::TX:
+    case INSTRUCTION::TYPE::TXDG:
+        return BASIS_TYPE::X;
+
+    case INSTRUCTION::TYPE::Z:
+    case INSTRUCTION::TYPE::S:
+    case INSTRUCTION::TYPE::SDG:
+    case INSTRUCTION::TYPE::T:
+    case INSTRUCTION::TYPE::TDG:
+        return BASIS_TYPE::Z;
+
+    default:
+        return BASIS_TYPE::NONE;
+    }
+}
+
+constexpr INSTRUCTION::TYPE
+_flip_basis(INSTRUCTION::TYPE g)
+{
+    switch (g)
+    {
+    case INSTRUCTION::TYPE::Z:
+        return INSTRUCTION::TYPE::X;
+    case INSTRUCTION::TYPE::S:
+        return INSTRUCTION::TYPE::SX;
+    case INSTRUCTION::TYPE::SDG:
+        return INSTRUCTION::TYPE::SXDG;
+    case INSTRUCTION::TYPE::T:
+        return INSTRUCTION::TYPE::TX;
+    case INSTRUCTION::TYPE::TDG:
+        return INSTRUCTION::TYPE::TXDG;
+
+    case INSTRUCTION::TYPE::X:
+        return INSTRUCTION::TYPE::Z;
+    case INSTRUCTION::TYPE::SX:
+        return INSTRUCTION::TYPE::S;
+    case INSTRUCTION::TYPE::SXDG:
+        return INSTRUCTION::TYPE::SDG;
+    case INSTRUCTION::TYPE::TX:
+        return INSTRUCTION::TYPE::T;
+    case INSTRUCTION::TYPE::TXDG:
+        return INSTRUCTION::TYPE::TDG;
+
+    default:
+        return g;
+    }
+}
+
+constexpr int8_t
+_get_rotation_value(INSTRUCTION::TYPE g)
+{
+    // the output is r, where g is some rotation of r*pi/4
+    switch (g)
+    {
+    case INSTRUCTION::TYPE::X:
+    case INSTRUCTION::TYPE::Z:
+        return 4;
+    case INSTRUCTION::TYPE::S:
+    case INSTRUCTION::TYPE::SX:
+        return 2;
+    case INSTRUCTION::TYPE::SDG:
+    case INSTRUCTION::TYPE::SXDG:
+        return 6;
+    case INSTRUCTION::TYPE::T:
+    case INSTRUCTION::TYPE::TX:
+        return 1;
+    case INSTRUCTION::TYPE::TDG:
+    case INSTRUCTION::TYPE::TXDG:
+        return 7;
+    default:
+        return -1;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
-rm_thread_iteration()
+_thread_iteration()
 {
     // critical section: get pending rotation request:
     std::unique_lock<std::mutex> sched_lock(RM_SCHED_LOCK);
@@ -162,28 +407,24 @@ rm_thread_iteration()
         return;
     }
 
-    PENDING_ENTRY::ptr entry = std::move(RM_PENDING.front());
+    pending_type::ptr entry = std::move(RM_PENDING.front());
     RM_PENDING.pop_front();
-    auto k = make_angle(entry->rotation, entry->precision);
+    auto k = _make_angle(entry->rotation, entry->precision);
     size_t ref_count = 1;
 
     // insert into `RM_READY_MAP`:
     auto it = RM_READY_MAP.find(k);
     if (it == RM_READY_MAP.end())
     {
-        PROMISE::ptr p = std::make_unique<PROMISE>();
+        promise_type::ptr p = std::make_unique<promise_type>();
         p->ref_count = ref_count;
-        PROMISE* p_raw = p.get();  // need this after we move `p`
+        promise_type* p_raw = p.get();  // need this after we move `p`
         RM_READY_MAP.insert({k, std::move(p)});
         sched_lock.unlock();
 
-        // parallel region:
-        p_raw->urotseq = rm_synthesize_rotation(entry->rotation, entry->precision);
+        p_raw->urotseq = _synthesize_rotation(entry->rotation, entry->precision);
 
         sched_lock.lock();
-
-//      std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " synthesized rotation " << fpa::to_string(entry->rotation) << ", precision = " << entry->precision << "\n";
-
         p_raw->ready = true;
         RM_VALUE_READY.notify_all();
     }
@@ -196,104 +437,8 @@ rm_thread_iteration()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
-rm_flip_h_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
-{
-    size_t h_count = std::count(urotseq.begin(), urotseq.end(), INSTRUCTION::TYPE::H);
-
-    auto begin = urotseq.begin();
-    // while there are at least two H gates, flip the subsequence between them:
-    while (h_count > 2)
-    {
-        auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
-        if (h_begin == urotseq.end())
-            break;
-
-        auto h_end = std::find(h_begin+1, urotseq.end(), INSTRUCTION::TYPE::H);
-        if (h_end == urotseq.end())
-            break;
-
-        std::for_each(h_begin+1, h_end, [](auto& g) { g = flip_basis(g); });
-
-        // set the H gates to nil -- we will remove all NIL gates at the end:
-        *h_begin = INSTRUCTION::TYPE::NIL;
-        *h_end = INSTRUCTION::TYPE::NIL;
-
-        begin = h_end+1;
-        h_count -= 2;
-    }
-
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
-    urotseq.erase(it, urotseq.end());
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-rm_consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
-{
-    // generate a subsequence, stop until we hit an H gate or gate in a different basis:
-    BASIS_TYPE current_basis{BASIS_TYPE::NONE};
-    int8_t current_rotation_sum{0};
-    auto seq_begin = urotseq.begin();
-    for (auto it = urotseq.begin(); it != urotseq.end(); it++)
-    {
-        auto g = *it;
-        if (current_basis != BASIS_TYPE::NONE)
-        {
-            if (get_basis_type(g) != current_basis)
-            {
-                // replace the sequence with the appropriate gate:
-                auto seq_kill_begin = rm_consolidate_gate(current_basis, current_rotation_sum, seq_begin);
-                // set all gates from `seq_kill_begin` to `it` to `NIL` -- we will remove these later:
-                std::fill(seq_kill_begin, it, INSTRUCTION::TYPE::NIL);
-                
-                // set basis type to none since we can now start a new subsequence
-                current_basis = BASIS_TYPE::NONE;
-                current_rotation_sum = 0;
-            }
-            else
-            {
-                current_rotation_sum += get_rotation_value(g);
-                current_rotation_sum &= 7;  // mod 8
-            }
-        }
-
-        // this is not an else since we may set `current_basis` to `BASIS_TYPE::NONE` in the above if statement
-        if (current_basis == BASIS_TYPE::NONE)
-        {
-            if (g == INSTRUCTION::TYPE::H)
-                continue;  // nothing to be done
-
-            current_basis = get_basis_type(g);
-            if (current_basis == BASIS_TYPE::NONE)
-                throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
-            current_rotation_sum = get_rotation_value(g);
-            seq_begin = it;
-        }
-    }
-
-    // if we are still in a subsequence, finish it off:
-    if (current_basis != BASIS_TYPE::NONE)
-    {
-        auto seq_kill_begin = rm_consolidate_gate(current_basis, current_rotation_sum, seq_begin);
-        std::fill(seq_kill_begin, urotseq.end(), INSTRUCTION::TYPE::NIL);
-    }
-
-    // remove all `NIL` gates:
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
-    urotseq.erase(it, urotseq.end());
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-constexpr size_t GS_CALL_PRINT_FREQUENCY = 100'000;
-static std::atomic<size_t> GS_CALL_COUNT{0};
-
 std::vector<INSTRUCTION::TYPE>
-rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
+_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
 {
     size_t gs_call_id = GS_CALL_COUNT.fetch_add(1);
 
@@ -301,19 +446,18 @@ rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     std::string fpa_str = fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP);
     std::string epsilon = "1e-" + std::to_string(precision);
 
-    bool measure_time = gs_call_id % GS_CALL_PRINT_FREQUENCY == 0 || (precision >= 8);
-//  bool measure_time = false;
+    bool measure_time = (gs_call_id % GS_CALL_PRINT_FREQUENCY == 0) || (precision >= 8);
     auto [gates_str, t_ms] = gridsynth::gridsynth_gates(
-                                    fpa_str, 
+                                    fpa_str,
                                     epsilon,
                                     NWQEC::DEFAULT_DIOPHANTINE_TIMEOUT_MS,
                                     NWQEC::DEFAULT_FACTORING_TIMEOUT_MS,
-                                    false, 
+                                    false,
                                     measure_time);
 
     if (gs_call_id % GS_CALL_PRINT_FREQUENCY == 0)
     {
-        std::cout << "GS call: " << gs_call_id << " from thread " 
+        std::cout << "GS call: " << gs_call_id << " from thread "
                 << THREAD_ID_TO_INDEX[std::this_thread::get_id()]
                 << "\n\tinputs: " << fpa_str << ", epsilon: " << epsilon
                 << "\n\tgates str: " << gates_str
@@ -324,9 +468,9 @@ rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
 
     if (t_ms > 5000.0)
     {
-        std::cerr << "[gs_cpp] possible performance issue: gridsynth took " << t_ms << " ms for inputs: " 
-            << fpa_str 
-            << ", epsilon: " << epsilon << " (b = " << precision 
+        std::cerr << "[gs_cpp] possible performance issue: gridsynth took " << t_ms << " ms for inputs: "
+            << fpa_str
+            << ", epsilon: " << epsilon << " (b = " << precision
             << "), fpa hex = " << rotation.to_hex_string() << "\n";
     }
 
@@ -346,16 +490,13 @@ rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     }
 
     [[maybe_unused]] size_t urotseq_original_size = out.size();
-
-    // optimizations:
-    rm_flip_h_subsequences(out);
-    rm_consolidate_and_reduce_subsequences(out);
-
+    _flip_h_subsequences(out);
+    _consolidate_and_reduce_subsequences(out);
     [[maybe_unused]] size_t urotseq_reduced_size = out.size();
 
     if (gs_call_id % GS_CALL_PRINT_FREQUENCY == 0)
     {
-        std::cout << "\treduced urotseq size from " << urotseq_original_size 
+        std::cout << "\treduced urotseq size from " << urotseq_original_size
                 << " to " << urotseq_reduced_size << "\n";
     }
 
@@ -365,8 +506,101 @@ rm_synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+void
+_flip_h_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
+{
+    size_t h_count = std::count(urotseq.begin(), urotseq.end(), INSTRUCTION::TYPE::H);
+
+    auto begin = urotseq.begin();
+    // while there are at least two H gates, flip the subsequence between them:
+    while (h_count > 2)
+    {
+        auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
+        if (h_begin == urotseq.end())
+            break;
+
+        auto h_end = std::find(h_begin+1, urotseq.end(), INSTRUCTION::TYPE::H);
+        if (h_end == urotseq.end())
+            break;
+
+        std::for_each(h_begin+1, h_end, [](auto& g) { g = _flip_basis(g); });
+
+        // set the H gates to nil -- we will remove all NIL gates at the end:
+        *h_begin = INSTRUCTION::TYPE::NIL;
+        *h_end = INSTRUCTION::TYPE::NIL;
+
+        begin = h_end+1;
+        h_count -= 2;
+    }
+
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    urotseq.erase(it, urotseq.end());
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+_consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
+{
+    // generate a subsequence, stop until we hit an H gate or gate in a different basis:
+    BASIS_TYPE current_basis{BASIS_TYPE::NONE};
+    int8_t current_rotation_sum{0};
+    auto seq_begin = urotseq.begin();
+    for (auto it = urotseq.begin(); it != urotseq.end(); it++)
+    {
+        auto g = *it;
+        if (current_basis != BASIS_TYPE::NONE)
+        {
+            if (_get_basis_type(g) != current_basis)
+            {
+                // replace the sequence with the appropriate gate:
+                auto seq_kill_begin = _consolidate_gate(current_basis, current_rotation_sum, seq_begin);
+                // set all gates from `seq_kill_begin` to `it` to `NIL` -- we will remove these later:
+                std::fill(seq_kill_begin, it, INSTRUCTION::TYPE::NIL);
+
+                // set basis type to none since we can now start a new subsequence
+                current_basis = BASIS_TYPE::NONE;
+                current_rotation_sum = 0;
+            }
+            else
+            {
+                current_rotation_sum += _get_rotation_value(g);
+                current_rotation_sum &= 7;  // mod 8
+            }
+        }
+
+        // this is not an else since we may set `current_basis` to `BASIS_TYPE::NONE` in the above if statement
+        if (current_basis == BASIS_TYPE::NONE)
+        {
+            if (g == INSTRUCTION::TYPE::H)
+                continue;  // nothing to be done
+
+            current_basis = _get_basis_type(g);
+            if (current_basis == BASIS_TYPE::NONE)
+                throw std::runtime_error("invalid gate: " + std::string(BASIS_GATES[static_cast<size_t>(g)]));
+            current_rotation_sum = _get_rotation_value(g);
+            seq_begin = it;
+        }
+    }
+
+    // if we are still in a subsequence, finish it off:
+    if (current_basis != BASIS_TYPE::NONE)
+    {
+        auto seq_kill_begin = _consolidate_gate(current_basis, current_rotation_sum, seq_begin);
+        std::fill(seq_kill_begin, urotseq.end(), INSTRUCTION::TYPE::NIL);
+    }
+
+    // remove all `NIL` gates:
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    urotseq.erase(it, urotseq.end());
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 std::vector<INSTRUCTION::TYPE>::iterator
-rm_consolidate_gate(BASIS_TYPE basis, int8_t rotation_sum, std::vector<INSTRUCTION::TYPE>::iterator begin)
+_consolidate_gate(BASIS_TYPE basis, int8_t rotation_sum, std::vector<INSTRUCTION::TYPE>::iterator begin)
 {
     bool is_z = basis == BASIS_TYPE::Z;
     if (rotation_sum == 0)
@@ -392,6 +626,31 @@ rm_consolidate_gate(BASIS_TYPE basis, int8_t rotation_sum, std::vector<INSTRUCTI
 
     return begin;
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+// Template helper function definition
+template <class ITERABLE> std::string
+_urotseq_to_string(ITERABLE iterable)
+{
+    std::stringstream strm;
+    bool first{true};
+    for (auto x : iterable)
+    {
+        if (!first)
+            strm << "'";
+        first = false;
+        std::string_view sx = BASIS_GATES[static_cast<size_t>(x)];
+        strm << sx;
+    }
+    return strm.str();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}  // anonymous namespace
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

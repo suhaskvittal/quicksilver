@@ -297,7 +297,7 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
             if (rotation.popcount() == 0)
                 return;
             // schedule the rotation's synthesis:
-            rm_schedule_synthesis(rotation, get_required_precision(rotation));
+            rotation_manager_schedule_synthesis(rotation, get_required_precision(rotation));
         }
 
         // first, check if any arguments are registers with width > 1 that are un-indexed:
@@ -756,7 +756,7 @@ PROGRAM_INFO::complete_rotation_gates()
             }
             else
             {
-                inst.urotseq = rm_find(inst.angle, get_required_precision(inst.angle));
+                inst.urotseq = rotation_manager_find(inst.angle, get_required_precision(inst.angle));
                 rotation_cache_.insert({inst.angle, inst.urotseq});
             }
 

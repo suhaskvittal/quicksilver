@@ -6,6 +6,7 @@
 #include "compiler/memory_scheduler/impl.h"
 
 #include <iostream>
+#include <unordered_set>
 
 namespace compile
 {
@@ -19,7 +20,7 @@ namespace memory_scheduler
  * Helper functions + data structures
  * */
 
-namespace 
+namespace
 {
 
 /*
@@ -66,13 +67,13 @@ std::vector<CST_NODE*> _cst_init(const active_set_type&, size_t qubit_count);
 void _cst_update(std::vector<CST_NODE*>&, inst_ptr, config_type conf);
 
 /*
- * Traverses the CST by using the `child` pointer in each node. Returns the 
+ * Traverses the CST by using the `child` pointer in each node. Returns the
  * deepest node from the starting node (deepest node has null child)
  * */
 CST_NODE* _cst_traverse(CST_NODE*);
 
 /*
- * Returns the CST node that maximizes compute intensity 
+ * Returns the CST node that maximizes compute intensity
  * See `_cst_score` for calculation.
  * */
 CST_NODE* _cst_find_best_node(const std::vector<CST_NODE*>&);
@@ -113,6 +114,14 @@ hint(const active_set_type& active_set, const dag_ptr& dag, config_type conf)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+/* HELPER FUNCTION DEFINITIONS START HERE */
+
+namespace
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 std::vector<CST_NODE*>
 _cst_init(const active_set_type& active_set, size_t qubit_count)
 {
@@ -129,11 +138,11 @@ _cst_init(const active_set_type& active_set, size_t qubit_count)
 ////////////////////////////////////////////////////////////
 
 void
-_cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst)
+_cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type conf)
 {
     // identify the deepest nodes in the CST that contain the arguments of `inst`
-    std::unordered<CST_NODE*> deepest_nodes; 
-    oldest_nodes.reserve(get_inst_qubit_count(inst->type));
+    std::unordered_set<CST_NODE*> deepest_nodes;
+    deepest_nodes.reserve(get_inst_qubit_count(inst->type));
     bool any_frozen{false};
     for (auto it = inst->q_begin(); it != inst->q_end(); it++)
     {
@@ -201,7 +210,7 @@ _cst_traverse(CST_NODE* x)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CST_NDOE*
+CST_NODE*
 _cst_find_best_node(const std::vector<CST_NODE*>& entry_points)
 {
     CST_NODE* best_cst_node{nullptr};
@@ -210,7 +219,7 @@ _cst_find_best_node(const std::vector<CST_NODE*>& entry_points)
     _cst_generic_dfs(entry_points,
                     [&best_cst_node, &best_score] (CST_NODE* x)
                     {
-                        double score = _cst_score(x); 
+                        double score = _cst_score(x);
                         if (best_cst_node == nullptr || score > best_score)
                         {
                             best_cst_node = x;
@@ -218,6 +227,7 @@ _cst_find_best_node(const std::vector<CST_NODE*>& entry_points)
                         }
                     },
                     [] (CST_NODE*) {});
+    return best_cst_node;
 }
 
 double
@@ -259,6 +269,11 @@ _cst_generic_dfs(const std::vector<CST_NODE*>& entry_points, const LOOP_CALLBACK
     for (auto* x : visited)
         exitf(x);
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}  // anonymous namespace
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
