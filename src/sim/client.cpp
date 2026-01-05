@@ -1,11 +1,9 @@
 /*
-    author: Suhas Vittal
-    date:   15 September 2025
-*/
+ *  author: Suhas Vittal
+ *  date:   4 January 2026
+ * */
 
-#include "client.h"
-
-#include <iostream>
+#include "sim/client.h"
 
 namespace sim
 {
@@ -13,84 +11,72 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
-QUBIT::operator==(const QUBIT& other) const
-{
-    return client_id == other.client_id && qubit_id == other.qubit_id;
-}
-
-std::string
-QUBIT::to_string() const
-{
-    return "q" + std::to_string(qubit_id) + " (c" + std::to_string(client_id) + ")";
-}
-
-std::ostream&
-operator<<(std::ostream& os, const QUBIT& q)
-{
-    os << q.to_string();
-    return os;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-CLIENT::CLIENT(std::string trace_file, int8_t id)
-    :trace_file(trace_file),
-    id(id),
-    num_qubits(open_file())
+CLIENT::CLIENT(std::string _trace_file, int8_t _id)
+    :trace_file(_trace_file),
+    id(_id),
+    num_qubits(open_file_and_read_qubit_count()),
+    dag{new DAG(num_qubits)}
 {}
 
 CLIENT::~CLIENT()
 {
-    close_file();
+    generic_strm_close(tristrm_)
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CLIENT::inst_ptr
-CLIENT::read_instruction_from_trace()
+std::vector<inst_ptr>
+CLIENT::get_ready_instructions()
 {
-    INSTRUCTION::io_encoding enc{};
+    constexpr size_t DAG_WATERMARK = 16384;
+    // fill up the DAG if it is below some count:
+    while (dag_->inst_count() < DAG_WATERMARK)
+        read_instruction_from_trace();
 
-    if (eof())
-    {
-        has_hit_eof_once = true;
-        // reload the file:
-        close_file();
-        open_file();
-    }
-
-    enc.read_write([this] (void* buf, size_t size) { return generic_strm_read(this->trace_istrm, buf, size); });
-
-    inst_ptr inst{new INSTRUCTION(std::move(enc))};
-    inst->inst_number = s_inst_read++;
-    return inst;
+    return dag_->get_front_layer();
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
+void
+CLIENT::retire_instruction(inst_ptr inst)
+{
+    dag_->remove_instruction_from_front_layer(inst);
+    s_inst_done++;
+    s_unrolled_inst_done += std::max(size_t{1}, inst->num_uops);
+}
 
 bool
 CLIENT::eof() const
 {
-    return generic_strm_eof(trace_istrm);
+    return has_hit_eof_once_;
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 size_t
-CLIENT::open_file()
+CLIENT::open_file_and_read_qubit_count()
 {
-    uint32_t n{0};
-    generic_strm_open(trace_istrm, trace_file, "rb");
-    generic_strm_read(trace_istrm, &n, 4);
+    uint32_t n;
+    generic_strm_open(tristrm_, trace_file, "r");
+    generic_strm_read(tristrm_, &n, 4);
     return static_cast<size_t>(n);
 }
 
-void
-CLIENT::close_file()
+CLIENT::inst_ptr
+CLIENT::read_instruction_from_file()
 {
-    generic_strm_close(trace_istrm);
+    if (eof())
+    {
+        std::cerr << "CLIENT::read_instruction_from_file: client " << static_cast<int>(id)
+                << " hit eof for trace \"" << trace_file << "\"" << _die{};
+    }
+
+    INSTRUCTION::io_encoding enc{};
+    enc.read_write([this] (void* buf, size_t size) { return generic_strm_read(this->tristrm_, buf, size); });
+    inst_ptr inst{new INSTRUCTION(std::move(enc))};
+    inst->inst_number = s_inst_read++;
+    return inst;
 }
 
 ////////////////////////////////////////////////////////////

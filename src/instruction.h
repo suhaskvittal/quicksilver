@@ -7,15 +7,15 @@
 #define TYPES_h
 
 #include "fixed_point/angle.h"
+#include "generic_io.h"
+#include "globals.h"
 
-#include <cstdint>
+#include <array>
 #include <iosfwd>
 #include <vector>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-using qubit_type = int64_t;
 
 constexpr std::string_view BASIS_GATES[] = 
 {
@@ -30,44 +30,24 @@ constexpr std::string_view BASIS_GATES[] =
 
     // memory instruction:
     "mswap",
-    "mprefetch",
-    "mswap_c",
 
     "nil"
 };
 
-struct INSTRUCTION
+class INSTRUCTION
 {
-    constexpr static size_t FPA_PRECISION = 64;
+    constexpr static size_t FPA_PRECISION{64};
+    constexpr static size_t MAX_QUBITS{3};
+    constexpr static int64_t INVALID_NUMBER{-1};
 
+    using qubit_array = std::array<qubit_type, MAX_QUBITS>;
     using fpa_type = FPA_TYPE<FPA_PRECISION>;
-
-    // `io_encoding` is to simplify the serialization of the instruction to a byte stream.
-    struct io_encoding
-    {
-        using gate_id_type = uint8_t;
-
-        gate_id_type        type_id{static_cast<gate_id_type>(INSTRUCTION::TYPE::NIL)};
-        qubit_type          qubits[3]{-1,-1,-1};                   // all gates are at most 3-qubit gates
-        uint16_t            fpa_word_count{fpa_type::NUM_WORDS};   // need this for compatibility in case `FPA_PRECISION` changes.
-        fpa_type::word_type angle[fpa_type::NUM_WORDS];
-        uint32_t            urotseq_size{0};
-        gate_id_type*       urotseq{nullptr};
-
-        io_encoding() =default;
-        io_encoding(const INSTRUCTION*);
-        ~io_encoding();
-
-        // `read_write` requires the function argument to require
-        //  (1) a pointer to a memory location to read from/write to, and (2) the size of the memory location.
-        // We have a single function since the calling code is the same for both reading and writing.
-        // We use templates to abstract away the IO functions. So, zlib, lzma, or stdio work equally well.
-        template <class RW_FUNC> void read_write(const RW_FUNC&);
-    };
 
     enum class TYPE
     {
-         // supported quantum gates:
+        /*
+         * Quantum gates (Clifford + T + other extensions)
+         * */
         H, X, Y, Z, 
         S, SX, SDG, SXDG, 
         T, TX, TDG, TXDG, 
@@ -76,147 +56,170 @@ struct INSTRUCTION
         CCX, CCZ, 
         MZ, MX,
 
-        // memory instruction:
-        MSWAP,      // programmer-directed memory access 
-                    //          -- "mswap q0, q1" means move q0 to compute and q1 to memory (q0 is requested, q1 is victim)
-                    //          -- throws error in simulation if q0 is not in memory or q1 is not in compute
-        MPREFETCH,  // programmer-directed prefetch (same semantics as `MSWAP`)
-        MSWAP_C,    // mswap with cacheable hint
+        /*
+         * Memory instructions:
+         *  MSWAP q0, q1   loads q0 into the compute subsystem and stores q1 into the memory subsystem.
+         * */
+        MSWAP,
 
         NIL
     };
 
-    TYPE type;
-    
-    std::vector<qubit_type> qubits;   // used by all quantum gates
-    fpa_type                angle{};
-    std::vector<TYPE>       urotseq{}; // "unrolled rotation sequence" of Clifford+T gates that implement `angle`
     /*
-        Statistics (only for simulation):
-    */
-    uint64_t s_time_at_head_of_window{std::numeric_limits<uint64_t>::max()};
-    uint64_t s_time_completed{std::numeric_limits<uint64_t>::max()};
+     * `type` corresponds to some basic instruction.
+     * This can be a Clifford=T gate (i.e., T, H, etc.),
+     * or some other instruction (like MSWAP)
+     * */
+    const TYPE type;
+
     /*
-        Simulation variables:
-    */
-    uint64_t inst_number{};
-    uint64_t total_isolated_resource_stall_cycles{0};
-    uint64_t total_isolated_memory_stall_cycles{0};
-    bool is_scheduled{false};
+     * `qubits` is stored in a fixed-width array (see `MAX_QUBITS`)
+     * By default, an entry is `0`.
+     *
+     * The number of valid qubits is determined by the function
+     * `get_inst_qubit_count(INSTRUCTION::TYPE)`.
+     * */
+    const qubit_array qubits;
+
+    /*
+     * `angle` and `urotseq` are only useful for RZ and RX gates.
+     *
+     * `angle` is a fixed-point representation of the angle (so we
+     * have high precision for angles near a power of two).
+     *
+     * `urotseq` is a sequence of Clifford+T gates that approximate
+     * RZ or RX of `angle`
+     * */
+    const fpa_type          angle;
+    const std::vector<TYPE> urotseq;
+
+    /*
+     * These are simulator-related parameters. The simulator manages
+     * them and can change them at will:
+     * */
+    int64_t  number{INVALID_NUMBER};
     uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
+private:
+    /*
+     * Gates like RZ and RX have micro-ops (or uops) that must be execute
+     * to implement them. Here is some logic to track them.
+     *
+     * `current_uop` is the currently pending uop, and `uops_retired` is
+     * the number of completed/retired uops. This instruction should be
+     * retired once `uops_retired == uop_count()`
+     * */
+    INSTRUCTION* current_uop_{nullptr};
+    size_t       uops_retired_{0};
 
-    // this is for tracking the start of a stall
-    uint64_t resource_stall_start_cycle{std::numeric_limits<uint64_t>::max()};
-    uint64_t memory_stall_start_cycle{std::numeric_limits<uint64_t>::max()};
+    const size_t qubit_count_;
+public:
+    /*
+     * Basic constructor for initializing from a given list of qubits.
+     * */
+    INSTRUCTION(TYPE, std::initializer_list<qubit_type>);
 
-    // gates like RZ/RX require multiple sub-operations to complete, so `uop_completed` 
-    // is used to track the progress of the instruction.
-    INSTRUCTION* curr_uop{nullptr};
-    size_t   uop_completed{0};
-    size_t   num_uops{0};
+    /*
+     * Constructor for initializing from a container:
+     * */
+    template <class ITER_TYPE> 
+    INSTRUCTION(TYPE, ITER_TYPE q_begin, ITER_TYPE q_end);
 
-    // prefetch metadata -- to avoid unnecessary memory accesses
-    bool has_initiated_prefetch{false};
-    bool has_pending_prefetch_request{false};
+    /*
+     * Rotation gate constructors: we require that `urotseq` is specified using
+     * iterators since the sequence can be rather long.
+     * */
+    template <class ITER_TYPE>
+    INSTRUCTION(TYPE, std::initializer_list<qubit_type>, fpa_type, ITER_TYPE urotseq_begin, ITER_TYPE urotseq_end);
 
-    INSTRUCTION(TYPE, std::vector<qubit_type>);
-    INSTRUCTION(io_encoding&&);
+    template <class Q_IT_TYPE, class U_IT_TYPE>
+    INSTRUCTION(TYPE, Q_IT_TYPE q_begin, Q_IT_TYPE q_end, fpa_type, U_IT_TYPE urotseq_begin, U_IT_TYPE urotseq_end);
+
     INSTRUCTION(const INSTRUCTION&) =default;
 
-    // we require that the rotations are provided via iterators instead of an `initializer_list` 
-    // since the sequence can be rather long.
-    template <class ITER_TYPE> INSTRUCTION(TYPE, 
-                                            std::vector<qubit_type>, 
-                                            fpa_type, 
-                                            ITER_TYPE urotseq_begin, 
-                                            ITER_TYPE urotseq_end);
+    /*
+     * `retire_current_uop` deletes `current_uop` and gets the next `uop`.
+     * `uops_retired` is also incremented.
+     *
+     * This function returns true if all uops are done.
+     * */
+    bool retire_current_uop();
 
-    io_encoding serialize() const;
+    size_t       uops_retired() const;
+    INSTRUCTION* current_uop() const;
+
+    /*
+     * `uop_count` returns the number of `uops` that must be executed.
+     * For rotation gates, this is just `urotseq.size()`. For CCX and CCZ
+     * gates, this is the number of gates in the CX+T decomposition.
+     * */
+    size_t uop_count() const;
+
+    /*
+     * Iterator support for valid qubit range
+     * */
+    qubit_type* q_begin();
+    qubit_type* q_end();
+    const qubit_type* q_begin() const;
+    const qubit_type* q_end() const;
 
     std::string to_string() const;
+private:
+    void get_next_uop();
 };
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class RW_FUNC> void
-INSTRUCTION::io_encoding::read_write(const RW_FUNC& rwf)
-{
-    constexpr gate_id_type RZ_GATE_ID = static_cast<gate_id_type>(INSTRUCTION::TYPE::RZ);
-    constexpr gate_id_type RX_GATE_ID = static_cast<gate_id_type>(INSTRUCTION::TYPE::RX);
+/*
+ * IO support for `INSTRUCTION`:
+ * */
 
-    rwf((void*)&type_id, sizeof(type_id));
-    rwf((void*)qubits, 3*sizeof(qubit_type));
-
-    if (type_id == RZ_GATE_ID || type_id == RX_GATE_ID)
-    {
-        // fixed point angle:
-        rwf((void*)&fpa_word_count, sizeof(fpa_word_count));
-        rwf((void*)angle, fpa_word_count * sizeof(fpa_type::word_type));
-
-        // unrolled rotation sequence:
-        rwf((void*)&urotseq_size, sizeof(urotseq_size));
-        if (urotseq_size > 0)
-        {
-            if (urotseq == nullptr)
-                urotseq = new gate_id_type[urotseq_size];
-            rwf((void*)urotseq, urotseq_size * sizeof(gate_id_type));
-        }
-    }
-}
-
-template <class ITER_TYPE>
-INSTRUCTION::INSTRUCTION(TYPE _type, 
-                         std::vector<qubit_type> _qubits, 
-                         fpa_type _angle, 
-                         ITER_TYPE urotseq_begin, 
-                         ITER_TYPE urotseq_end)
-    :type{_type},
-    qubits(_qubits),
-    angle(_angle),
-    urotseq(urotseq_begin, urotseq_end)
-{}
+INSTRUCTION* read_instruction_from_stream(generic_strm_type);
+void         write_instruction_to_stream(generic_strm_type, INSTRUCTION*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-inline bool
-is_software_instruction(INSTRUCTION::TYPE t)
-{
-    return t == INSTRUCTION::TYPE::X
-        || t == INSTRUCTION::TYPE::Y
-        || t == INSTRUCTION::TYPE::Z
-        || t == INSTRUCTION::TYPE::SWAP;
-}
+/*
+ * These functions are simple boolean functions that
+ * categorize a given `INSTRUCTION::TYPE`
+ * */
 
-inline bool
-is_memory_instruction(INSTRUCTION::TYPE t)
-{
-    return t == INSTRUCTION::TYPE::MSWAP
-        || t == INSTRUCTION::TYPE::MPREFETCH
-        || t == INSTRUCTION::TYPE::MSWAP_C;
-}
+constexpr bool is_software_instruction(INSTRUCTION::TYPE);
+constexpr bool is_memory_access(INSTRUCTION::TYPE);
+constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
+constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
+constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
 
-inline bool
-is_normal_memory_instruction(INSTRUCTION::TYPE t)
-{
-    return t == INSTRUCTION::TYPE::MSWAP
-        || t == INSTRUCTION::TYPE::MPREFETCH
-        || t == INSTRUCTION::TYPE::MSWAP_C;
-}
+/*
+ * This function is a constexpr function that returns
+ * the number of arguments for a given instruction type.
+ *
+ * Also useful when reading out qubits from `INSTRUCTION`
+ * */
 
-inline bool
-is_cacheable_memory_instruction(INSTRUCTION::TYPE t)
-{
-    return t == INSTRUCTION::TYPE::MSWAP_C;
-}
+constexpr size_t get_inst_qubit_count(INSTRUCTION::TYPE t)
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+/*
+ * Other useful functions:
+ * */
+
+/*
+ * `convert_qubit_container_into_qubit_array` copies the data in the range to an array and returns it.
+ * An error is thrown if `std::distance(begin, end)` is not equal to the number of arguments specificed
+ * by `INSTRUCTION::TYPE`.
+ * */
+template <class ITER>
+INSTRUCTION::qubit_array convert_qubit_container_into_qubit_array(INSTRUCTION::TYPE, ITER begin, ITER end);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+#include "instruction.tpp"
 
 #endif
