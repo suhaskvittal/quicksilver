@@ -21,7 +21,6 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-
 namespace prog
 {
 
@@ -161,84 +160,14 @@ public:
 private:
     qubit_type get_qubit_id_from_operand(const prog::QASM_INST_INFO::operand_type&) const;
 
-    void complete_rotation_gates();
+    void   complete_rotation_gates();
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
-    /*
-        Templated function for perform some operations every layer. The callback is called
-        every layer, and is passed the layer number (`size_t`) 
-        and the instructions (std::vector<const INSTRUCTION*>) in that layer. Note that the 
-        instructions are pointers to the instructions in the original program, and not copies.
-    */
-    template <class CALLBACK> void iterate_through_instructions_by_layer(const CALLBACK&) const;
 };
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 size_t get_required_precision(const INSTRUCTION::fpa_type&);
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class CALLBACK> void
-PROGRAM_INFO::iterate_through_instructions_by_layer(const CALLBACK& callback) const
-{
-    struct layer_type
-    {
-        std::vector<const INSTRUCTION*> inst;
-        size_t num_qubits_among_inst{0};
-    };
-
-    // need this to track dependencies roughly
-    std::vector<size_t> qubit_last_used_layer(num_qubits_declared_, 0);
-
-    // a layer is removed once `num_qubits_among_inst == num_qubits_declared_`
-    std::unordered_map<size_t, layer_type> layers;
-    layers[0] = layer_type{};
-
-    for (const auto& inst : instructions_)
-    {
-        // compute next layer id
-        std::vector<size_t> layer_ids(inst.qubits.size());
-        std::transform(inst.qubits.begin(), inst.qubits.end(), layer_ids.begin(), 
-                    [&qubit_last_used_layer] (qubit_type qubit_id)
-                    {
-                        return qubit_last_used_layer[qubit_id];
-                    });
-        auto max_it = std::max_element(layer_ids.begin(), layer_ids.end());
-        size_t next_layer_id = (*max_it) + 1;
-    
-        auto layer_it = layers.find(next_layer_id);
-        if (layer_it == layers.end())
-        {
-            // time to make a new layer:
-            layer_type lay{};
-            lay.inst.push_back(&inst);
-            lay.num_qubits_among_inst += inst.qubits.size();
-            layers[next_layer_id] = lay;
-        }
-        else
-        {
-            layer_it->second.inst.push_back(&inst);
-            layer_it->second.num_qubits_among_inst += inst.qubits.size();
-
-            // if the layer is full, issue a callback and delete `layer_it`
-            if (layer_it->second.num_qubits_among_inst == num_qubits_declared_)
-            {
-                callback(layer_it->first, layer_it->second.inst);
-                layers.erase(layer_it);
-            }
-        }
-
-        // update `qubit_last_used_layer`
-        for (const auto& qubit_id : inst.qubits)
-            qubit_last_used_layer[qubit_id] = next_layer_id;
-    }
-
-    // issue the callback for any remaining layers:
-    for (const auto& [layer_id, layer] : layers)
-        callback(layer_id, layer.inst);
-}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

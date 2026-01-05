@@ -49,7 +49,7 @@ struct io_encoding
  *  or writes its data to a file (output stream)
  * */
 template <class IO_FUNCTION>
-void _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type, const IO_FUNCTION&);
+void _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type&, const IO_FUNCTION&);
 
 }  // anon namespace
 
@@ -65,6 +65,12 @@ INSTRUCTION::INSTRUCTION(TYPE _type, std::initializer_list<qubit_type> _qubits)
 {
     if (uop_count() > 0)
         get_next_uop();
+}
+
+INSTRUCTION::~INSTRUCTION()
+{
+    if (current_uop_ != nullptr)
+        delete current_uop_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -105,7 +111,7 @@ const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_coun
 ////////////////////////////////////////////////////////////
 
 size_t
-INSTRUCTION::uop_count()
+INSTRUCTION::uop_count() const
 {
 
     if (is_rotation_instruction(type))
@@ -116,6 +122,12 @@ INSTRUCTION::uop_count()
         return NUM_CCZ_UOPS;
     else
         return 0;
+}
+
+size_t
+INSTRUCTION::unrolled_inst_count() const
+{
+    return std::max(size_t{1}, uop_count());
 }
 
 ////////////////////////////////////////////////////////////
@@ -220,7 +232,7 @@ operator<<(std::ostream& os, const INSTRUCTION& inst)
 ////////////////////////////////////////////////////////////
 
 INSTRUCTION*
-read_instruction_from_stream(generic_strm_type istrm)
+read_instruction_from_stream(generic_strm_type& istrm)
 {
     io_encoding enc;
     _fill_or_consume_serialized_instruction(enc, istrm, generic_strm_read);
@@ -239,7 +251,7 @@ read_instruction_from_stream(generic_strm_type istrm)
 }
 
 void
-write_instruction_to_stream(generic_strm_type ostrm, INSTRUCTION* inst)
+write_instruction_to_stream(generic_strm_type& ostrm, INSTRUCTION* inst)
 {
     io_encoding enc;
 
@@ -267,7 +279,7 @@ write_instruction_to_stream(generic_strm_type ostrm, INSTRUCTION* inst)
 /* BEGINNING OF HELPER FUNCTIONS */
 
 template <class IO_FUNCTION> void
-_fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type strm, const IO_FUNCTION& io_fn)
+_fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& strm, const IO_FUNCTION& io_fn)
 {
     io_fn(strm, &enc.type_id, sizeof(enc.type_id));
     io_fn(strm, &enc.qubits, sizeof(qubit_type)*MAX_QUBITS);

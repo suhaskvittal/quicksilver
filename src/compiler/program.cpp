@@ -83,7 +83,6 @@ std::string
 QASM_INST_INFO::to_string() const
 {
     std::stringstream ss;
-
     std::stringstream gate_param_ss;
 
     gate_param_ss << gate_name;

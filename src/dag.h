@@ -22,7 +22,7 @@ public:
     struct node_type
     {
         inst_ptr                inst;
-        std::vector<node_type*> dependent;
+        std::vector<node_type*> dependent{};
         size_t                  pred_count{0};
     };
 
@@ -54,12 +54,29 @@ public:
     void add_instruction(inst_ptr);
     void remove_instruction_from_front_layer(inst_ptr);
 
+    /*
+     * This returns a list of all instructions in the front layer.
+     * These are the oldest instructions in the program.
+     * */
     std::vector<inst_ptr> get_front_layer() const;
+
+    /*
+     * This is a modified version of the above function that
+     * returns instructions in the front layer that meet the given
+     * predicate.
+     * */
+    template <class PRED>
+    std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
+
+    template <class CALLBACK>
+    void for_each_instruction_in_layer_order(const CALLBACK&) const;
 
     size_t inst_count() const;
 };
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+#include "dag.tpp"
 
 #endif   // DAG_h

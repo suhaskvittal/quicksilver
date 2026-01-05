@@ -136,6 +136,8 @@ public:
 
     INSTRUCTION(const INSTRUCTION&) =default;
 
+    ~INSTRUCTION();
+
     /*
      * `retire_current_uop` deletes `current_uop` and gets the next `uop`.
      * `uops_retired` is also incremented.
@@ -153,6 +155,12 @@ public:
      * gates, this is the number of gates in the CX+T decomposition.
      * */
     size_t uop_count() const;
+
+    /*
+     * `unrolled_inst_count` returns `std::max(1, uop_count())`
+     * This is useful for counting instructions done during simulation
+     * */
+    size_t unrolled_inst_count() const;
 
     /*
      * Iterator support for valid qubit range
@@ -176,8 +184,8 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
  * IO support for `INSTRUCTION`:
  * */
 
-INSTRUCTION* read_instruction_from_stream(generic_strm_type);
-void         write_instruction_to_stream(generic_strm_type, INSTRUCTION*);
+INSTRUCTION* read_instruction_from_stream(generic_strm_type&);
+void         write_instruction_to_stream(generic_strm_type&, INSTRUCTION*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

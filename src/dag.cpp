@@ -111,9 +111,7 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
 std::vector<DAG::inst_ptr>
 DAG::get_front_layer() const
 {
-    std::vector<inst_ptr> front_layer_insts(front_layer_.size());
-    std::transform(front_layer_.begin(), front_layer_.end(), [] (const auto& p) { return p.first; });
-    return front_layer_insts;
+    return get_front_layer_if([] (const auto*) { return true; });
 }
 
 size_t
