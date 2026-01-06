@@ -61,7 +61,7 @@ INSTRUCTION::INSTRUCTION(TYPE _type, std::initializer_list<qubit_type> _qubits)
     qubits(_convert_qubit_container_into_qubit_array(_type, _qubits.begin(), _qubits.end())),
     angle{},
     urotseq{},
-    qubit_count_{get_inst_qubit_count(_type)}
+    qubit_count{get_inst_qubit_count(_type)}
 {
     if (uop_count() > 0)
         get_next_uop();
@@ -102,10 +102,10 @@ INSTRUCTION* INSTRUCTION::current_uop() const { return current_uop_; }
 ////////////////////////////////////////////////////////////
 
 qubit_type*       INSTRUCTION::q_begin() { return qubits.data(); }
-qubit_type*       INSTRUCTION::q_end() { return qubits.data() + qubit_count_; }
+qubit_type*       INSTRUCTION::q_end() { return qubits.data() + qubit_count; }
 
 const qubit_type* INSTRUCTION::q_begin() const { return qubits.data(); }
-const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_count_; }
+const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_count; }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

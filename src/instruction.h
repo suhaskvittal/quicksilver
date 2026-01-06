@@ -94,6 +94,11 @@ class INSTRUCTION
     const std::vector<TYPE> urotseq;
 
     /*
+     * Same value as `get_inst_qubit_count(type)`
+     * */
+    const size_t qubit_count_;
+
+    /*
      * These are simulator-related parameters. The simulator manages
      * them and can change them at will:
      * */
@@ -110,8 +115,6 @@ private:
      * */
     INSTRUCTION* current_uop_{nullptr};
     size_t       uops_retired_{0};
-
-    const size_t qubit_count_;
 public:
     /*
      * Basic constructor for initializing from a given list of qubits.

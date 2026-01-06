@@ -592,7 +592,7 @@ _consolidate_and_reduce_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
     }
 
     // remove all `NIL` gates:
-    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
+    auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (auto t) { return t == INSTRUCTION::TYPE::NIL; });
     urotseq.erase(it, urotseq.end());
 }
 

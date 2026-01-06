@@ -76,19 +76,19 @@ class OQ2_LEXER;
 %nterm <prog::QASM_INST_INFO>                               instruction
 %nterm <std::vector<prog::EXPRESSION>>                      optional_instruction_params
 %nterm <std::vector<prog::EXPRESSION>>                      instruction_params
-%nterm <std::vector<prog::QASM_INST_INFO::operand_type>>    instruction_arguments
+%nterm <std::vector<prog::QASM_OPERAND>>    instruction_arguments
 %nterm <prog::QASM_INST_INFO>                               measurement
 
-%nterm <prog::EXPRESSION>                           expression
-%nterm <prog::EXPRESSION::term_type>                term
-%nterm <prog::EXPRESSION::exponential_value_type>   signed_expval;
-%nterm <prog::EXPRESSION::exponential_value_type>   expval;
-%nterm <prog::EXPRESSION::generic_value_type>       generic_value
-%nterm <prog::QASM_INST_INFO::operand_type>         argument;
+%nterm <prog::EXPRESSION>                   expression
+%nterm <prog::TERM>                         term
+%nterm <prog::EXPONENTIAL_VALUE>            signed_expval;
+%nterm <prog::EXPONENTIAL_VALUE>            expval;
+%nterm <prog::generic_value_type>           generic_value
+%nterm <prog::QASM_OPERAND> argument;
 
 %%
 
-program: OPENQASM VERSION_STRING ';' line   { prog.version_ = $2; }
+program: OPENQASM VERSION_STRING ';' line   { prog.version = $2; }
         | line                               { prog.version_ = "2.0"; }    
         ;
 
@@ -165,36 +165,52 @@ measurement: MEASURE argument ARROW argument ';'    {
                                                     }
             ;
 
-expression: term                                { $$.termseq.emplace_back($1, prog::EXPRESSION::OPERATOR::ADD); }
-            | expression PLUS_MINUS term        { 
-                                                    auto op = static_cast<prog::EXPRESSION::OPERATOR>($2);
+expression: term                                {
+                                                    prog::TERM_ENTRY entry;
+                                                    entry.term = $1;
+                                                    entry.operator_with_previous = prog::OPERATOR::ADD;
+                                                    $$.terms.push_back(entry);
+                                                }
+            | expression PLUS_MINUS term        {
+                                                    auto op = static_cast<prog::OPERATOR>($2);
                                                     $$ = std::move($1);
-                                                    $$.termseq.emplace_back($3, op);
+                                                    prog::TERM_ENTRY entry;
+                                                    entry.term = $3;
+                                                    entry.operator_with_previous = op;
+                                                    $$.terms.push_back(entry);
                                                 }
             ;
 term: term MULTIPLY_DIVIDE signed_expval        {
-                                                    auto op = static_cast<prog::EXPRESSION::OPERATOR>($2 + 2);
-                                                    $$ = std::move($1); 
-                                                    $$.emplace_back($3, op);
+                                                    auto op = static_cast<prog::OPERATOR>($2 + 2);
+                                                    $$ = std::move($1);
+                                                    prog::FACTOR factor;
+                                                    factor.exponential_value = $3;
+                                                    factor.operator_with_previous = op;
+                                                    $$.factors.push_back(factor);
                                                 }
-    | signed_expval                             {  $$.emplace_back($1, prog::EXPRESSION::OPERATOR::MULTIPLY); }
+    | signed_expval                             {
+                                                    prog::FACTOR factor;
+                                                    factor.exponential_value = $1;
+                                                    factor.operator_with_previous = prog::OPERATOR::MULTIPLY;
+                                                    $$.factors.push_back(factor);
+                                                }
     ;
 signed_expval: expval                           { $$ = $1; }
              | PLUS_MINUS expval                {
-                                                    $2.second = ($1 > 0);
+                                                    $2.is_negated = ($1 > 0);
                                                     $$ = std::move($2);
                                                 }
              ;
-expval: generic_value                           { $$.first.push_back($1); }
-        | expval POWER generic_value            { $$ = std::move($1); $$.first.push_back($3); }
+expval: generic_value                           { $$.power_sequence.push_back($1); }
+        | expval POWER generic_value            { $$ = std::move($1); $$.power_sequence.push_back($3); }
         ;
 generic_value: INTEGER_LITERAL                  { $$ = $1; }
             | FLOAT_LITERAL                     { $$ = $1; }
             | IDENTIFIER                        { $$ = $1; }
-            | '(' expression ')'                { 
-                                                    prog::EXPRESSION::expr_ptr e_p{new prog::EXPRESSION}; 
+            | '(' expression ')'                {
+                                                    prog::expr_ptr e_p{new prog::EXPRESSION};
                                                     *e_p = $2;
-                                                    $$ = std::move(e_p); 
+                                                    $$ = std::move(e_p);
                                                 }
             ;
 

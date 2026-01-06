@@ -6,79 +6,72 @@
 #ifndef COMPILER_PROGRAM_EXPRESSION_h
 #define COMPILER_PROGRAM_EXPRESSION_h
 
-#include "compiler/program.h"
-
 #include <cstdint>
+#include <memory>
+#include <string>
+#include <variant>
+#include <vector>
 
 namespace prog
 {
-namespace expr
-{
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct VALUE_INFO
+// Forward declarations
+struct EXPRESSION;
+struct VALUE_INFO;
+
+// Operator enum (moved from EXPRESSION)
+enum class OPERATOR { ADD, SUBTRACT, MULTIPLY, DIVIDE };
+
+// Base types
+using expr_ptr = std::shared_ptr<EXPRESSION>;
+using generic_value_type = std::variant<int64_t, double, std::string, expr_ptr>;
+
+// Expression component types (flattened from EXPRESSION)
+struct EXPONENTIAL_VALUE
 {
-    using fpa_type = PROGRAM_INFO::fpa_type;
-    
-    enum class STATE 
-    {
-        DEFAULT,
-        ZERO,
-        ONE,
-        IS_INTEGRAL,
-        CAN_USE_FIXED_POINT,
-        POWER_OF_TWO_IS_VALID
-    };
+    std::vector<generic_value_type> power_sequence;
+    bool is_negated{false};
+};
 
-    bool      is_negated{false};
-    ssize_t   power_of_two_exponent{0};
-    fpa_type  fixed_point{};
-    int64_t   integral_value{0};
-    double    floating_point{0.0};
-    STATE     state{STATE::ZERO};
+struct FACTOR
+{
+    EXPONENTIAL_VALUE exponential_value;
+    OPERATOR operator_with_previous;
+};
 
-    VALUE_INFO() =default;
-    VALUE_INFO(const VALUE_INFO&) =default;
+struct TERM
+{
+    std::vector<FACTOR> factors;
+};
 
-    VALUE_INFO(const EXPRESSION::generic_value_type&);
+struct TERM_ENTRY
+{
+    TERM term;
+    OPERATOR operator_with_previous;
+};
 
-    static VALUE_INFO init_as_one();
-
-    fpa_type readout_fixed_point_angle() const;
-
-    VALUE_INFO& operator+=(VALUE_INFO);
-    VALUE_INFO& operator-=(VALUE_INFO);
-    VALUE_INFO& operator*=(VALUE_INFO);
-    VALUE_INFO& operator/=(VALUE_INFO);
-    VALUE_INFO& operator^=(VALUE_INFO);
-
-    VALUE_INFO negated() const;
-    void consume_negated();
-
-    bool can_use_fixed_point() const;
-    bool is_power_of_two() const;
-    bool is_integral() const;
+struct EXPRESSION
+{
+    std::vector<TERM_ENTRY> terms;
 
     std::string to_string() const;
 };
 
-VALUE_INFO operator+(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator-(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator*(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator/(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator^(VALUE_INFO, VALUE_INFO);
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Converts an `EXPRESSION` (symbolic) to an actual value
+ * represented by either a `double` or fixed point type.
+ * */
+VALUE_INFO evaluate_expression(const EXPRESSION&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO evaluate_expression(const prog::EXPRESSION&);
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-}   // namespace expr
 }   // namespace prog
 
-#endif  // PROGRAM_EXPRESSION_h
+#endif  // COMPILER_PROGRAM_EXPRESSION_h

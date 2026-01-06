@@ -46,6 +46,9 @@ print_stats(std::ostream& out, const PROGRAM_INFO::stats_type& stats)
     print_stat_line(out, "UNROLLED_INSTRUCTION_COUNT", stats.unrolled_inst_count);
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 int main(int argc, char* argv[])
 {
     std::string input_file;
@@ -62,10 +65,9 @@ int main(int argc, char* argv[])
         .parse(argc, argv);
 
     prog::rotation_manager_init(num_threads);
-
     auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
-
     std::cout << "DONE\n";
+
     if (stats_output_file.empty())
     {
         print_stats(std::cout, stats);
@@ -77,7 +79,6 @@ int main(int argc, char* argv[])
     }
 
     prog::rotation_manager_end();
-
     return 0;
 }
 

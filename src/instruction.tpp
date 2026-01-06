@@ -12,7 +12,7 @@ INSTRUCTION::INSTRUCTION(TYPE _type, ITER_TYPE q_begin, ITER_TYPE q_end)
     qubits(convert_qubit_container_into_qubit_array(_type, q_begin, q_end)),
     angle{},
     urotseq{},
-    qubit_count_{get_inst_qubit_count(_type)}
+    qubit_count{get_inst_qubit_count(_type)}
 {}
 
 template <class ITER_TYPE>
@@ -25,7 +25,7 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
     qubits(convert_qubit_container_into_qubit_array(_type, qubits_init.begin(), qubits_init.end())),
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
-    qubit_count_{get_inst_qubit_count(_type)}
+    qubit_count{get_inst_qubit_count(_type)}
 {}
 
 template <class Q_IT_TYPE, class U_IT_TYPE>
@@ -38,7 +38,7 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
     qubits(convert_qubit_container_into_qubit_array(_type, q_begin, q_end)),
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
-    qubit_count_{get_inst_qubit_count(_type)}
+    qubit_count{get_inst_qubit_count(_type)}
 {}
 
 ////////////////////////////////////////////////////////////
