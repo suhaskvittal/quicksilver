@@ -40,9 +40,13 @@ using active_set_type = std::unordered_set<qubit_type>;
 struct config_type
 {
     int64_t active_set_capacity{12};
-    int64_t inst_compile_limit{120'000'000};
+    int64_t inst_compile_limit{15'000'000};
+    int64_t print_progress_frequency{1'000'000};
     int64_t dag_inst_capacity{8192};
     bool    verbose{false};
+
+    /* Policy specific parameters */
+    int64_t hint_lookahead_depth{16};
 };
 
 /*

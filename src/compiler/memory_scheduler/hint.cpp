@@ -92,6 +92,11 @@ void _cst_free(std::vector<CST_NODE*>&&);
 template <class LOOP_CALLBACK, class EXIT_CALLBACK>
 void _cst_generic_dfs(const std::vector<CST_NODE*>&, const LOOP_CALLBACK&, const EXIT_CALLBACK&);
 
+/*
+ * Returns the compute score for the instruction.
+ * */
+size_t _score_instruction(inst_ptr);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -103,7 +108,9 @@ hint(const active_set_type& active_set, const dag_ptr& dag, config_type conf)
     // build the CST:
     auto entry_points = _cst_init(active_set, dag->qubit_count);
     dag->for_each_instruction_in_layer_order(
-            [&entry_points, &conf] (inst_ptr inst) { _cst_update(entry_points, inst, conf); });
+            [&entry_points, &conf] (inst_ptr inst) { _cst_update(entry_points, inst, conf); },
+            conf.hint_lookahead_depth
+    );
     CST_NODE* best = _cst_find_best_node(entry_points);
     auto out = transform_active_set(active_set, best->qubits);
 
@@ -167,7 +174,7 @@ _cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type con
     {
         // simple case -- just update the sole node:
         CST_NODE* x = *deepest_nodes.begin();
-        x->compute_count += inst->unrolled_inst_count();
+        x->compute_count += _score_instruction(inst);
     }
     else
     {
@@ -179,7 +186,7 @@ _cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type con
             y->compute_count += x->compute_count;
             y->memory_count += x->memory_count;
         }
-        y->compute_count += inst->unrolled_inst_count();
+        y->compute_count += _score_instruction(inst);
 
         // if `y->qubits` is too large (exceeds active set capacity), then
         // freeze all nodes and delete `y`
@@ -268,6 +275,24 @@ _cst_generic_dfs(const std::vector<CST_NODE*>& entry_points, const LOOP_CALLBACK
 
     for (auto* x : visited)
         exitf(x);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+_score_instruction(inst_ptr inst)
+{
+    if (is_rotation_instruction(inst->type))
+        return 20;
+    else if (is_toffoli_like_instruction(inst->type))
+        return 10;
+    else if (is_cx_like_instruction(inst->type))
+        return 2;
+    else if (is_software_instruction(inst->type))
+        return 0;
+    else
+        return 1;
 }
 
 ////////////////////////////////////////////////////////////

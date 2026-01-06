@@ -69,7 +69,7 @@ public:
     std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
 
     template <class CALLBACK>
-    void for_each_instruction_in_layer_order(const CALLBACK&) const;
+    void for_each_instruction_in_layer_order(const CALLBACK&, size_t max_layer) const;
 
     size_t inst_count() const;
 };

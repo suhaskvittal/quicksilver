@@ -36,6 +36,8 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
     int64_t               inst_done{0};
     while (inst_done < conf.inst_compile_limit && !generic_strm_eof(istrm))
     {
+        const uint64_t inst_done_before{inst_done};
+
         // try to fill up the DAG during every iteration
         read_instructions_into_dag(dag, istrm, conf.dag_inst_capacity);
 
@@ -45,9 +47,10 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
         if (completable.empty())
         {
             // scheduling epoch: invoke the memory access scheduler:
-            auto out = scheduler.emit_memory_instructions(active_set, dag, conf);
-            outgoing_buffer.insert(outgoing_buffer.end(), out.memory_accesses.begin(), out.memory_accesses.end());
+            auto out = scheduler(active_set, dag, conf);
+            assert(out.active_set.size() == conf.active_set_capacity);
 
+            outgoing_buffer.insert(outgoing_buffer.end(), out.memory_accesses.begin(), out.memory_accesses.end());
             active_set = std::move(out.active_set);
 
             stats.memory_accesses += out.memory_accesses.size();
@@ -70,6 +73,32 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
             auto end = begin + (OUTGOING_CAPACITY/2);
             drain_buffer_into_stream(begin, end, ostrm);
             outgoing_buffer.erase(begin, end);
+        }
+
+        if ((inst_done % conf.print_progress_frequency) < (inst_done_before % conf.print_progress_frequency))
+        {
+            auto front_layer = dag->get_front_layer();
+
+            std::cout << "\nMemory Scheduler ============================================="
+                        << "\ninstructions done = " << inst_done
+                        << "\nmemory accesses   = " << stats.memory_accesses
+                        << "\nscheduling epochs = " << stats.scheduler_epochs
+                        << "\nactive set =";
+            for (auto q : active_set)
+                std::cout << " " << q;
+            std::cout << "\nDAG inst count = " << dag->inst_count() 
+                            << " of " << conf.dag_inst_capacity
+                            << ", front layer =";
+            if (front_layer.size() > 8)
+            {
+                std::cout << " (hidden, width = " << front_layer.size() << ")";
+            }
+            else
+            {
+                for (auto* inst : front_layer)
+                    std::cout << "\n\t" << *inst;
+            }
+            std::cout << "\n";
         }
     }
 

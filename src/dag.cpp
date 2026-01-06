@@ -13,7 +13,7 @@
 DAG::DAG(size_t _qubit_count)
     :qubit_count(_qubit_count),
     front_layer_(),
-    back_instructions_(_qubit_count)
+    back_instructions_(_qubit_count, nullptr)
 {
     front_layer_.reserve(qubit_count);
 }
@@ -52,8 +52,9 @@ DAG::add_instruction(inst_ptr inst)
     node_type* x = new node_type{inst};
 
     std::unordered_set<node_type*> visited;
-    for (qubit_type q : inst->qubits)
+    for (auto it = inst->q_begin(); it != inst->q_end(); it++)
     {
+        auto q = *it;
         if (back_instructions_[q] != nullptr)
         {
             // avoid double counting the dependency
@@ -79,10 +80,20 @@ void
 DAG::remove_instruction_from_front_layer(inst_ptr inst)
 {
     auto node_it = front_layer_.find(inst);
-    if (node_it != front_layer_.end())
+    if (node_it == front_layer_.end())
     {
         std::cerr << "DAG::remove_instruction_from_layer: inst " << *inst 
-                    << " was not found in the front layer" << _die{};
+                    << " was not found in the front layer"
+                    << "\nfront layer contents:";
+        for (const auto& [inst, node] : front_layer_)
+        {
+            std::cerr << "\n\tinst = " << *inst 
+                        << ", node pred count = " << node->pred_count
+                        << ", node dependents =";
+            for (auto* x : node->dependent)
+                std::cerr << "\n\t\t" << *x->inst;
+        }
+        std::cerr << _die{};
     }
     node_type* head_node = node_it->second;
     front_layer_.erase(node_it);
@@ -96,9 +107,9 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
     }
 
     // finally, if `inst` is also in `back_instructions_`, then we need to clear the entry
-    for (qubit_type q : inst->qubits)
-        if (back_instructions_[q] == head_node)
-            back_instructions_[q] = nullptr;
+    for (auto it = inst->q_begin(); it != inst->q_end(); it++)
+        if (back_instructions_[*it] == head_node)
+            back_instructions_[*it] = nullptr;
 
     delete head_node;
     inst_count_--;

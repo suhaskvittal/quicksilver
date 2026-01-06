@@ -21,16 +21,8 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class T> void
-print_stat_line(std::ostream& out, std::string_view name, T value)
+namespace
 {
-    out << std::setw(64) << std::left << name;
-    if constexpr (std::is_floating_point<T>::value)
-        out << std::setw(12) << std::right << std::fixed << std::setprecision(8) << value;
-    else
-        out << std::setw(12) << std::right << value;
-    out << "\n";
-}
 
 void
 print_stats(std::ostream& out, const PROGRAM_INFO::stats_type& stats)
@@ -45,6 +37,8 @@ print_stats(std::ostream& out, const PROGRAM_INFO::stats_type& stats)
     print_stat_line(out, "VIRTUAL_INSTRUCTION_COUNT", stats.virtual_inst_count);
     print_stat_line(out, "UNROLLED_INSTRUCTION_COUNT", stats.unrolled_inst_count);
 }
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

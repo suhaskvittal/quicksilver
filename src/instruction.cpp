@@ -37,11 +37,11 @@ struct io_encoding
 
     using fpa_type = INSTRUCTION::fpa_type;
 
-    uint8_t             type_id;
-    qubit_type          qubits[MAX_QUBITS];
+    uint8_t             type_id{0};
+    qubit_type          qubits[MAX_QUBITS]{-1,-1,-1};
     uint16_t            fpa_word_count{fpa_type::NUM_WORDS};  // needed in case `FPA_PRECISION` changes
     fpa_type::word_type angle[fpa_type::NUM_WORDS];
-    uint16_t            urotseq_size;
+    uint32_t            urotseq_size{0};
     uint8_t             urotseq[UROTSEQ_CAPACITY];
 };
 
@@ -102,8 +102,8 @@ INSTRUCTION* INSTRUCTION::current_uop() const { return current_uop_; }
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-qubit_type*       INSTRUCTION::q_begin() { return const_cast<qubit_type*>(q_begin()); }
-qubit_type*       INSTRUCTION::q_end() { return const_cast<qubit_type*>(q_end()); }
+qubit_type*       INSTRUCTION::q_begin() { return const_cast<qubit_type*>(qubits.data()); }
+qubit_type*       INSTRUCTION::q_end() { return const_cast<qubit_type*>(qubits.data()) + qubit_count; }
 
 const qubit_type* INSTRUCTION::q_begin() const { return qubits.data(); }
 const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_count; }

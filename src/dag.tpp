@@ -23,7 +23,7 @@ DAG::get_front_layer_if(const PRED& pred) const
 ////////////////////////////////////////////////////////////
 
 template <class CALLBACK> void
-DAG::for_each_instruction_in_layer_order(const CALLBACK& callback) const
+DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t max_layer) const
 {
     std::unordered_set<node_type*> current_layer;
     for (const auto& [__unused_inst, node] : front_layer_)
@@ -32,7 +32,8 @@ DAG::for_each_instruction_in_layer_order(const CALLBACK& callback) const
     // we will use `pred_table` to identify when to add an instruction to the next layer.
     // condition: `pred_table[node] == node->pred_count`
     std::unordered_map<node_type*, size_t> pred_table;
-    while (!current_layer.empty())
+    size_t layer_count{0};
+    while (!current_layer.empty() && layer_count < max_layer)
     {
         std::unordered_set<node_type*> next_layer;
         next_layer.reserve(current_layer.size());
@@ -46,6 +47,7 @@ DAG::for_each_instruction_in_layer_order(const CALLBACK& callback) const
                     next_layer.insert(y);
         }
         current_layer = std::move(next_layer);
+        layer_count++;
     }
 }
 

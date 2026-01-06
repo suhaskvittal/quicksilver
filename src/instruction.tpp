@@ -73,15 +73,19 @@ is_t_like_instruction(INSTRUCTION::TYPE t)
 constexpr bool
 is_rotation_instruction(INSTRUCTION::TYPE t)
 {
-    return t == INSTRUCTION::TYPE::RX
-            || t == INSTRUCTION::TYPE::RZ;
+    return t == INSTRUCTION::TYPE::RX || t == INSTRUCTION::TYPE::RZ;
+}
+
+constexpr bool
+is_cx_like_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::CX || t == INSTRUCTION::TYPE::CZ;
 }
 
 constexpr bool
 is_toffoli_like_instruction(INSTRUCTION::TYPE t)
 {
-    return t == INSTRUCTION::TYPE::CCX
-            || t == INSTRUCTION::TYPE::CCZ;
+    return t == INSTRUCTION::TYPE::CCX || t == INSTRUCTION::TYPE::CCZ;
 }
 
 ////////////////////////////////////////////////////////////
@@ -137,7 +141,7 @@ template <class ITER> INSTRUCTION::qubit_array
 convert_qubit_container_into_qubit_array(INSTRUCTION::TYPE type, ITER begin, ITER end)
 {
     assert(std::distance(begin, end) == get_inst_qubit_count(type));
-
+    assert(std::none_of(begin, end, [] (auto q) { return q < 0; }));
     INSTRUCTION::qubit_array qubits;
     std::copy(begin, end, qubits.begin());
     return qubits;

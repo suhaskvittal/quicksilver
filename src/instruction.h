@@ -208,6 +208,7 @@ constexpr bool is_software_instruction(INSTRUCTION::TYPE);
 constexpr bool is_memory_access(INSTRUCTION::TYPE);
 constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
+constexpr bool is_cx_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
 
 /*

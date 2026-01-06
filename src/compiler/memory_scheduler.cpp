@@ -45,7 +45,7 @@ transform_active_set(const active_set_type& current, const active_set_type& targ
 void
 read_instructions_into_dag(dag_ptr& dag, generic_strm_type& istrm, size_t until_capacity)
 {
-    while (dag->inst_count() < until_capacity)
+    while (dag->inst_count() < until_capacity && !generic_strm_eof(istrm))
     {
         inst_ptr inst = read_instruction_from_stream(istrm);
         dag->add_instruction(inst);

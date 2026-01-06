@@ -146,3 +146,17 @@ endif()
 
 ###################################################
 ###################################################
+
+# Memory scheduler (qs_memory_scheduler)
+
+add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp
+                                    ${COMMON_FILES}
+                                    src/compiler/memory_scheduler.cpp
+                                    src/compiler/memory_scheduler/eif.cpp
+                                    src/compiler/memory_scheduler/hint.cpp)
+target_include_directories(qs_memory_scheduler PRIVATE "src")
+target_compile_options(qs_memory_scheduler PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
+
+###################################################
+###################################################
