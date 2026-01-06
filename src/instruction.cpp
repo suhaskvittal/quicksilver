@@ -5,6 +5,7 @@
 
 #include "instruction.h"
 
+#include <cassert>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -31,8 +32,8 @@ constexpr size_t NUM_CCX_UOPS{NUM_CCZ_UOPS+2};
  * */
 struct io_encoding
 {
-    constexpr size_t MAX_QUBITS{INSTRUCTION::MAX_QUBITS};
-    constexpr size_t UROTSEQ_CAPACITY{256};
+    constexpr static size_t MAX_QUBITS{INSTRUCTION::MAX_QUBITS};
+    constexpr static size_t UROTSEQ_CAPACITY{256};
 
     using fpa_type = INSTRUCTION::fpa_type;
 
@@ -58,7 +59,7 @@ void _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type&, c
 
 INSTRUCTION::INSTRUCTION(TYPE _type, std::initializer_list<qubit_type> _qubits)
     :type{_type},
-    qubits(_convert_qubit_container_into_qubit_array(_type, _qubits.begin(), _qubits.end())),
+    qubits(convert_qubit_container_into_qubit_array(_type, _qubits.begin(), _qubits.end())),
     angle{},
     urotseq{},
     qubit_count{get_inst_qubit_count(_type)}
@@ -101,8 +102,8 @@ INSTRUCTION* INSTRUCTION::current_uop() const { return current_uop_; }
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-qubit_type*       INSTRUCTION::q_begin() { return qubits.data(); }
-qubit_type*       INSTRUCTION::q_end() { return qubits.data() + qubit_count; }
+qubit_type*       INSTRUCTION::q_begin() { return const_cast<qubit_type*>(q_begin()); }
+qubit_type*       INSTRUCTION::q_end() { return const_cast<qubit_type*>(q_end()); }
 
 const qubit_type* INSTRUCTION::q_begin() const { return qubits.data(); }
 const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_count; }
@@ -149,12 +150,12 @@ INSTRUCTION::get_next_uop()
 {
     if (is_rotation_instruction(type))
     {
-        current_uop_ = new INSTRUCTION{urotseq[uops_retired_], {qubits[0}};
+        current_uop_ = new INSTRUCTION{urotseq[uops_retired_], {qubits[0]}};
     }
     else
     {
         // we define the uop order for CCX and CCZ gates here (CCX has two extra H gates -- front and back).
-        using uop_spec_type = std::pari<INSTRUCTION::TYPE, std::array<ssize_t,2>>:
+        using uop_spec_type = std::pair<INSTRUCTION::TYPE, std::array<ssize_t,2>>;
         constexpr INSTRUCTION::TYPE CX = INSTRUCTION::TYPE::CX;
         constexpr INSTRUCTION::TYPE TDG = INSTRUCTION::TYPE::TDG;
         constexpr INSTRUCTION::TYPE T = INSTRUCTION::TYPE::T;
@@ -185,7 +186,7 @@ INSTRUCTION::get_next_uop()
             if (uop_idx == 0 || uop_idx == NUM_CCX_UOPS-1)
             {
                 current_uop_ = new INSTRUCTION{INSTRUCTION::TYPE::H, {qubits[2]}};
-                return false;
+                return;
             }
 
             // if we survive until this point, decrement `uop_idx` so we can index into `CCZ_UOPS`
@@ -199,7 +200,7 @@ INSTRUCTION::get_next_uop()
         for (ssize_t ii : uop_qubit_idx)
             if (ii >= 0)
                 uop_args.push_back(qubits[ii]);
-        current_uop_ = new INSTRUCTION{uop_type, uop_args};
+        current_uop_ = new INSTRUCTION{uop_type, uop_args.begin(), uop_args.end()};
     }
 }
 
@@ -240,7 +241,7 @@ read_instruction_from_stream(generic_strm_type& istrm)
     INSTRUCTION::TYPE              type = static_cast<INSTRUCTION::TYPE>(enc.type_id);
     auto                           q_begin = std::begin(enc.qubits);
     auto                           q_end = q_begin + get_inst_qubit_count(type);
-    fpa_type                       angle(std::begin(enc.angle), std::end(enc.angle));
+    INSTRUCTION::fpa_type          angle(std::begin(enc.angle), std::end(enc.angle));
     std::vector<INSTRUCTION::TYPE> urotseq(enc.urotseq_size);
 
     std::transform(enc.urotseq, enc.urotseq+enc.urotseq_size, urotseq.begin(),
@@ -251,7 +252,7 @@ read_instruction_from_stream(generic_strm_type& istrm)
 }
 
 void
-write_instruction_to_stream(generic_strm_type& ostrm, INSTRUCTION* inst)
+write_instruction_to_stream(generic_strm_type& ostrm, const INSTRUCTION* inst)
 {
     io_encoding enc;
 
@@ -270,7 +271,7 @@ write_instruction_to_stream(generic_strm_type& ostrm, INSTRUCTION* inst)
     std::transform(inst->urotseq.begin(), inst->urotseq.end(), std::begin(enc.urotseq),
                     [] (const auto t) { return static_cast<uint8_t>(t); });
 
-    _fill_or_consume_serialized_instruction(enc, ostram, generic_strm_write);
+    _fill_or_consume_serialized_instruction(enc, ostrm, generic_strm_write);
 }
 
 ////////////////////////////////////////////////////////////
@@ -278,13 +279,19 @@ write_instruction_to_stream(generic_strm_type& ostrm, INSTRUCTION* inst)
 
 /* BEGINNING OF HELPER FUNCTIONS */
 
+namespace
+{
+
 template <class IO_FUNCTION> void
 _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& strm, const IO_FUNCTION& io_fn)
 {
-    io_fn(strm, &enc.type_id, sizeof(enc.type_id));
-    io_fn(strm, &enc.qubits, sizeof(qubit_type)*MAX_QUBITS);
+    constexpr uint8_t RZ_TYPE_ID = static_cast<uint8_t>(INSTRUCTION::TYPE::RZ),
+                      RX_TYPE_ID = static_cast<uint8_t>(INSTRUCTION::TYPE::RX);
 
-    if (is_rotation_instruction(type))
+    io_fn(strm, &enc.type_id, sizeof(enc.type_id));
+    io_fn(strm, &enc.qubits, sizeof(qubit_type)*io_encoding::MAX_QUBITS);
+
+    if (enc.type_id == RZ_TYPE_ID || enc.type_id == RX_TYPE_ID)
     {
         // angle data
         io_fn(strm, &enc.fpa_word_count, sizeof(enc.fpa_word_count));
@@ -297,6 +304,8 @@ _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& str
         io_fn(strm, enc.urotseq, sizeof(uint8_t)*enc.urotseq_size);
     }
 }
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

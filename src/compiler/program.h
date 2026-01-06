@@ -11,6 +11,8 @@
 #include "compiler/program/expression.h"
 #include "compiler/program/rotation_manager.h"
 
+#include "instruction_fpa_hash.inl"
+
 #include <cstdio>
 #include <memory>
 #include <numeric>
@@ -102,6 +104,7 @@ public:
     using fpa_type = INSTRUCTION::fpa_type;
     using register_table = std::unordered_map<std::string, prog::REGISTER>;
     using gate_decl_table = std::unordered_map<std::string, prog::GATE_DEFINITION>;
+    using inst_ptr = std::unique_ptr<INSTRUCTION>;
 
     struct stats_type
     {
@@ -130,10 +133,9 @@ public:
      * */
     std::string version;
 private:
-    register_table  registers_;
-    gate_decl_table user_defined_gates_;
-
-    std::vector<INSTRUCTION> instructions_;
+    register_table        registers_;
+    gate_decl_table       user_defined_gates_;
+    std::vector<inst_ptr> instructions_;
 
     /*
      * This is a cache of the rotation sequences for the rotations that have been synthesized.
@@ -180,8 +182,8 @@ public:
      * */
     void flush_and_clear_instructions();
 
-    const std::vector<INSTRUCTION>& get_instructions() const { return instructions_; }
-    size_t                          get_num_qubits() const { return num_qubits_declared_; }
+    const std::vector<inst_ptr>& get_instructions() const { return instructions_; }
+    size_t                       get_num_qubits() const { return num_qubits_declared_; }
 private:
     qubit_type get_qubit_id_from_operand(const prog::QASM_OPERAND&) const;
 
@@ -229,11 +231,6 @@ private:
      * */
     stats_type compute_statistics_for_current_instructions() const;
 };
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t get_required_precision(const INSTRUCTION::fpa_type&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

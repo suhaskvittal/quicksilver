@@ -6,7 +6,8 @@
 #ifndef COMPILER_PROGRAM_VALUE_INFO_h
 #define COMPILER_PROGRAM_VALUE_INFO_h
 
-#include "expression.h"
+#include "compiler/program/expression.h"
+#include "compiler/program.h"
 
 #include <cstdint>
 
@@ -39,8 +40,7 @@ struct VALUE_INFO
 
     VALUE_INFO() =default;
     VALUE_INFO(const VALUE_INFO&) =default;
-
-    VALUE_INFO(const EXPRESSION::generic_value_type&);
+    VALUE_INFO(const generic_value_type&);
 
     static VALUE_INFO init_as_one();
 

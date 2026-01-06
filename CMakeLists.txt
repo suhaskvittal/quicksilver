@@ -93,51 +93,35 @@ add_flex_bison_dependency(OQ2Lexer OQ2Parser)
 
 message(STATUS "BISON_OQ2Parser_OUTPUTS: ${BISON_OQ2Parser_OUTPUTS}")
 
+set(COMMON_FILES
+    src/argparse.cpp
+    src/dag.cpp
+    src/generic_io.cpp
+    src/globals.cpp
+    src/instruction.cpp)
+
 set(BINARY_GEN_FILES
     ${BISON_OQ2Parser_OUTPUTS} 
     ${FLEX_OQ2Lexer_OUTPUTS}
-    src/argparse.cpp
-    src/generic_io.cpp
-    src/instruction.cpp
     src/compiler/program.cpp
     src/compiler/program/expression.cpp
-    src/compiler/program/rotation_manager.cpp)
-
-set(SIM_FILES
-    src/argparse.cpp
-    src/generic_io.cpp
-    src/instruction.cpp
-    src/sim.cpp
-    src/sim/client.cpp
-    src/sim/clock.cpp
-    src/sim/compute.cpp
-    src/sim/epr_generator.cpp
-    src/sim/factory.cpp
-    src/sim/memory.cpp
-    src/sim/routing.cpp
-    src/sim/utils/factory_builder.cpp)
-
-set(MEMOPT_FILES
-    src/compiler/memopt.cpp
-    src/compiler/memopt/impl.cpp
-    src/compiler/memopt/impl/viszlai.cpp
-    src/compiler/memopt/impl/cost_aware.cpp)
+    src/compiler/program/rotation_manager.cpp
+    src/compiler/program/value_info.cpp)
 
 ###################################################
 ###################################################
 
-# Quicksilver simulator library:
+# Library for common files (`qs_common`)
 
-add_library(qssl SHARED ${SIM_FILES})
-target_include_directories(qssl PUBLIC "src")
-target_compile_options(qssl PUBLIC ${COMPILE_OPTIONS})
-target_compile_definitions(qssl PUBLIC -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-target_link_libraries(qssl PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
+add_library(qs_common SHARED ${COMMON_FILES})
+target_include_directories(qs_common PUBLIC "src")
+target_compile_options(qs_common PUBLIC ${COMPILE_OPTIONS})
+target_link_libraries(qs_common PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################
 
-# Binary generation executable:
+# Binary generation executable (`qs_gen_binary`)
 
 if (COMPILE_BINARY_GENERATION)
     add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
@@ -147,47 +131,18 @@ if (COMPILE_BINARY_GENERATION)
         target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
     endif()
 
-    target_include_directories(qs_gen_binary PRIVATE "src" ${CMAKE_CURRENT_BINARY_DIR} "deps/nwqec/include" ${GMP_INCLUDE_DIR} ${MPFR_INCLUDE_DIR})
+    target_include_directories(qs_gen_binary PRIVATE "src" 
+                                                    ${CMAKE_CURRENT_BINARY_DIR} 
+                                                    "deps/nwqec/include" 
+                                                    ${GMP_INCLUDE_DIR} 
+                                                    ${MPFR_INCLUDE_DIR})
+
     target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
     target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-    target_link_libraries(qs_gen_binary PRIVATE ${GMP_LIBRARIES} ${MPFR_LIBRARIES} ZLIB::ZLIB LibLZMA::LibLZMA)
+    target_link_libraries(qs_gen_binary PRIVATE qs_common
+                                                ${GMP_LIBRARIES} 
+                                                ${MPFR_LIBRARIES})
 endif()
-
-###################################################
-###################################################
-
-# compiler for adding memory instructions:
-
-add_executable(qs_mem_compile main/qs_mem_compile.cpp
-                src/argparse.cpp
-                src/generic_io.cpp
-                src/instruction.cpp
-                ${MEMOPT_FILES})
-target_compile_options(qs_mem_compile PRIVATE ${COMPILE_OPTIONS})
-target_include_directories(qs_mem_compile PRIVATE "src")
-target_link_libraries(qs_mem_compile PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
-
-###################################################
-###################################################
-
-# iterative simulator for memory evaluations:
-add_executable(qs_sim_mem main/qs_sim_mem_search.cpp ${MEMOPT_FILES})
-target_link_libraries(qs_sim_mem PRIVATE qssl)
-target_compile_options(qs_sim_mem PRIVATE ${COMPILE_OPTIONS})
-target_include_directories(qs_sim_mem PRIVATE "src")
-target_link_libraries(qs_sim_mem PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
-
-###################################################
-###################################################
-
-# program analysis and reporting tool:
-add_executable(qs_report main/qs_report.cpp
-                src/argparse.cpp
-                src/generic_io.cpp
-                src/instruction.cpp)
-target_compile_options(qs_report PRIVATE ${COMPILE_OPTIONS})
-target_include_directories(qs_report PRIVATE "src")
-target_link_libraries(qs_report PRIVATE ZLIB::ZLIB LibLZMA::LibLZMA)
 
 ###################################################
 ###################################################

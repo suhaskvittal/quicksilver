@@ -56,7 +56,6 @@ DAG::add_instruction(inst_ptr inst)
     {
         if (back_instructions_[q] != nullptr)
         {
-            is_oldest_for_all_qubits = false;
             // avoid double counting the dependency
             if (!visited.count(back_instructions_[q]))
             {

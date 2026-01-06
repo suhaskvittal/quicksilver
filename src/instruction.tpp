@@ -3,6 +3,8 @@
  *  date:   4 January 2026
  * */
 
+#include <cassert>
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -134,8 +136,8 @@ get_inst_qubit_count(INSTRUCTION::TYPE t)
 template <class ITER> INSTRUCTION::qubit_array 
 convert_qubit_container_into_qubit_array(INSTRUCTION::TYPE type, ITER begin, ITER end)
 {
-    const size_t cnt{get_inst_qubit_count(type)};
-    assert(std::distance(begin, end) == cnt);
+    assert(std::distance(begin, end) == get_inst_qubit_count(type));
+
     INSTRUCTION::qubit_array qubits;
     std::copy(begin, end, qubits.begin());
     return qubits;

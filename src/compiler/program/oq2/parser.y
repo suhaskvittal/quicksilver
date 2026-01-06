@@ -89,7 +89,7 @@ class OQ2_LEXER;
 %%
 
 program: OPENQASM VERSION_STRING ';' line   { prog.version = $2; }
-        | line                               { prog.version_ = "2.0"; }    
+        | line                               { prog.version = "2.0"; }    
         ;
 
 line: line include_stmt                     { prog.merge(std::move($2)); }

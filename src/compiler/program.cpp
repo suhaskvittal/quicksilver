@@ -7,6 +7,7 @@
 #include "compiler/program/expression.h"
 #include "compiler/program/oq2/lexer_wrapper.h"
 #include "compiler/program/rotation_manager.h"
+#include "compiler/program/value_info.h"
 #include "parser.tab.h"
 
 #include <cstdio>
@@ -34,6 +35,8 @@ int64_t GL_PRINT_PROGRESS{1'000'000};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+using namespace prog;
 
 /*
  * Helper functions and other useful data structures
@@ -81,7 +84,7 @@ subst_map_type<T> _make_substitution_map(const std::vector<std::string>& names,
  * will update this to be `2*(pi/2)+3`
  * */
 void _parameter_substitution(EXPRESSION&, const subst_map_type<EXPRESSION>&);
-void _argument_substition(prog::QASM_OPERAND&, const subst_map_type<prog::QASM_OPERAND>&);
+void _argument_substitution(prog::QASM_OPERAND&, const subst_map_type<prog::QASM_OPERAND>&);
 
 /*
  * Checks if two maps have the same key. If so, the programs exits with an error.
@@ -142,7 +145,7 @@ PROGRAM_INFO::from_file(std::string input_file)
     std::istringstream _tmp{};
     OQ2_LEXER lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, "");
-    int retcode = parser();
+    [[ maybe_unused ]] int retcode = parser();
 
     generic_strm_close(istrm);
 
@@ -175,7 +178,7 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     std::istringstream _tmp{};
     OQ2_LEXER lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, dirname);
-    int retcode = parser();
+    [[ maybe_unused ]] int retcode = parser();
 
     generic_strm_close(istrm);
 
@@ -297,7 +300,8 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
     // merge instructions: 
     instructions_.reserve(instructions_.size() + other.instructions_.size());
     std::move(std::make_move_iterator(other.instructions_.begin()),
-              std::make_move_iterator(other.instructions_.end()), std::back_inserter(instructions_));
+              std::make_move_iterator(other.instructions_.end()), 
+              std::back_inserter(instructions_));
 }
 
 ////////////////////////////////////////////////////////////
@@ -343,12 +347,9 @@ PROGRAM_INFO::flush_and_clear_instructions()
     for (const auto& inst : instructions_)
     {
         // retrieve the rotation sequence for this instruction:
-        if (inst.type == INSTRUCTION::TYPE::RZ || inst.type == INSTRUCTION::TYPE::RX)
-            if (inst.urotseq.empty()) // this is an RZ(0) or RZ(2*pi) that did not get caught -- just skip it:
-                continue;
-
-        auto enc = inst.serialize();
-        enc.read_write([this] (void* buf, size_t size) { return generic_strm_write(*this->ostrm_p_, buf, size); });
+        if (is_rotation_instruction(inst->type) && inst->urotseq.empty())
+            continue;
+        write_instruction_to_stream(*ostrm_p_, inst.get());
     }
 
     // clear instructions:
@@ -386,12 +387,12 @@ INSTRUCTION::fpa_type
 PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& angle_expr)
 {
     // Given our basis gates, there can only be one parameter for rotation gates.
-    fpa_type rotation = expr::evaluate_expression(angle_expr).readout_fixed_point_angle();
+    fpa_type rotation = evaluate_expression(angle_expr).readout_fixed_point_angle();
     // ignore gates with an angle of 0:
     if (rotation.popcount() == 0)
         return fpa_type{};  // return zero angle
     // schedule the rotation's synthesis:
-    rotation_manager_schedule_synthesis(rotation, get_required_precision(rotation));
+    rotation_manager_schedule_synthesis(rotation, _get_required_precision(rotation));
     return rotation;
 }
 
@@ -409,8 +410,8 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
                 [this] (const auto& x) { return this->get_qubit_id_from_operand(x); });
 
     std::vector<INSTRUCTION::TYPE> urotseq;
-    INSTRUCTION inst{type, qubits, rotation, urotseq.begin(), urotseq.end()};
-    instructions_.push_back(inst);
+    inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
+    instructions_.push_back(std::move(inst));
 
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "\tevaluated as: " << inst << "\n";
@@ -445,8 +446,8 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
         }
 
         // create and push the instruction:
-        INSTRUCTION inst{type, qubits, rotation, urotseq.begin(), urotseq.end()};
-        instructions_.push_back(inst);
+        inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
+        instructions_.push_back(std::move(inst));
 
 #if defined(PROGRAM_INFO_VERBOSE)
         std::cout << "\t\t( " << i << " ) " << inst << "\n";
@@ -505,8 +506,9 @@ PROGRAM_INFO::add_basis_gate_instruction(prog::QASM_INST_INFO&& qasm_inst, INSTR
     // Check for vector operands
     std::vector<bool> v_op_vec(qasm_inst.args.size(), false);
     std::vector<size_t> v_op_width(qasm_inst.args.size(), 0);
-    for (const QASM_OPERAND& operand : qasm_inst.args)
+    for (size_t i = 0; i < qasm_inst.args.size(); i++)
     {
+        const auto& operand = qasm_inst.args[i];
         auto it = registers_.find(operand.name);
         if (it == registers_.end())
             std::cerr << "PROGRAM_INFO::add_basis_gate_instruction: register not found: " << operand.name << _die{};
@@ -546,19 +548,15 @@ PROGRAM_INFO::cancel_adjacent_rotations()
         auto& prev_inst = instructions_[i-1];
         auto& curr_inst = instructions_[i];
 
-        if (is_rotation_instruction(curr_inst.type))
+        if (is_rotation_instruction(curr_inst->type) && is_rotation_instruction(prev_inst->type))
         {
-            // Check that the previous gate is also an RZ/RX with complementary angle
-            if (is_rotation_instruction(prev_inst))
+            auto angle_sum = fpa::add(curr_inst->angle, prev_inst->angle);
+            if (angle_sum.popcount() == 0)
             {
-                auto angle_sum = fpa::add(curr_inst.angle, prev_inst.angle);
-                if (angle_sum.popcount() == 0)
-                {
-                    prev_inst.type = INSTRUCTION::TYPE::NIL;
-                    curr_inst.type = INSTRUCTION::TYPE::NIL;
-                    i += 2;  // skip both cancelled instructions
-                    continue;
-                }
+                prev_inst->deletable = true;
+                curr_inst->deletable = true;
+                i += 2;
+                continue;
             }
         }
         i++;
@@ -574,19 +572,19 @@ PROGRAM_INFO::cancel_inverse_gate_pairs()
         auto& prev_inst = instructions_[i-1];
         auto& curr_inst = instructions_[i];
 
-        auto it = GATE_INVERSE_MAP.find(curr_inst.type);
-        if (it != GATE_INVERSE_MAP.end() && prev_inst.type == it->second)
+        auto it = GATE_INVERSE_MAP.find(curr_inst->type);
+        if (it != GATE_INVERSE_MAP.end() && prev_inst->type == it->second)
         {
             // Check that all qubits match
             bool same{true};
             for (size_t j = 0; j < curr_inst->qubit_count; ++j)
-                same &= (curr_inst.qubits[j] == prev_inst.qubits[j]);
+                same &= (curr_inst->qubits[j] == prev_inst->qubits[j]);
 
             if (same)
             {
-                prev_inst.type = INSTRUCTION::TYPE::NIL;
-                curr_inst.type = INSTRUCTION::TYPE::NIL;
-                i += 2;  // skip both cancelled instructions
+                prev_inst->deletable = true;
+                curr_inst->deletable = true;
+                i += 2; 
                 continue;
             }
         }
@@ -606,8 +604,7 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
     auto it = std::remove_if(instructions_.begin(), instructions_.end(),
                         [] (const auto& inst)
                         {
-                            bool is_rot = inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ;
-                            return is_rot && inst.angle.popcount() == 0;
+                            return is_rotation_instruction(inst->type) && inst->angle.popcount() == 0;
                         });
     instructions_.erase(it, instructions_.end());
 
@@ -616,8 +613,7 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
     cancel_inverse_gate_pairs();
 
     // Phase 3: Remove NIL gates
-    it = std::remove_if(instructions_.begin(), instructions_.end(),
-                    [] (const auto& inst) { return inst.type == INSTRUCTION::TYPE::NIL; });
+    it = std::remove_if(instructions_.begin(), instructions_.end(), [] (const auto& inst) { return inst->deletable; });
     instructions_.erase(it, instructions_.end());
 
     size_t removed_this_pass = num_gates_before - instructions_.size();
@@ -639,11 +635,11 @@ PROGRAM_INFO::compute_statistics_for_current_instructions() const
 
     for (const auto& inst : instructions_)
     {
-        bool is_sw_gate = is_software_instruction(inst.type);
-        bool is_t_like = (inst.type == INSTRUCTION::TYPE::T || inst.type == INSTRUCTION::TYPE::TDG);
-        bool is_cxz = (inst.type == INSTRUCTION::TYPE::CX || inst.type == INSTRUCTION::TYPE::CZ);
-        bool is_rot = (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ);
-        bool is_ccxz = (inst.type == INSTRUCTION::TYPE::CCX || inst.type == INSTRUCTION::TYPE::CCZ);
+        bool is_sw_gate = is_software_instruction(inst->type);
+        bool is_t_like = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TDG);
+        bool is_cxz = (inst->type == INSTRUCTION::TYPE::CX || inst->type == INSTRUCTION::TYPE::CZ);
+        bool is_rot = (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ);
+        bool is_ccxz = (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
 
         out.total_gate_count++;
         out.software_gate_count += is_sw_gate;
@@ -653,15 +649,7 @@ PROGRAM_INFO::compute_statistics_for_current_instructions() const
         out.ccxz_count += is_ccxz;
 
         out.virtual_inst_count++;
-
-        if (is_rot)
-            out.unrolled_inst_count += inst.urotseq.size();
-        else if (inst.type == INSTRUCTION::TYPE::CCX)
-            out.unrolled_inst_count += 15;
-        else if (inst.type == INSTRUCTION::TYPE::CCZ)
-            out.unrolled_inst_count += 13;
-        else
-            out.unrolled_inst_count++;
+        out.unrolled_inst_count += inst->unrolled_inst_count();
     }
 
     return out;
@@ -679,21 +667,21 @@ PROGRAM_INFO::complete_rotation_gates()
         if (ii % 100'000 == 0)
             (std::cout << ".").flush();
         ii++;
-        if (inst.type == INSTRUCTION::TYPE::RX || inst.type == INSTRUCTION::TYPE::RZ)
+        if (is_rotation_instruction(inst->type))
         {
-            auto it = rotation_cache_.find(inst.angle);
+            auto it = rotation_cache_.find(inst->angle);
             if (it != rotation_cache_.end())
             {
-                inst.urotseq = it->second;
+                inst->urotseq = it->second;
             }
             else
             {
-                inst.urotseq = rotation_manager_find(inst.angle, get_required_precision(inst.angle));
-                rotation_cache_.insert({inst.angle, inst.urotseq});
+                inst->urotseq = rotation_manager_find(inst->angle, _get_required_precision(inst->angle));
+                rotation_cache_.insert({inst->angle, inst->urotseq});
             }
 
-            if (inst.urotseq.empty())
-                std::cerr << "[alert] rotation synthesis yielded empty sequence for " << inst.to_string() << "\n";
+            if (inst->urotseq.empty())
+                std::cerr << "[alert] rotation synthesis yielded empty sequence for " << *inst << "\n";
         }
     }
     std::cout << "\n";
@@ -791,7 +779,7 @@ _parameter_substitution(EXPRESSION& param, const subst_map_type<EXPRESSION>& sub
 
 void
 _argument_substitution(prog::QASM_OPERAND& arg,
-                        const subst_map_type<prog::QASM_OPERAND> subst_map) 
+                        const subst_map_type<prog::QASM_OPERAND>& subst_map) 
 {
     auto it = subst_map.find(arg.name);
     if (it != subst_map.end())

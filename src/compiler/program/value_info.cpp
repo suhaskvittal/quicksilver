@@ -27,7 +27,7 @@ constexpr size_t INT_IDX{0},
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
+VALUE_INFO::VALUE_INFO(const generic_value_type& value)
 {
     state = STATE::DEFAULT;
     if (value.index() == INT_IDX)
@@ -78,10 +78,7 @@ VALUE_INFO::VALUE_INFO(const EXPRESSION::generic_value_type& value)
             // create hex string:
             size_t width_start_idx = ident.find("fpa") + 3;
             size_t hex_ident_start_idx = ident.find("0x");
-            size_t num_bits = std::stoi(ident.substr(width_start_idx, hex_ident_start_idx - width_start_idx));
-
             size_t hex_start_idx = hex_ident_start_idx + 2;
-
             std::array<fpa_type::word_type, fpa_type::NUM_WORDS> words{};
             int nibble_count{NUM_BITS_PER_NIBBLE-1};
             int word_idx{fpa_type::NUM_WORDS-1};
@@ -264,7 +261,7 @@ VALUE_INFO::operator^=(VALUE_INFO v)
 
     if (v.state == STATE::ZERO)
     {
-        EXPRESSION::generic_value_type x;
+        generic_value_type x;
         x.emplace<INT_IDX>(1);
         *this = VALUE_INFO(x);
     }

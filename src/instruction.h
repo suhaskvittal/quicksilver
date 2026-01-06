@@ -36,6 +36,7 @@ constexpr std::string_view BASIS_GATES[] =
 
 class INSTRUCTION
 {
+public:
     constexpr static size_t FPA_PRECISION{64};
     constexpr static size_t MAX_QUBITS{3};
     constexpr static int64_t INVALID_NUMBER{-1};
@@ -88,15 +89,17 @@ class INSTRUCTION
      * have high precision for angles near a power of two).
      *
      * `urotseq` is a sequence of Clifford+T gates that approximate
-     * RZ or RX of `angle`
+     * RZ or RX of `angle`. `urotseq` is not const since it may 
+     * need to be changed during compilation (to support asynchrnous 
+     * synthesis).
      * */
-    const fpa_type          angle;
-    const std::vector<TYPE> urotseq;
+    const fpa_type    angle;
+    std::vector<TYPE> urotseq;
 
     /*
      * Same value as `get_inst_qubit_count(type)`
      * */
-    const size_t qubit_count_;
+    const size_t qubit_count;
 
     /*
      * These are simulator-related parameters. The simulator manages
@@ -104,6 +107,11 @@ class INSTRUCTION
      * */
     int64_t  number{INVALID_NUMBER};
     uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
+
+    /*
+     * Other exposed variables that may be useful:
+     * */
+    bool deletable{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute
@@ -186,9 +194,8 @@ std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
 /*
  * IO support for `INSTRUCTION`:
  * */
-
 INSTRUCTION* read_instruction_from_stream(generic_strm_type&);
-void         write_instruction_to_stream(generic_strm_type&, INSTRUCTION*);
+void         write_instruction_to_stream(generic_strm_type&, const INSTRUCTION*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -197,7 +204,6 @@ void         write_instruction_to_stream(generic_strm_type&, INSTRUCTION*);
  * These functions are simple boolean functions that
  * categorize a given `INSTRUCTION::TYPE`
  * */
-
 constexpr bool is_software_instruction(INSTRUCTION::TYPE);
 constexpr bool is_memory_access(INSTRUCTION::TYPE);
 constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
@@ -210,8 +216,7 @@ constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
  *
  * Also useful when reading out qubits from `INSTRUCTION`
  * */
-
-constexpr size_t get_inst_qubit_count(INSTRUCTION::TYPE t)
+constexpr size_t get_inst_qubit_count(INSTRUCTION::TYPE t);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

@@ -4,6 +4,7 @@
     */
 
 #include "compiler/program/expression.h"
+#include "compiler/program/value_info.h"
 
 #include <iostream>
 
@@ -114,7 +115,7 @@ _generic_value_to_string(generic_value_type val)
     else if (std::holds_alternative<std::string>(val))
         return std::get<std::string>(val);
     else
-        return std::get<EXPRESSION::expr_ptr>(val)->to_string();
+        return std::get<expr_ptr>(val)->to_string();
 }
 
 std::string

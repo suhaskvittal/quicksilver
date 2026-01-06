@@ -11,14 +11,12 @@
 template <class PRED> std::vector<DAG::inst_ptr>
 DAG::get_front_layer_if(const PRED& pred) const
 {
-    std::unordered_set<inst_ptr> front_layer_insts; 
+    std::vector<inst_ptr> front_layer_insts; 
     front_layer_insts.reserve(front_layer_.size());
-
     for (const auto& [inst, __unused_node] : front_layer_)
         if (pred(inst))
-            front_layer_insts.insert(inst);
-
-    return std::vector<inst_ptr>(front_layer_insts.begin(), front_layer_insts.end());
+            front_layer_insts.push_back(inst);
+    return front_layer_insts;
 }
 
 ////////////////////////////////////////////////////////////
