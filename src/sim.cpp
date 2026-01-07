@@ -5,166 +5,22 @@
 
 #include "sim.h"
 
-#include <unordered_map>
-#include <vector>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
 
 namespace sim
 {
 
-COMPUTE* GL_CMP;
-EPR_GENERATOR* GL_EPR;
-
-std::mt19937 GL_RNG{0};
-std::uniform_real_distribution<double> FP_RAND{0.0, 1.0};
-
-uint64_t GL_CURRENT_TIME_NS{0};
-
-// simulation wall clock start time
 std::chrono::steady_clock::time_point GL_SIM_WALL_START;
+std::mt19937_64 GL_RNG{0};
 
-bool GL_PRINT_PROGRESS{false};
-int64_t GL_PRINT_PROGRESS_FREQ{-1};
-
-bool GL_ELIDE_MSWAP_INSTRUCTIONS{false};
-bool GL_ELIDE_MPREFETCH_INSTRUCTIONS{false};
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool GL_IMPL_CACHEABLE_STORES{false};
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class T, class U> double
-_fpdiv(T a, U b)
-{
-    return static_cast<double>(a) / static_cast<double>(b);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-print_stats(std::ostream& out)
-{
-    std::vector<T_FACTORY*> t_factories = GL_CMP->get_t_factories();
-    std::vector<MEMORY_MODULE*> mem_modules = GL_CMP->get_mem_modules();
-    
-    // print stats for each client:
-    out << "\n\nSIMULATION_STATS------------------------------------------------------------\n";
-    double execution_time_us = (GL_CMP->current_cycle() / GL_CMP->OP_freq_khz) * 1e3;
-    double execution_time_s = execution_time_us / 1e6;
-
-    const auto& clients = GL_CMP->get_clients();
-    for (size_t i = 0; i < clients.size(); i++)
-    {
-        const auto& c = clients[i];
-        out << "CLIENT_" << i << "\n";
-        double kilo_inst_per_s = (c->s_unrolled_inst_done / execution_time_s) * 1e-3;
-
-//      print_stat_line(out, "TIME_PER_UNROLLED_INST (us/inst)", execution_time_us / c->s_unrolled_inst_done);
-        print_stat_line(out, "KIPS", kilo_inst_per_s);
-        print_stat_line(out, "VIRTUAL_INST_DONE", c->s_inst_done);
-        print_stat_line(out, "UNROLLED_INST_DONE", c->s_unrolled_inst_done);
-//      print_stat_line(out, "INST_ROUTING_STALL_CYCLES", c->s_inst_routing_stall_cycles);
-//      print_stat_line(out, "INST_RESOURCE_STALL_CYCLES", c->s_inst_resource_stall_cycles);
-//      print_stat_line(out, "INST_MEMORY_STALL_CYCLES", c->s_inst_memory_stall_cycles);
-        print_stat_line(out, "MEMORY_SWAPS", c->s_mswap_count);
-        print_stat_line(out, "CACHEABLE_MEMORY_SWAPS", c->s_cacheable_mswap_count);
-        print_stat_line(out, "MEMORY_PREFETCHES", c->s_mprefetch_count);
-        print_stat_line(out, "T_GATE_COUNT", c->s_t_gate_count);
-        print_stat_line(out, "T_TOTAL_ERROR", c->s_total_t_error);
-    }
-
-    print_stat_line(out, "EVICTIONS_NO_USES", GL_CMP->s_evictions_no_uses, false);
-    print_stat_line(out, "EVICTIONS_PREFETCH_NO_USES", GL_CMP->s_evictions_prefetch_no_uses, false);
-    print_stat_line(out, "OPERATIONS_WITH_DECOUPLED_LOADS", GL_CMP->s_operations_with_decoupled_loads, false);
-
-    // print factory stats:
-    std::unordered_map<size_t, std::vector<T_FACTORY*>> factory_level_map;
-    for (auto* f : t_factories)
-        factory_level_map[f->level_].push_back(f);
-
-    for (size_t i = 0; i < factory_level_map.size(); i++)
-    {
-        out << "FACTORY_L" << i << "\n";
-
-        uint64_t tot_prod_tries{0},
-                 tot_failures{0};
-        for (auto* f : factory_level_map[i])
-        {
-            tot_prod_tries += f->s_prod_tries;
-            tot_failures += f->s_failures;
-        }
-
-        print_stat_line(out, "PROD_TRIES", tot_prod_tries);
-        print_stat_line(out, "FAILURES", tot_failures);
-    }
-
-    // print memory stats:
-    
-    // accumulate any client-level stats:
-    uint64_t total_memory_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_memory_requests; });
-    uint64_t total_memory_prefetch_requests = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_memory_prefetch_requests; });
-    uint64_t total_epr_buffer_occupancy_post_request = std::transform_reduce(mem_modules.begin(), mem_modules.end(), 
-                                                    uint64_t{0}, std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_total_epr_buffer_occupancy_post_request; });
-    uint64_t total_cached_stores = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_cached_stores; });
-    uint64_t total_loads_from_cache = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_loads_from_cache; });
-    uint64_t total_forwards = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_forwards; });
-    uint64_t total_mem_access_latency = std::transform_reduce(mem_modules.begin(), mem_modules.end(), uint64_t{0}, 
-                                                    std::plus<uint64_t>(),
-                                                    [] (auto* m) { return m->s_total_memory_access_latency_in_compute_cycles; });
-
-    double mean_epr_buffer_occupancy_post_request = _fpdiv(total_epr_buffer_occupancy_post_request, total_memory_requests);
-    double mean_mem_access_latency = _fpdiv(total_mem_access_latency, total_memory_requests);
-
-    out << "MEMORY\n";
-    print_stat_line(out, "ALL_REQUESTS", total_memory_requests);
-    print_stat_line(out, "PREFETCH_REQUESTS", total_memory_prefetch_requests);
-    print_stat_line(out, "CACHED_STORES", total_cached_stores);
-    print_stat_line(out, "LOADS_FROM_CACHE", total_loads_from_cache);
-    print_stat_line(out, "REQUEST_FORWARDS", total_forwards);
-    print_stat_line(out, "MEAN_MEM_ACCESS_LATENCY", mean_mem_access_latency);
-
-    if (GL_EPR != nullptr)
-    {
-        print_stat_line(out, "MEAN_EPR_BUFFER_OCCUPANCY_POST_REQUEST", mean_epr_buffer_occupancy_post_request);
-
-        size_t bin_size = GL_EPR->buffer_capacity_ < GL_EPR->s_occu_hist.size() 
-                                    ? 1 
-                                    : GL_EPR->buffer_capacity_ / GL_EPR->s_occu_hist.size();
-        bin_size = std::min(bin_size, GL_EPR->s_occu_hist.size()-1);
-        out << "EPR_BUFFER_OCCU_HISTOGRAM\n";
-        for (size_t i = 0; i < GL_EPR->s_occu_hist.size(); i++)
-        {
-            size_t bin_min = i * bin_size,
-                   bin_max = (i+1) * bin_size;
-            print_stat_line(out, "\tEPR_BUFFER_OCCU_HISTOGRAM_" + std::to_string(bin_min) + "_" + std::to_string(bin_max),
-                                GL_EPR->s_occu_hist[i],
-                                false);
-        }
-    }
-}
+cycle_type GL_MAX_CYCLES_WITH_NO_PROGRESS{5000};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 std::string
-sim_walltime()
+walltime()
 {
     auto duration = std::chrono::duration<double>(std::chrono::steady_clock::now() - GL_SIM_WALL_START);
     double total_seconds = duration.count();
@@ -180,7 +36,7 @@ sim_walltime()
 }
 
 double
-sim_walltime_s()
+walltime_s()
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - GL_SIM_WALL_START).count();
 }

@@ -63,10 +63,7 @@ INSTRUCTION::INSTRUCTION(TYPE _type, std::initializer_list<qubit_type> _qubits)
     angle{},
     urotseq{},
     qubit_count{get_inst_qubit_count(_type)}
-{
-    if (uop_count() > 0)
-        get_next_uop();
-}
+{}
 
 INSTRUCTION::~INSTRUCTION()
 {
@@ -114,7 +111,6 @@ const qubit_type* INSTRUCTION::q_end() const { return qubits.data() + qubit_coun
 size_t
 INSTRUCTION::uop_count() const
 {
-
     if (is_rotation_instruction(type))
         return urotseq.size();
     else if (type == INSTRUCTION::TYPE::CCX)

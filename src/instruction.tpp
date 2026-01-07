@@ -28,7 +28,10 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
     qubit_count{get_inst_qubit_count(_type)}
-{}
+{
+    if (uop_count() > 0)
+        get_next_uop();
+}
 
 template <class Q_IT_TYPE, class U_IT_TYPE>
 INSTRUCTION::INSTRUCTION(TYPE _type,
@@ -41,7 +44,10 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
     qubit_count{get_inst_qubit_count(_type)}
-{}
+{
+    if (uop_count() > 0)
+        get_next_uop();
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

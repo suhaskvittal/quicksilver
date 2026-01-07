@@ -108,6 +108,12 @@ set(BINARY_GEN_FILES
     src/compiler/program/rotation_manager.cpp
     src/compiler/program/value_info.cpp)
 
+set(SIM_FILES
+    src/sim/client.cpp
+    src/sim/factory.cpp
+    src/sim/operable.cpp
+    src/sim.cpp)
+
 ###################################################
 ###################################################
 
@@ -150,13 +156,22 @@ endif()
 # Memory scheduler (qs_memory_scheduler)
 
 add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp
-                                    ${COMMON_FILES}
                                     src/compiler/memory_scheduler.cpp
                                     src/compiler/memory_scheduler/eif.cpp
                                     src/compiler/memory_scheduler/hint.cpp)
 target_include_directories(qs_memory_scheduler PRIVATE "src")
 target_compile_options(qs_memory_scheduler PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
+
+###################################################
+###################################################
+
+# Simple context switch simulator (qs_ctxsim)
+
+add_executable(qs_ctxsim main/qs_ctxsim.cpp ${SIM_FILES})
+target_include_directories(qs_ctxsim PRIVATE "src")
+target_compile_options(qs_ctxsim PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_ctxsim PRIVATE qs_common)
 
 ###################################################
 ###################################################
