@@ -34,12 +34,13 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
     dag_ptr               dag{new DAG{num_qubits}};
     std::deque<inst_ptr>  outgoing_buffer;
     int64_t               inst_done{0};
-    while (inst_done < conf.inst_compile_limit && !generic_strm_eof(istrm))
+    while (inst_done < conf.inst_compile_limit)
     {
         const uint64_t inst_done_before{inst_done};
 
         // try to fill up the DAG during every iteration
-        read_instructions_into_dag(dag, istrm, conf.dag_inst_capacity);
+        if (!generic_strm_eof(istrm))
+            read_instructions_into_dag(dag, istrm, conf.dag_inst_capacity);
 
         // try to complete as many instructions as possible using the `active_set`
         auto completable = dag->get_front_layer_if(

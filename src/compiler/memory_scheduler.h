@@ -47,6 +47,7 @@ struct config_type
 
     /* Policy specific parameters */
     int64_t hint_lookahead_depth{16};
+    bool    hint_use_complex_selection{true};
 };
 
 /*

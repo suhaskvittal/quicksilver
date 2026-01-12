@@ -3,15 +3,13 @@
  *  date:   5 January 2026
  * */
 
-#include <unordered_set>
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 template <class PRED> std::vector<DAG::inst_ptr>
 DAG::get_front_layer_if(const PRED& pred) const
 {
-    std::vector<inst_ptr> front_layer_insts; 
+    std::vector<inst_ptr> front_layer_insts;
     front_layer_insts.reserve(front_layer_.size());
     for (const auto& [inst, __unused_node] : front_layer_)
         if (pred(inst))
@@ -25,26 +23,35 @@ DAG::get_front_layer_if(const PRED& pred) const
 template <class CALLBACK> void
 DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t max_layer) const
 {
-    std::unordered_set<node_type*> current_layer;
-    for (const auto& [__unused_inst, node] : front_layer_)
-        current_layer.insert(node);
+    // update iteration generation so we know when to reset predecessor
+    iteration_generation_++;
+    const size_t gen = iteration_generation_;
 
-    // we will use `pred_table` to identify when to add an instruction to the next layer.
-    // condition: `pred_table[node] == node->pred_count`
-    std::unordered_map<node_type*, size_t> pred_table;
+    std::vector<node_type*> current_layer;
+    current_layer.reserve(front_layer_.size());
+    for (const auto& [_, node] : front_layer_)
+        current_layer.push_back(node);
+
     size_t layer_count{0};
     while (!current_layer.empty() && layer_count < max_layer)
     {
-        std::unordered_set<node_type*> next_layer;
+        std::vector<node_type*> next_layer;
         next_layer.reserve(current_layer.size());
+
         for (auto* x : current_layer)
         {
             callback(x->inst);
 
-            // traverse to neighbors:
             for (node_type* y : x->dependent)
-                if ((++pred_table[y]) == y->pred_count)
-                    next_layer.insert(y);
+            {
+                if (y->last_generation_ != gen)
+                {
+                    y->last_generation_ = gen;
+                    y->tmp_pred_count_ = 0;
+                }
+                if ((++y->tmp_pred_count_) == y->pred_count)
+                    next_layer.push_back(y);
+            }
         }
         current_layer = std::move(next_layer);
         layer_count++;

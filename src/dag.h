@@ -8,6 +8,7 @@
 
 #include "instruction.h"
 
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -24,6 +25,12 @@ public:
         inst_ptr                inst;
         std::vector<node_type*> dependent{};
         size_t                  pred_count{0};
+
+        /*
+         * These variables are for `for_each_instruction_in_layer_order` (see below)
+         * */
+        mutable uint8_t         tmp_pred_count_{0};
+        mutable size_t          last_generation_{0};
     };
 
     const size_t qubit_count;
@@ -47,6 +54,11 @@ private:
     std::vector<node_type*> back_instructions_;
 
     size_t inst_count_{0};
+
+    /*
+     * This is used during `for_each_instruction_in_layer_order`
+     * */
+    mutable size_t iteration_generation_{0};
 public:
     DAG(size_t qubit_count);
     ~DAG();

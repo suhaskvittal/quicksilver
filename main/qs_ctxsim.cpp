@@ -63,11 +63,13 @@ void ctxsim_read_and_execute_pending_instructions();
 bool ctxsim_do_rotation_instruction(inst_ptr, sim::QUBIT*);
 bool ctxsim_do_t_like_instruction(sim::QUBIT*);
 
+bool ctxsim_context_switch_condition(int64_t inst_limit);
+
 /*
  * Sets `new_active_client` to `CTX_ACTIVE_CLIENT`.
  * Also models the delay.
  * */
-void ctxsim_do_context_switch(sim::CLIENT* new_active_client);
+void ctxsim_do_context_switch(sim::CLIENT* new_active_client, cycle_type ctx_switch_latency);
 
 void ctxsim_cleanup();
 
@@ -92,7 +94,8 @@ main(int argc, char* argv[])
 
     double  magic_state_throughput;  // per cycle
     int64_t magic_state_capacity;
-    int64_t max_cycles_before_context_switch;
+    int64_t ctx_switch_latency;
+    int64_t ctx_switch_min_delay;
 
     int64_t rotation_buffer_capacity;
 
@@ -106,10 +109,11 @@ main(int argc, char* argv[])
         // system configuration:
         .optional("-m", "--magic-state-throughput", "Number of magic states produced each cycle", magic_state_throughput, 1.0)
         .optional("", "--magic-state-capacity", "Max number of buffered magic states", magic_state_capacity, 32)
-        .optional("-ctx", "--context-switch-frequency", "Max cycles before context switch is forced", max_cycles_before_context_switch, 1'000'000)
+        .optional("-cl", "--context-switch-latency", "Latency of context switch", ctx_switch_latency, 75)
+        .optional("-cd", "--context-switch-min-delay", "Minimum cycles between two context switches", ctx_switch_min_delay, 100'000)
 
         // rotation elision:
-        .optional("", "--rotation-elision", "Enable rotation elision", CTX_ROTATION_ELISION, false)
+        .optional("-re", "--rotation-elision", "Enable rotation elision", CTX_ROTATION_ELISION, false)
         .optional("", "--rotation-buffer-capacity", "Maximum number of rotations that can be buffered per client", rotation_buffer_capacity, 2)
 
         .parse(argc, argv);
@@ -122,7 +126,7 @@ main(int argc, char* argv[])
     ctxsim_init(trace_files, rotation_buffer_capacity);
 
     double magic_state_prod{0.0};
-    cycle_type last_context_switch_cycle{0};
+    cycle_type last_ctx_switch_cycle{0};
     sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
 
     bool done;
@@ -140,20 +144,29 @@ main(int argc, char* argv[])
                             << " : inst done = " << c->s_unrolled_inst_done
                             << ", ipc = " << c->ipc()
                             << "\n";
+
+                if (CTX_ROTATION_ELISION)
+                {
+                    std::cout << "\trotations:";
+                    for (const auto& e : CTX_ROTATION_BUFFER[c->id])
+                    {
+                        if (e.origin != nullptr)
+                        {
+                            std::cout << "\n\t\tinst = " << *e.origin 
+                                    << ", gates done = " << e.gates_applied
+                                    << " of " << e.origin->uop_count();
+                        }
+                    }
+                    std::cout << "\n";
+                }
             }
             std::cout << "context switches = " << s_context_switches
                         << "\n";
         }
 
-        bool do_ctx_switch = (CTX_CURRENT_CYCLE - last_context_switch_cycle >= max_cycles_before_context_switch)
-                                || (CTX_ACTIVE_CLIENT->s_unrolled_inst_done >= inst_limit);
-        if (CTX_ROTATION_ELISION)
-        {
-            auto begin = CTX_ROTATION_BUFFER[CTX_ACTIVE_CLIENT->id].begin(),
-                 end = CTX_ROTATION_BUFFER[CTX_ACTIVE_CLIENT->id].end();
-            bool any_rotations_in_buffer = std::any_of(begin, end, [] (const auto& e) { return e.origin != nullptr; });
-            do_ctx_switch |= !any_rotations_in_buffer;
-        }
+        bool do_ctx_switch = (CTX_ACTIVE_CLIENT->s_unrolled_inst_done >= inst_limit)
+                                || ctxsim_context_switch_condition(inst_limit);
+        do_ctx_switch &= (CTX_CURRENT_CYCLE - last_ctx_switch_cycle) >= ctx_switch_min_delay;
 
         // check if need to, and can, do a context switch
         if (do_ctx_switch)
@@ -162,8 +175,8 @@ main(int argc, char* argv[])
                                 [inst_limit] (auto* c) { return c->s_unrolled_inst_done < inst_limit; });
             if (c_it != CTX_CLIENTS.end())
             {
-                ctxsim_do_context_switch(*c_it);
-                last_context_switch_cycle = CTX_CURRENT_CYCLE;
+                ctxsim_do_context_switch(*c_it, ctx_switch_latency);
+                last_ctx_switch_cycle = CTX_CURRENT_CYCLE;
 
                 // we do this rotation so that the active client is always first.
                 std::rotate(CTX_CLIENTS.begin(), c_it, CTX_CLIENTS.end());
@@ -315,19 +328,18 @@ ctxsim_do_rotation_instruction(inst_ptr inst, sim::QUBIT* q)
             if (rot_data.gates_applied >= inst->uop_count())
             {
                 retire = FPR(sim::GL_RNG) >= 0.5;
-                q->cycle_available = CTX_CURRENT_CYCLE + 4;
+                q->cycle_available = CTX_CURRENT_CYCLE + 3;
             }
             rot_data.origin = nullptr;
             rot_data.gates_applied = 0;
+            return retire;
         }
     }
 
     // get next uop that is a T gate:
-    while (!retire && !is_t_like_instruction(inst->current_uop()->type))
-        retire = inst->retire_current_uop();
-    if (!retire && ctxsim_do_t_like_instruction(q))
-        retire = inst->retire_current_uop();
-    return retire;
+    bool retire_uop = !is_t_like_instruction(inst->current_uop()->type)
+                        || ctxsim_do_t_like_instruction(q);
+    return retire_uop && inst->retire_current_uop();;
 }
 
 ////////////////////////////////////////////////////////////
@@ -351,13 +363,39 @@ ctxsim_do_t_like_instruction(sim::QUBIT* q)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
-ctxsim_do_context_switch(sim::CLIENT* c)
+bool
+ctxsim_context_switch_condition(int64_t inst_limit)
 {
-    // update qubit availablity cycles of cur0rent client and `c`
-    const cycle_type ctx_switch_latency = 75;
-//  const cycle_type ctx_switch_latency = 0;
+    if (CTX_ROTATION_ELISION)
+    {
+        const auto& curr_rb = CTX_ROTATION_BUFFER[CTX_ACTIVE_CLIENT->id];
+        bool all_rotations_done = std::all_of(curr_rb.begin(), curr_rb.end(), 
+                                        [] (const auto& e) { return e.origin == nullptr; });
 
+        auto c_it = std::find_if(CTX_CLIENTS.begin()+1, CTX_CLIENTS.end(),
+                                [inst_limit] (auto* c) { return c->s_unrolled_inst_done < inst_limit; });
+        if (c_it == CTX_CLIENTS.end())
+            return false;
+
+        auto* next_client = *c_it;
+        const auto& next_rb = CTX_ROTATION_BUFFER[next_client->id];
+        bool all_rotations_ready = std::all_of(next_rb.begin(), next_rb.end(),
+                                        [] (const auto& e) 
+                                        {
+                                            return e.origin == nullptr || e.gates_applied >= e.origin->uop_count(); 
+                                        });
+        return all_rotations_done && all_rotations_ready;
+    }
+
+    return false;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+ctxsim_do_context_switch(sim::CLIENT* c, cycle_type ctx_switch_latency)
+{
     // first get latest qubit availability
     cycle_type ctx_switch_start_cycle{0};
     for (sim::QUBIT* q : CTX_QUBITS)
@@ -381,17 +419,16 @@ ctxsim_do_context_switch(sim::CLIENT* c)
                                     {
                                         if (is_rotation_instruction(inst->type))
                                             future_rotations.push_back(inst);
-                                    }, 32);
-        ssize_t idx = future_rotations.size()-1;
+                                    }, 128);
+        size_t idx = 0;
         auto& rb = CTX_ROTATION_BUFFER[CTX_ACTIVE_CLIENT->id];
         for (auto& e : rb)
         {
-            if (idx < 0)
+            if (idx >= future_rotations.size())
                 break;
             if (e.origin == nullptr)
-                e.origin = future_rotations[idx--];
+                e.origin = future_rotations[idx++];
         }
-        std::reverse(rb.begin(), rb.end());
     }
 
     CTX_ACTIVE_CLIENT = c;
@@ -415,8 +452,9 @@ ctxsim_cleanup()
 void
 ctxsim_re_serve()
 {
-    for (auto* c : CTX_CLIENTS)
+    for (size_t i = 0; i <= 1; i++)
     {
+        auto* c = CTX_CLIENTS[i];
         for (auto& e : CTX_ROTATION_BUFFER[c->id])
         {
             if (e.origin == nullptr || e.gates_applied >= e.origin->uop_count())
