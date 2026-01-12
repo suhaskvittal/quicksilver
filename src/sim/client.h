@@ -65,6 +65,9 @@ public:
     void retire_instruction(inst_ptr);
 
     bool eof() const;
+
+    const std::unique_ptr<DAG>& dag() const;
+    const double                ipc() const;
 private:
     size_t   open_file_and_read_qubit_count();
     inst_ptr read_instruction_from_trace();
@@ -83,7 +86,14 @@ CLIENT::get_ready_instructions(const PRED& pred)
     constexpr size_t DAG_WATERMARK = 16384;
     // fill up the DAG if it is below some count:
     while (dag_->inst_count() < DAG_WATERMARK)
-        dag_->add_instruction(read_instruction_from_trace());
+    {
+        inst_ptr inst = read_instruction_from_trace();
+        // immediately elide software instructions here
+        if (is_software_instruction(inst->type))
+            delete inst;
+        else
+            dag_->add_instruction(inst);
+    }
     return dag_->get_front_layer_if(pred);
 }
 

@@ -42,6 +42,18 @@ CLIENT::eof() const
     return generic_strm_eof(tristrm_);
 }
 
+const std::unique_ptr<DAG>&
+CLIENT::dag() const
+{
+    return dag_;
+}
+
+const double
+CLIENT::ipc() const
+{
+    return mean(s_unrolled_inst_done, s_cycle_complete);
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

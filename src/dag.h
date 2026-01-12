@@ -68,6 +68,9 @@ public:
     template <class PRED>
     std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
 
+    /*
+     * Executes the given callback for up-to `max_layer`
+     * */
     template <class CALLBACK>
     void for_each_instruction_in_layer_order(const CALLBACK&, size_t max_layer) const;
 
