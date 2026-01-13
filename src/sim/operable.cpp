@@ -6,6 +6,7 @@
 #include "sim/operable.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace sim
@@ -65,6 +66,12 @@ coordinate_clock_scale(std::vector<OPERABLE*> operables)
     double max_freq = *std::max_element(freq_array.begin(), freq_array.end());
     for (auto* op : operables)
         op->clock_scale_ = max_freq / op->freq_khz;
+}
+
+cycle_type
+convert_cycles(cycle_type cycles, double original_freq_khz, double new_freq_khz)
+{
+    return static_cast<cycle_type>(ceil(cycles * new_freq_khz / original_freq_khz));
 }
 
 ////////////////////////////////////////////////////////////

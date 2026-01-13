@@ -87,6 +87,11 @@ private:
  * */
 void coordinate_clock_scale(std::vector<OPERABLE*>);
 
+/*
+ * Converts clock cycles between two different frequencies:
+ * */
+cycle_type convert_cycles(cycle_type, double original_freq_khz, double new_freq_khz);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

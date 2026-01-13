@@ -8,6 +8,7 @@
 
 #include "sim/client.h"
 #include "sim/factory.h"
+#include "sim/storage.h"
 
 #include <array>
 #include <memory>
@@ -23,6 +24,7 @@ class COMPUTE_SUBSYSTEM : public OPERABLE
 {
 public:
     using inst_ptr = CLIENT::inst_ptr;
+    using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
 
     /*
      * Information about a CLIENT's context:
@@ -41,7 +43,7 @@ public:
      * */
     uint64_t s_context_switches{0};
 private:
-    std::unordered_set<QUBIT*> qubits_;
+    std::unique_ptr<STORAGE> local_memory_;
 
     /*
      * Only a subset of clients can execute on the
@@ -61,6 +63,11 @@ private:
     std::unordered_map<CLIENT*, context_type> client_context_map_;
 
     /*
+     * Pointer to memory subsystem
+     * */
+    MEMORY_SUBSYSTEM* memory_hierarchy_;
+
+    /*
      * `top_level_t_factories_` are used to perform T gates
      * */
     std::vector<T_FACTORY_BASE*> top_level_t_factories_;
@@ -69,10 +76,12 @@ public:
     void print_deadlock_info(std::ostream&) const override;
 
     void context_switch(CLIENT* incoming, CLIENT* outgoing);
+
+    const std::unique_ptr<STORAGE>& local_memory() const;
 protected:
     long operate() override;
 private:
-    size_t fetch_and_execute_instructions_from_client(CLIENT*);
+    size_t fetch_and_execute_instructions_from_client(CLIENT*, const ready_qubits_map&);
 
     /*
      * Tries to execute a given instruction. `args` corresponds to
@@ -88,7 +97,7 @@ private:
     bool do_h_or_s_gate(inst_ptr, QUBIT*);
     bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
     bool do_t_like_gate(inst_ptr, QUBIT*);
-    bool do_memory_access(inst_ptr, QUBIT* incoming, QUBIT* outgoing);
+    bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
 };
 
 ////////////////////////////////////////////////////////////
