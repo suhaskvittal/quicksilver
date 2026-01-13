@@ -33,7 +33,7 @@ public:
      * Finds the requisite `STORAGE*` location to serve
      * the access and executes `STORAGE::do_memory_access`
      * */
-    access_result_type do_memory_access(QUBIT*, QUBIT*);
+    access_result_type do_memory_access(QUBIT* ld, QUBIT* st);
 
     const std::vector<STORAGE*>& storages() const;
 private:

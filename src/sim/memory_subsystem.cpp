@@ -31,12 +31,12 @@ MEMORY_SUBSYSTEM::tick()
 ////////////////////////////////////////////////////////////
 
 MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_memory_access(QUBIT* in, QUBIT* out)
+MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, QUBIT* st)
 {
-    auto storage_it = lookup(in);
+    auto storage_it = lookup(ld);
     if (storage_it == storages_.end())
     {
-        std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *out << " not found";
+        std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *ld << " not found";
         for (auto* s : storages_)
         {
             std::cerr << "\n\t" << s->name << " :";
@@ -45,7 +45,7 @@ MEMORY_SUBSYSTEM::do_memory_access(QUBIT* in, QUBIT* out)
         }
         std::cerr << _die{};
     }
-    return (*storage_it)->do_memory_access(in, out);
+    return (*storage_it)->do_memory_access(ld, st);
 }
 
 ////////////////////////////////////////////////////////////

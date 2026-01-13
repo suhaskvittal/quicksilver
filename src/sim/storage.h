@@ -80,7 +80,7 @@ public:
      * descendant is defined that modifies how latency
      * or other functionality is implemented.
      * */
-    virtual access_result_type do_memory_access(QUBIT* incoming, QUBIT* outgoing);
+    virtual access_result_type do_memory_access(QUBIT* ld, QUBIT* st);
 
     const backing_buffer_type& contents() const;
 protected:

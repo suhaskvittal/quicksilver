@@ -60,10 +60,10 @@ STORAGE::insert(QUBIT* q)
 ////////////////////////////////////////////////////////////
 
 STORAGE::access_result_type
-STORAGE::do_memory_access(QUBIT* in, QUBIT* out)
+STORAGE::do_memory_access(QUBIT* ld, QUBIT* st)
 {
-    assert(contents_.count(in) == 0);
-    assert(contents_.count(out) > 0);
+    assert(contents_.count(ld) > 0);
+    assert(contents_.count(st) == 0);
 
     // find ready adapter to serve memory access
     auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
@@ -73,8 +73,8 @@ STORAGE::do_memory_access(QUBIT* in, QUBIT* out)
 
     // complete memory access since adapter is available
     *adapter_it = current_cycle() + load_latency + store_latency;
-    contents_.erase(out);
-    contents_.insert(in);
+    contents_.erase(ld);
+    contents_.insert(st);
     return access_result_type{.success=true, .latency=load_latency+store_latency, .storage_freq_khz=freq_khz};
 }
 
