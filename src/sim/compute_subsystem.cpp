@@ -42,7 +42,30 @@ COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
 void
 COMPUTE_SUBSYSTEM::context_switch(CLIENT* in, CLIENT* out)
 {
+    auto c_it = std::find(active_clients_.begin(), active_clients_.end(), out);
+    if (c_it == active_clients_.end())
+        std::cerr << "COMPUTE_SUBSYSTEM::context_switch: tried to context switch out an inactive client" << _die{};
+    *c_it = in;
 
+    /* 1. Populate `context_switch_memory_access_buffer_` */
+
+    // need to get lists of active qubits for `in` and `out`
+    const context_type& in_ctx = client_context_table_[in->id];
+    std::vector<QUBIT*> out_active_qubits;
+    out_active_qubits.reserve(qubit_capacity / concurrent_clients);
+    std::copy_if(local_memory_->contents().begin(), local_memory_->contents().end(), out_active_qubits.begin(),
+                [out_id=out->id] (QUBIT* q) { return q->client_id == out_id; });
+
+    // generate memory accesses:
+    assert(context_switch_memory_access_buffer_.empty());
+    assert(in_ctx.active_qubits.size() == out_active_qubits.size());
+    for (size_t i = 0; i < in_ctx.active_qubits.size(); i++)
+        context_switch_memory_access_buffer_.emplace_back(in_ctx.active_qubits[i], out_active_qubits[i]);
+
+    /* 2. Update context for `out` */
+
+    client_context_table_[out->id] = context_type{.active_qubits=std::move(out_active_qubits),
+                                                  .cycle_saved=current_cycle()};
 }
 
 ////////////////////////////////////////////////////////////
@@ -62,20 +85,43 @@ COMPUTE_SUBSYSTEM::operate()
 {
     long progress{0};
 
+    /* 1. Handle context switch memory accesses */
+
+    if (!context_switch_memory_access_buffer_.empty())
+    {
+        auto begin = context_switch_memory_access_buffer_.begin(),
+             end = context_switch_memory_access_buffer_.end();
+        auto it = std::remove_if(begin, end,
+                        [this] (const auto& p)
+                        {
+                            const auto [q1, q2] = p;  // don't be fooled -- `q1` and `q2` are pointers.
+                            if (q1->cycle_available <= current_cycle() && q2->cycle_available <= current_cycle())
+                                return do_memory_access(nullptr, q1, q2);
+                            else
+                                return false;
+                        });
+        progress += std::distance(it, end);
+        context_switch_memory_access_buffer_.erase(it, end);
+    }
+
+    /* 2. Handle pending instructions for any active clients */
+
     // construct the ready qubits map for each client:
-    std::array<ready_qubits_map, 8> ready_qubits_by_client(active_clients_.size());
+    std::vector<ready_qubits_map> ready_qubits_by_client(total_clients);
+    for (auto& m : ready_qubits_by_client)
+        m.reserve(qubit_capacity);
     for (auto* q : local_memory_->contents())
         if (q->cycle_available <= current_cycle())
             ready_qubits_by_client[q->client_id].insert({q->qubit_id, q});
 
     // process instructions for each client
     size_t ii{last_used_client_idx_};
-    for (size_t i = 0; i < active_clients_.size(); i++)
+    for (size_t i = 0; i < concurrent_clients; i++)
     {
         CLIENT* c = active_clients_[ii];
         progress += fetch_and_execute_instructions_from_client(c, ready_qubits_by_client[c->id]);
         ii++;
-        if (ii >= active_clients_.size())
+        if (ii >= concurrent_clients)
             ii = 0;
     }
     last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
@@ -213,6 +259,7 @@ COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
     {
         // need to convert storage latency to compute cycles:
         cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, freq_khz);
+        local_memory_->do_memory_access(st, ld);
         _update_available_cycle({ld, st}, current_cycle() + latency);
     }
     return result.success;

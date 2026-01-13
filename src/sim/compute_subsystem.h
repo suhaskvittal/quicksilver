@@ -31,12 +31,13 @@ public:
      * */
     struct context_type
     {
-        std::unordered_set<QUBIT*> active_set;
-        cycle_type                 cycle_saved;
+        std::vector<QUBIT*> active_qubits;
+        cycle_type          cycle_saved;
     };
 
     const size_t qubit_capacity;
     const size_t concurrent_clients;
+    const size_t total_clients;
 
     /*
      * Statistics:
@@ -59,8 +60,13 @@ private:
 
     /*
      * Context switch information:
+     *  `client_context_map_` contains information about a client's program state
+     *  `context_switch_memory_access_buffer_` contains a list of memory accesses
+     *      that must complete to execute a context switch. These have priority
+     *      over everything else.
      * */
-    std::unordered_map<CLIENT*, context_type> client_context_map_;
+    std::vector<context_type>              client_context_table_;
+    std::vector<std::pair<QUBIT*, QUBIT*>> context_switch_memory_access_buffer_;
 
     /*
      * Pointer to memory subsystem
@@ -75,6 +81,7 @@ public:
     void print_progress(std::ostream&) const override;
     void print_deadlock_info(std::ostream&) const override;
 
+    void initialize_context(CLIENT*);
     void context_switch(CLIENT* incoming, CLIENT* outgoing);
 
     const std::unique_ptr<STORAGE>& local_memory() const;
