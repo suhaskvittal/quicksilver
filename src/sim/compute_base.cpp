@@ -36,6 +36,13 @@ COMPUTE_BASE::COMPUTE_BASE(std::string_view             name,
      top_level_t_factories_(std::move(top_level_t_factories)),
      memory_hierarchy_(memory_hierarchy)
 {
+    // initialize local memory:
+    local_memory_ = std::make_unique<STORAGE>(freq_khz,
+                                                0,                      // n (does not matter)
+                                                _local_memory_capacity, // k (matters)
+                                                0,                      // d (does not matter)
+                                                1,                      // load latency
+                                                1);                     // store latency
 }
 
 ////////////////////////////////////////////////////////////

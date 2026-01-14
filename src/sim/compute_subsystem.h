@@ -25,13 +25,20 @@ public:
     using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
     using ctx_switch_condition_type = std::optional<std::pair<CLIENT*, CLIENT*>>;
 
+    struct config_type
+    {
+        /*
+         * Local memory configuration:
+         * */
+    };
+
     /*
      * Information about a CLIENT's context:
      * */
     struct context_type
     {
         std::vector<QUBIT*> active_qubits;
-        cycle_type          cycle_saved;
+        cycle_type          cycle_saved{};
     };
 
     const size_t   concurrent_clients;

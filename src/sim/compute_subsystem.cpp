@@ -31,11 +31,52 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     :COMPUTE_BASE("compute_subsystem", freq_khz, local_memory_capacity, top_level_t_factories, memory_hierarchy),
     concurrent_clients(_concurrent_clients),
     total_clients(client_trace_files.size()),
-    simulation_instructions(_simulation_instructions)
+    simulation_instructions(_simulation_instructions),
+    all_clients_(total_clients),
+    active_clients_(concurrent_clients),
+    inactive_clients_(total_clients - concurrent_clients),
+    client_context_table_(total_clients)
 {
-    
+    // initialize clients:
+    assert(total_clients >= concurrent_clients);
+    for (client_id_type i = 0; i < client_trace_files.size(); i++)
+        all_clients_[i] = new CLIENT{client_trace_files[i], i};
+    auto c_begin = all_clients_.begin(),
+         c_mid = all_clients_.begin()+concurrent_clients_,
+         c_end = all_clients_.end();
+    std::copy(c_begin, c_mid, active_clients_.begin());
+    std::copy(c_mid, c_end, inactive_clients_.begin());
+
+    // initialize all the memory:
+    std::vector<std::vector<QUBIT*>> qubits_by_client(total_clients);
+    std::transform(c_begin, c_end, qubits_by_client.begin(),
+            [] (const auto* c)
+            {
+                std::vector<QUBIT*> qubits(c->num_qubits);
+                for (qubit_type i = 0; i < c->num_qubits; i++)
+                    qubits[i] = new QUBIT{i, c->id};
+                return qubits;
+            });
+    std::vector<STORAGE*> all_storage{local_memory_.get()};
+    all_storage.insert(all_storage.end(), memory_hierarchy_.storages().begin(), memory_hierarchy_.storages().end());
+    storage_striped_initialization(all_storage, qubits_by_client, concurrent_clients);
+
+    // initialize context for all inactive clients:
+    const size_t active_qubits_per_client = local_memory_capacity / concurrent_clients;
+    for (auto* c : inactive_clients_)
+    {
+        auto q_begin = all_storage[c->id].begin();
+        auto q_end = q_begin + active_qubits_per_client;
+        client_context_table_[c->id].active_qubits.assign(q_begin, q_end);
+    }
+    context_switch_memory_access_buffer_.reserve(active_qubits_per_client);
 }
-                                     
+
+~COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM()
+{
+    for (auto* c : all_clients_)
+        delete c;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -121,8 +162,11 @@ COMPUTE_SUBSYSTEM::handle_completed_clients()
         {
             if (!inactive_clients_.empty())
             {
+                // note that `do_context_switch` will set `*c_it`, so we only
+                // need to incremenet `c_it`
                 do_context_switch(std::move(inactive_clients_.front()), c);
                 inactive_clients_.pop_front();
+                c_it++;
             }
             else
             {
@@ -175,6 +219,8 @@ COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
 
     client_context_table_[out->id] = context_type{.active_qubits=std::move(out_active_qubits),
                                                   .cycle_saved=current_cycle()};
+
+    s_context_switches++;
 }
 
 ////////////////////////////////////////////////////////////

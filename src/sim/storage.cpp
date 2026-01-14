@@ -46,6 +46,12 @@ STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type _load
     contents_.reserve(k);
 }
 
+~STORAGE::STORAGE()
+{
+    for (auto* q : contents_)
+        delete q;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

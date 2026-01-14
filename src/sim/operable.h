@@ -83,6 +83,11 @@ private:
 ////////////////////////////////////////////////////////////
 
 /*
+ * Computes the frequency (kHz) for the given period (ns)
+ * */
+double compute_freq_khz(uint64_t period_in_nanoseconds);
+
+/*
  * Sets the clock scale of all components passed in.
  * */
 void coordinate_clock_scale(std::vector<OPERABLE*>);

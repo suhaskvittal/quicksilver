@@ -46,7 +46,7 @@ public:
     const std::vector<T_FACTORY_BASE*>& top_level_t_factories() const;
     MEMORY_SUBSYSTEM*                   memory_hierarchy() const;
 protected:
-    bool execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
+    virtual bool execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
 private:
     bool do_h_or_s_gate(inst_ptr, QUBIT*);
     bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);

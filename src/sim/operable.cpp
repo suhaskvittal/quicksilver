@@ -58,6 +58,12 @@ OPERABLE::current_cycle() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+double
+compute_freq_khz(uint64_t p_ns)
+{
+    return 1e6 / static_cast<double>(p_ns);
+}
+
 void
 coordinate_clock_scale(std::vector<OPERABLE*> operables)
 {
