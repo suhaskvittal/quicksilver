@@ -1,0 +1,187 @@
+/*
+ *  author: Suhas Vittal
+ *  date:   13 January 2026
+ * */
+
+#include "sim/compute_base.h"
+#include "sim/memory_subsystem.h"
+
+namespace sim
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Helper function declarations:
+ * */
+
+namespace
+{
+
+void _update_available_cycle(std::vector<QUBIT*>, cycle_type);
+
+}  // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE_BASE::COMPUTE_BASE(std::string_view             name,
+                           double                       freq_khz,
+                           size_t                       _local_memory_capacity,
+                           std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                           MEMORY_SUBSYSTEM*            memory_hierarchy)
+    :OPERABLE(name, freq_khz),
+     local_memory_capacity(_local_memory_capacity),
+     top_level_t_factories_(std::move(top_level_t_factories)),
+     memory_hierarchy_(memory_hierarchy)
+{
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+const std::unique_ptr<STORAGE>&
+COMPUTE_BASE::local_memory() const
+{
+    return local_memory_;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+const std::vector<T_FACTORY_BASE*>&
+COMPUTE_BASE::top_level_t_factories() const
+{
+    return top_level_t_factories_;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+MEMORY_SUBSYSTEM*
+COMPUTE_BASE::memory_hierarchy() const
+{
+    return memory_hierarchy_;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_BASE::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
+{
+    if (is_software_instruction(inst->type))
+        return true;
+
+    switch (inst->type)
+    {
+    case INSTRUCTION::TYPE::H:
+    case INSTRUCTION::TYPE::S:
+    case INSTRUCTION::TYPE::SX:
+    case INSTRUCTION::TYPE::SDG:
+    case INSTRUCTION::TYPE::SXDG:
+        return do_h_or_s_gate(inst, args[0]);
+
+    case INSTRUCTION::TYPE::CX:
+    case INSTRUCTION::TYPE::CZ:
+        return do_cx_like_gate(inst, args[0], args[1]);
+
+    case INSTRUCTION::TYPE::T:
+    case INSTRUCTION::TYPE::TX:
+    case INSTRUCTION::TYPE::TDG:
+    case INSTRUCTION::TYPE::TXDG:
+        return do_t_like_gate(inst, args[0]);
+
+    case INSTRUCTION::TYPE::MSWAP:
+        return do_memory_access(inst, args[0], args[1]);
+
+    default:
+        std::cerr << "COMPUTE_BASE::execute_instruction: unknown instruction: " << *inst << _die{};
+    }
+
+    return false;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_BASE::do_h_or_s_gate(inst_ptr inst, QUBIT* q)
+{
+    _update_available_cycle({q}, current_cycle()+2);
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_BASE::do_cx_like_gate(inst_ptr inst, QUBIT* q1, QUBIT* q2)
+{
+    _update_available_cycle({q1, q2}, current_cycle()+2);
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
+{
+    // search for an available magic state:
+    auto f_it = std::find_if(top_level_t_factories_.begin(), top_level_t_factories_.end(),
+                        [] (const auto* f) { return f->buffer_occupancy() > 0; });
+    if (f_it == top_level_t_factories_.end())
+        return false;
+
+    (*f_it)->consume(1);
+    cycle_type latency = (GL_RNG() & 1) ? 4 : 2;
+    _update_available_cycle({q}, current_cycle() + latency);
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
+{
+    auto result = memory_hierarchy_->do_memory_access(ld, st);
+    if (result.success)
+    {
+        // need to convert storage latency to compute cycles:
+        cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, freq_khz);
+        local_memory_->do_memory_access(st, ld);
+        _update_available_cycle({ld, st}, current_cycle() + latency);
+    }
+    return result.success;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/* HELPER FUNCTION DEFINITIONS START HERE */
+
+namespace
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+_update_available_cycle(std::vector<QUBIT*> qubits, cycle_type c)
+{
+    for (auto* q : qubits)
+        q->cycle_available = c;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+}  // namespace sim

@@ -103,7 +103,7 @@ protected:
  * */
 
 void storage_striped_initialization(const std::vector<STORAGE*>&,
-                                    const std::vector<size_t>& qubit_counts_by_client,
+                                    const std::vector<std::vector<QUBIT*>>& qubits_by_client,
                                     size_t num_active_clients);
 
 ////////////////////////////////////////////////////////////

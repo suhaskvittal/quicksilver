@@ -98,28 +98,28 @@ STORAGE::operate()
 
 void
 storage_striped_initialization(const std::vector<STORAGE*>& storage_array,
-                                const std::vector<size_t>& qubit_counts,
+                                const std::vector<QUBIT*>& qubits,
                                 size_t num_active_clients)
 {
-    std::vector<size_t> qubits_allocated(qubit_counts.size(), 0);
+    std::vector<size_t> qubits_allocated(qubits.size(), 0);
 
     // first handle compute subsystem's local memory:
-    _fill_up_storage_round_robin(storage_array[0], qubits_allocated, qubit_counts, num_active_clients);
+    _fill_up_storage_round_robin(storage_array[0], qubits_allocated, qubits, num_active_clients);
     for (size_t i = 1; i < qubit_counts.size(); i++)
-        _fill_up_storage_round_robin(storage_array[i], qubits_allocated, qubit_counts, qubit_counts.size());
+        _fill_up_storage_round_robin(storage_array[i], qubits_allocated, qubits, qubit_counts.size());
 
     // verify that all clients have been fully allocated
     bool any_clients_incomplete = false;
     for (size_t i = 0; i < qubit_counts.size(); i++)
-        any_clients_incomplete |= qubits_allocated[i] < qubit_counts[i];
+        any_clients_incomplete |= qubits_allocated[i] < qubits[i].size();
     if (any_clients_incomplete)
     {
         std::cerr << "storage_striped_initialization: storage_array was insufficient to allocate memory for"
                       " all clients:";
-        for (size_t i = 0; i < qubit_counts.size(); i++)
+        for (size_t i = 0; i < qubits.size(); i++)
         {
             std::cerr << "\n\tclient " << i << " : allocated "
-                        << qubits_allocated[i] << " of " << qubit_counts[i];
+                        << qubits_allocated[i] << " of " << qubits[i].size();
         }
         std::cerr << _die{};
     }
@@ -140,7 +140,7 @@ _storage_name(size_t n, size_t k, size_t d)
 void
 _fill_up_storage_round_robin(STORAGE* storage,
                               std::vector<size_t>& qubits_allocated,
-                              const std::vector<size_t>& qubit_counts,
+                              const std::vector<std::vector<QUBIT*>>& qubits,
                               size_t idx_upper_bound)
 {
     // handle edge cases
@@ -152,10 +152,10 @@ _fill_up_storage_round_robin(STORAGE* storage,
     size_t client_idx{0};
 
     // helper to check if any client needs allocation
-    auto needs_allocation = [&]()
+    auto needs_allocation = [qubits_allocated, qubits]()
     {
         for (size_t i{0}; i < idx_upper_bound; i++)
-            if (qubits_allocated[i] < qubit_counts[i])
+            if (qubits_allocated[i] < qubits[i].size())
                 return true;
         return false;
     };
@@ -164,18 +164,14 @@ _fill_up_storage_round_robin(STORAGE* storage,
     while (qubits_inserted < storage->logical_qubit_count && needs_allocation())
     {
         // skip clients that are fully allocated
-        if (qubits_allocated[client_idx] >= qubit_counts[client_idx])
+        if (qubits_allocated[client_idx] >= qubits[client_idx].size())
         {
             client_idx = (client_idx + 1) % idx_upper_bound;
             continue;
         }
 
         // allocate one qubit for current client
-        QUBIT* q = new QUBIT{
-            .qubit_id = static_cast<qubit_type>(qubits_allocated[client_idx]),
-            .client_id = static_cast<client_id_type>(client_idx),
-            .cycle_available = 0
-        };
+        QUBIT* q = qubits[client_idx][qubits_allocated[client_idx]];
         storage->insert(q);
 
         // update tracking

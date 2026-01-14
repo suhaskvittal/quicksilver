@@ -11,16 +11,31 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-/*
- * Helper function declarations:
- * */
-
 namespace
 {
 
-void _update_available_cycle(std::vector<QUBIT*>, cycle_type);
+bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
 
-}  // anon
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
+                                     std::vector<std::string>     client_trace_files,
+                                     size_t                       local_memory_capacity,
+                                     size_t                       _concurrent_clients,
+                                     uint64_t                     _simulation_instructions,
+                                     std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                                     MEMORY_SUBSYSTEM*            memory_hierarchy)
+    :COMPUTE_BASE("compute_subsystem", freq_khz, local_memory_capacity, top_level_t_factories, memory_hierarchy),
+    concurrent_clients(_concurrent_clients),
+    total_clients(client_trace_files.size()),
+    simulation_instructions(_simulation_instructions)
+{
+    
+}
+                                     
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -39,8 +54,102 @@ COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+long
+COMPUTE_SUBSYSTEM::operate()
+{
+    long progress{0};
+
+    /* 1. Update clients and execute context switch if needed */
+
+    handle_completed_clients();
+    auto [ctx_s_c1, ctx_s_c2] = context_switch_condition();
+    if (ctx_s_c1 != nullptr)
+        do_context_switch(ctx_s_c1, ctx_s_c2);
+
+    /* 2. Handle context switch memory accesses */
+
+    if (!context_switch_memory_access_buffer_.empty())
+    {
+        auto begin = context_switch_memory_access_buffer_.begin(),
+             end = context_switch_memory_access_buffer_.end();
+        auto it = std::remove_if(begin, end,
+                        [this] (const auto& p)
+                        {
+                            const auto [q1, q2] = p;  // don't be fooled -- `q1` and `q2` are pointers.
+                            if (q1->cycle_available <= current_cycle() && q2->cycle_available <= current_cycle())
+                                return do_memory_access(nullptr, q1, q2);
+                            else
+                                return false;
+                        });
+        progress += std::distance(it, end);
+        context_switch_memory_access_buffer_.erase(it, end);
+    }
+
+    /* 3. Handle pending instructions for any active clients */
+
+    // construct the ready qubits map for each client:
+    std::vector<ready_qubits_map> ready_qubits_by_client(total_clients);
+    for (auto& m : ready_qubits_by_client)
+        m.reserve(qubit_capacity);
+    for (auto* q : local_memory_->contents())
+        if (q->cycle_available <= current_cycle())
+            ready_qubits_by_client[q->client_id].insert({q->qubit_id, q});
+
+    // process instructions for each client
+    size_t ii{last_used_client_idx_};
+    for (size_t i = 0; i < concurrent_clients; i++)
+    {
+        CLIENT* c = active_clients_[ii];
+        progress += fetch_and_execute_instructions_from_client(c, ready_qubits_by_client[c->id]);
+        ii++;
+        if (ii >= concurrent_clients)
+            ii = 0;
+    }
+    last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
-COMPUTE_SUBSYSTEM::context_switch(CLIENT* in, CLIENT* out)
+COMPUTE_SUBSYSTEM::handle_completed_clients()
+{
+    for (auto c_it = active_clients_.begin(); c_it != active_clients_.end(); )
+    {
+        CLIENT* c = *c_it;
+        if (_client_is_done(c, simulation_instructions))
+        {
+            if (!inactive_clients_.empty())
+            {
+                do_context_switch(std::move(inactive_clients_.front()), c);
+                inactive_clients_.pop_front();
+            }
+            else
+            {
+                c_it = active_clients_.erase(c_it);
+            }
+        }
+        else
+        {
+            c_it++;
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE_SUBSYSTEM::ctx_switch_condition_type
+COMPUTE_SUBSYSTEM::context_switch_condition()
+{
+    return ctx_switch_condition_type{nullptr, nullptr};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
 {
     auto c_it = std::find(active_clients_.begin(), active_clients_.end(), out);
     if (c_it == active_clients_.end())
@@ -66,65 +175,6 @@ COMPUTE_SUBSYSTEM::context_switch(CLIENT* in, CLIENT* out)
 
     client_context_table_[out->id] = context_type{.active_qubits=std::move(out_active_qubits),
                                                   .cycle_saved=current_cycle()};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-const std::unique_ptr<STORAGE>&
-COMPUTE_SUBSYSTEM::local_memory() const
-{
-    return local_memory_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-long
-COMPUTE_SUBSYSTEM::operate()
-{
-    long progress{0};
-
-    /* 1. Handle context switch memory accesses */
-
-    if (!context_switch_memory_access_buffer_.empty())
-    {
-        auto begin = context_switch_memory_access_buffer_.begin(),
-             end = context_switch_memory_access_buffer_.end();
-        auto it = std::remove_if(begin, end,
-                        [this] (const auto& p)
-                        {
-                            const auto [q1, q2] = p;  // don't be fooled -- `q1` and `q2` are pointers.
-                            if (q1->cycle_available <= current_cycle() && q2->cycle_available <= current_cycle())
-                                return do_memory_access(nullptr, q1, q2);
-                            else
-                                return false;
-                        });
-        progress += std::distance(it, end);
-        context_switch_memory_access_buffer_.erase(it, end);
-    }
-
-    /* 2. Handle pending instructions for any active clients */
-
-    // construct the ready qubits map for each client:
-    std::vector<ready_qubits_map> ready_qubits_by_client(total_clients);
-    for (auto& m : ready_qubits_by_client)
-        m.reserve(qubit_capacity);
-    for (auto* q : local_memory_->contents())
-        if (q->cycle_available <= current_cycle())
-            ready_qubits_by_client[q->client_id].insert({q->qubit_id, q});
-
-    // process instructions for each client
-    size_t ii{last_used_client_idx_};
-    for (size_t i = 0; i < concurrent_clients; i++)
-    {
-        CLIENT* c = active_clients_[ii];
-        progress += fetch_and_execute_instructions_from_client(c, ready_qubits_by_client[c->id]);
-        ii++;
-        if (ii >= concurrent_clients)
-            ii = 0;
-    }
-    last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
 }
 
 ////////////////////////////////////////////////////////////
@@ -175,118 +225,16 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const r
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
-COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
-{
-    if (is_software_instruction(inst->type))
-        return true;
-
-    switch (inst->type)
-    {
-    case INSTRUCTION::TYPE::H:
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SX:
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::SXDG:
-        return do_h_or_s_gate(inst, args[0]);
-
-    case INSTRUCTION::TYPE::CX:
-    case INSTRUCTION::TYPE::CZ:
-        return do_cx_like_gate(inst, args[0], args[1]);
-
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TX:
-    case INSTRUCTION::TYPE::TDG:
-    case INSTRUCTION::TYPE::TXDG:
-        return do_t_like_gate(inst, args[0]);
-
-    case INSTRUCTION::TYPE::MSWAP:
-        return do_memory_access(inst, args[0], args[1]);
-
-    default:
-        std::cerr << "COMPUTE_SUBSYSTEM::execute_instruction: unknown instruction: " << *inst << _die{};
-    }
-
-    return false;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-COMPUTE_SUBSYSTEM::do_h_or_s_gate(inst_ptr inst, QUBIT* q)
-{
-    _update_available_cycle({q}, current_cycle()+2);
-    return true;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-COMPUTE_SUBSYSTEM::do_cx_like_gate(inst_ptr inst, QUBIT* q1, QUBIT* q2)
-{
-    _update_available_cycle({q1, q2}, current_cycle()+2);
-    return true;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
-{
-    // search for an available magic state:
-    auto f_it = std::find_if(top_level_t_factories_.begin(), top_level_t_factories_.end(),
-                        [] (const auto* f) { return f->buffer_occupancy() > 0; });
-    if (f_it == top_level_t_factories_.end())
-        return false;
-
-    (*f_it)->consume(1);
-    cycle_type latency = (GL_RNG() & 1) ? 4 : 2;
-    _update_available_cycle({q}, current_cycle() + latency);
-    return true;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-bool
-COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
-{
-    auto result = memory_hierarchy_->do_memory_access(ld, st);
-    if (result.success)
-    {
-        // need to convert storage latency to compute cycles:
-        cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, freq_khz);
-        local_memory_->do_memory_access(st, ld);
-        _update_available_cycle({ld, st}, current_cycle() + latency);
-    }
-    return result.success;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-/* HELPER FUNCTION DEFINITIONS START HERE */
-
 namespace
 {
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-_update_available_cycle(std::vector<QUBIT*> qubits, cycle_type c)
+bool
+_client_is_done(CLIENT* c, uint64_t s)
 {
-    for (auto* q : qubits)
-        q->cycle_available = c;
+    return c->s_unrolled_inst_done >= s;
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-} // anon
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

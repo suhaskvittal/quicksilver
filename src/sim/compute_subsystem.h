@@ -6,9 +6,7 @@
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
 #define SIM_COMPUTE_SUBSYSTEM_h
 
-#include "sim/client.h"
-#include "sim/factory.h"
-#include "sim/storage.h"
+#include "sim/compute_base.h"
 
 #include <array>
 #include <memory>
@@ -20,11 +18,12 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class COMPUTE_SUBSYSTEM : public OPERABLE
+class COMPUTE_SUBSYSTEM : public COMPUTE_BASE
 {
 public:
-    using inst_ptr = CLIENT::inst_ptr;
+    using inst_ptr = COMPUTE_BASE::inst_ptr;
     using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
+    using ctx_switch_condition_type = std::optional<std::pair<CLIENT*, CLIENT*>>;
 
     /*
      * Information about a CLIENT's context:
@@ -35,16 +34,16 @@ public:
         cycle_type          cycle_saved;
     };
 
-    const size_t qubit_capacity;
-    const size_t concurrent_clients;
-    const size_t total_clients;
+    const size_t   concurrent_clients;
+    const size_t   total_clients;
+    const uint64_t simulation_instructions;
 
     /*
      * Statistics:
      * */
     uint64_t s_context_switches{0};
 private:
-    std::unique_ptr<STORAGE> local_memory_;
+    std::vector<CLIENT*> all_clients_;
 
     /*
      * Only a subset of clients can execute on the
@@ -56,6 +55,7 @@ private:
      * fairness when executing instructions.
      * */
     std::vector<CLIENT*> active_clients_;
+    std::deque<CLIENT*>  inactive_clients_;
     size_t               last_used_client_idx_{0};
 
     /*
@@ -67,44 +67,37 @@ private:
      * */
     std::vector<context_type>              client_context_table_;
     std::vector<std::pair<QUBIT*, QUBIT*>> context_switch_memory_access_buffer_;
-
-    /*
-     * Pointer to memory subsystem
-     * */
-    MEMORY_SUBSYSTEM* memory_hierarchy_;
-
-    /*
-     * `top_level_t_factories_` are used to perform T gates
-     * */
-    std::vector<T_FACTORY_BASE*> top_level_t_factories_;
 public:
+    COMPUTE_SUBSYSTEM(double                         freq_khz,
+                        std::vector<std::string>     client_trace_files,
+                        size_t                       local_memory_capacity,
+                        size_t                       concurrent_clients,
+                        uint64_t                     simulation_instructions,
+                        std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                        MEMORY_SUBSYSTEM*            memory_hierarchy);
+    ~COMPUTE_SUBSYSTEM();
+
     void print_progress(std::ostream&) const override;
     void print_deadlock_info(std::ostream&) const override;
 
-    void initialize_context(CLIENT*);
-    void context_switch(CLIENT* incoming, CLIENT* outgoing);
-
-    const std::unique_ptr<STORAGE>& local_memory() const;
+    const bool done() const;
+    const std::vector<CLIENT*>& clients() const;
 protected:
     long operate() override;
 private:
+    void handle_completed_clients();
+
+    /*
+     * During each `tick()`, the `OS` will check
+     * if a context switch should occur using 
+     * `context_switch_condition()`.
+     * If the output is not {nullptr, *},
+     * `do_context_switch()` is called.
+     * */
+    ctx_switch_condition_type context_switch_condition() const;
+    void                      do_context_switch(CLIENT* incoming, CLIENT* outgoing);
+
     size_t fetch_and_execute_instructions_from_client(CLIENT*, const ready_qubits_map&);
-
-    /*
-     * Tries to execute a given instruction. `args` corresponds to
-     * the `QUBIT*`s that map to each of the instruction's arguments
-     *
-     * Returns true on a successful execution.
-     * */
-    bool execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
-
-    /*
-     * Helper functions for `execute_instruction`.
-     * */
-    bool do_h_or_s_gate(inst_ptr, QUBIT*);
-    bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
-    bool do_t_like_gate(inst_ptr, QUBIT*);
-    bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
 };
 
 ////////////////////////////////////////////////////////////
