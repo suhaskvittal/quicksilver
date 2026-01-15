@@ -6,6 +6,8 @@
 #ifndef SIM_CONFIGURATION_ALLOCATOR_h
 #define SIM_CONFIGURATION_ALLOCATOR_h
 
+#include "sim/factory.h"
+
 namespace sim
 {
 namespace configuration
@@ -18,6 +20,9 @@ struct FACTORY_ALLOCATION
 {
     std::vector<T_FACTORY_BASE*> first_level;
     std::vector<T_FACTORY_BASE*> second_level;
+
+    FACTORY_ALLOCATION() =default;
+    FACTORY_ALLOCATION(const FACTORY_ALLOCATION&) =default;
 };
 
 /*
