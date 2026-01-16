@@ -18,6 +18,7 @@ namespace configuration
  * Returns `2*d*(d+1)` (we use this to account for any slack qubits surrounding the patch)
  * */
 constexpr size_t surface_code_physical_qubit_count(size_t d);
+constexpr size_t surface_code_physical_qubit_count(size_t dx, size_t dz);
 
 /*
  * These return the physical qubit and logical qubit counts for the sub-family of BB codes
@@ -26,13 +27,23 @@ constexpr size_t surface_code_physical_qubit_count(size_t d);
 constexpr size_t bivariate_bicycle_code_physical_qubit_count(size_t d);
 constexpr size_t bivariate_bicycle_code_logical_qubit_count(size_t d);
 
-constexpr size_t magic_state_cultivation_physical_qubit_count(size_t d);
-constexpr size_t magic_state_distillation_physical_qubit_count(std::string_view type, size_t dx, size_t dz);
+/*
+ * Resource estimates for magic state factories:
+ *
+ * Routing overheads for distillation are assumed to be `(input_count+output+count)/2`
+ * */
+constexpr size_t magic_state_cultivation_physical_qubit_count(size_t escape_distance);
+constexpr size_t magic_state_distillation_physical_qubit_count(size_t input_count, 
+                                                                size_t output_count,
+                                                                size_t dx, 
+                                                                size_t dz);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 }  // namespace configuration
 }  // namespace sim
+
+#include "resource_estimation.tpp"
 
 #endif  // SIM_CONFIGURATION_RESOURCE_ESTIMATION_h

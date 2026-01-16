@@ -9,6 +9,7 @@
 #include "sim/compute_base.h"
 
 #include <array>
+#include <deque>
 #include <memory>
 #include <unordered_set>
 
@@ -23,7 +24,7 @@ class COMPUTE_SUBSYSTEM : public COMPUTE_BASE
 public:
     using inst_ptr = COMPUTE_BASE::inst_ptr;
     using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
-    using ctx_switch_condition_type = std::optional<std::pair<CLIENT*, CLIENT*>>;
+    using ctx_switch_condition_type = std::pair<CLIENT*, CLIENT*>;
 
     struct config_type
     {

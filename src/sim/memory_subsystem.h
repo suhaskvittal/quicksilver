@@ -35,6 +35,12 @@ public:
      * */
     access_result_type do_memory_access(QUBIT* ld, QUBIT* st);
 
+    /*
+     * Searches for the `QUBIT*` that matches the given client id
+     * and qubit id
+     * */
+    QUBIT* retrieve_qubit(client_id_type, qubit_type) const;
+
     const std::vector<STORAGE*>& storages() const;
 private:
     /*

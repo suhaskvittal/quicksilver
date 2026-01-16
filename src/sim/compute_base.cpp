@@ -3,6 +3,7 @@
  *  date:   13 January 2026
  * */
 
+#include "sim.h"
 #include "sim/compute_base.h"
 #include "sim/memory_subsystem.h"
 

@@ -51,6 +51,23 @@ MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, QUBIT* st)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+QUBIT*
+MEMORY_SUBSYSTEM::retrieve_qubit(client_id_type c_id, qubit_type q_id) const
+{
+    for (const auto* s : storages_)
+    {
+        const auto& contents = s->contents();
+        auto q_it = std::find_if(contents.begin(), contents.end(),
+                            [c_id, q_id] (const auto* q) { return q->client_id = c_id && q->qubit_id == q_id; });
+        if (q_it != contents.end())
+            return *q_it;
+    }
+    return nullptr;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 const std::vector<STORAGE*>&
 MEMORY_SUBSYSTEM::storages() const
 {

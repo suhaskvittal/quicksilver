@@ -56,12 +56,10 @@ std::string _cultivation_name(double probability_of_success);
 T_FACTORY_BASE::T_FACTORY_BASE(std::string_view name,
                                 double freq_khz,
                                 double _output_error_probability,
-                                size_t _buffer_capacity,
-                                const std::vector<T_FACTORY_BASE*>& previous_level)
+                                size_t _buffer_capacity)
     :OPERABLE(name, freq_khz),
     output_error_probability(_output_error_probability),
-    buffer_capacity(_buffer_capacity),
-    previous_level_(previous_level)
+    buffer_capacity(_buffer_capacity)
 {}
 
 void
@@ -102,13 +100,11 @@ T_DISTILLATION::T_DISTILLATION(double freq_khz,
                                 size_t buffer_capacity,
                                 size_t _initial_input_count,
                                 size_t _output_count,
-                                size_t _num_rotation_steps,
-                                const std::vector<T_FACTORY_BASE*>& previous_level)
+                                size_t _num_rotation_steps)
     :T_FACTORY_BASE(_distillation_name(_initial_input_count, _output_count, _num_rotation_steps),
                         freq_khz,
                         output_error_probability,
-                        buffer_capacity,
-                        previous_level),
+                        buffer_capacity)
     initial_input_count(_initial_input_count),
     output_count(_output_count),
     num_rotation_steps(_num_rotation_steps)
@@ -125,7 +121,7 @@ T_DISTILLATION::print_deadlock_info(std::ostream& out) const
 bool
 T_DISTILLATION::production_step()
 {
-    const bool is_lowest_level = previous_level_.empty();
+    const bool is_lowest_level = previous_level.empty();
 
     size_t magic_states_needed = (step_ == 0) ? initial_input_count : 1; 
     const double p_limit = FPR(GL_RNG);
@@ -140,15 +136,15 @@ T_DISTILLATION::production_step()
     }
     else
     {
-        size_t magic_states_avail = std::transform_reduce(previous_level_.begin(), previous_level_.end(),   
+        size_t magic_states_avail = std::transform_reduce(previous_level.begin(), previous_level.end(),   
                                                             size_t{0},
                                                             std::plus<size_t>{},
-                                                            [] (T_FACTORY_BASE* f) { return f->buffer_occupancy(); });
+                                                            [] (const auto* f) { return f->buffer_occupancy(); });
         if (magic_states_avail < magic_states_needed)
             return false;
         
         // get the magic states we need -- simultaneoulsy compute the probability of error
-        for (auto* f : previous_level_)
+        for (auto* f : previous_level)
         {
             if (f->buffer_occupancy() == 0)
                 continue;

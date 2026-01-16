@@ -24,6 +24,13 @@ public:
     const size_t buffer_capacity;
 
     /*
+     * Factories that produce magic states for this factory to use.
+     * If empty, then it is assumed that this factory consumes
+     * magic states created via state injection.
+     * */
+    std::vector<T_FACTORY_BASE*> previous_level;
+
+    /*
      * Statistics:
      * */
     uint64_t s_production_attempts{0};
@@ -33,19 +40,11 @@ protected:
      * Number of magic states in local buffer (max `buffer_capacity`)
      * */
     size_t buffer_occupancy_{0};
-
-    /*
-     * Factories that produce magic states for this factory to use.
-     * If empty, then it is assumed that this factory consumes
-     * magic states created via state injection.
-     * */
-    std::vector<T_FACTORY_BASE*> previous_level_;
 public:
     T_FACTORY_BASE(std::string_view name, 
                     double freq_khz, 
                     double output_error_prob,
-                    size_t buffer_capacity,
-                    const std::vector<T_FACTORY_BASE*>& previous_level);
+                    size_t buffer_capacity);
 
     /*
      * Safely consumes `count` magic states from the buffer.
@@ -92,8 +91,7 @@ public:
                     size_t buffer_capacity,
                     size_t initial_input_count,
                     size_t output_count,
-                    size_t num_rotation_steps,
-                    const std::vector<T_FACTORY_BASE*>& previous_level);
+                    size_t num_rotation_steps);
 
     void print_deadlock_info(std::ostream&) const override;
 private:

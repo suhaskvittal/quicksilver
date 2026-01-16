@@ -109,9 +109,14 @@ set(BINARY_GEN_FILES
     src/compiler/program/value_info.cpp)
 
 set(SIM_FILES
+    src/sim/configuration/allocator.cpp
     src/sim/client.cpp
+    src/sim/compute_base.cpp
+    src/sim/compute_subsystem.cpp
     src/sim/factory.cpp
+    src/sim/memory_subsystem.cpp
     src/sim/operable.cpp
+    src/sim/storage.cpp
     src/sim.cpp)
 
 ###################################################
@@ -123,6 +128,13 @@ add_library(qs_common SHARED ${COMMON_FILES})
 target_include_directories(qs_common PUBLIC "src")
 target_compile_options(qs_common PUBLIC ${COMPILE_OPTIONS})
 target_link_libraries(qs_common PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
+
+# Library for simulator files (`qs_simulator`)
+
+add_library(qs_simulator SHARED ${SIM_FILES})
+target_include_directories(qs_simulator PUBLIC "src")
+target_compile_options(qs_simulator PUBLIC ${COMPILE_OPTIONS})
+target_link_libraries(qs_simulator PUBLIC qs_common)
 
 ###################################################
 ###################################################
@@ -168,10 +180,20 @@ target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
 
 # Simple context switch simulator (qs_ctxsim)
 
-add_executable(qs_ctxsim main/qs_ctxsim.cpp ${SIM_FILES})
+add_executable(qs_ctxsim main/qs_ctxsim.cpp)
 target_include_directories(qs_ctxsim PRIVATE "src")
 target_compile_options(qs_ctxsim PRIVATE ${COMPILE_OPTIONS})
-target_link_libraries(qs_ctxsim PRIVATE qs_common)
+target_link_libraries(qs_ctxsim PRIVATE qs_simulator)
+
+###################################################
+###################################################
+
+# Magic state throughput estimation (qs_tpest)
+
+add_executable(qs_tpest main/qs_throughput_estimator.cpp)
+target_include_directories(qs_tpest PRIVATE "src")
+target_compile_options(qs_tpest PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_tpest PRIVATE qs_simulator)
 
 ###################################################
 ###################################################
