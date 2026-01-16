@@ -99,18 +99,9 @@ main(int argc, char* argv[])
 
     /*
      * Compute true throughput:
-     *
-     * The fastest factory determines the simulation frequency. We need
-     * to convert cycles to time.
      * */
 
-    double max_freq_khz = 0.0;
-    for (auto* f : alloc.first_level)
-        max_freq_khz = std::max(max_freq_khz, f->freq_khz);
-    for (auto* f : alloc.second_level)
-        max_freq_khz = std::max(max_freq_khz, f->freq_khz);
-
-    const double simulated_time_s = static_cast<double>(SIM_CURRENT_CYCLE) / (max_freq_khz * 1e3);
+    const double simulated_time_s = alloc.second_level[0]->current_cycle() / (alloc.second_level[0]->freq_khz * 1e3);
     const double true_throughput = static_cast<double>(SIM_MAGIC_STATES_CONSUMED) / simulated_time_s;
 
     /*
