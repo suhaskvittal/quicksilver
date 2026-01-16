@@ -109,10 +109,10 @@ main(int argc, char* argv[])
      * */
 
     print_stat_line(std::cout, "PHYSICAL_QUBIT_BUDGET", physical_qubit_budget);
-    print_stat_line(std::cout, "L1_FACTORY_FREQ_KHZ", alloc.first_level[0]->freq_khz);
-    print_stat_line(std::cout, "L1_FACTORY_COUNT", alloc.first_level.size());
-    print_stat_line(std::cout, "L2_FACTORY_FREQ_KHZ", alloc.second_level[0]->freq_khz);
-    print_stat_line(std::cout, "L2_FACTORY_COUNT", alloc.second_level.size());
+
+    sim::print_stats_for_factories(std::cout, "L1", alloc.first_level);
+    sim::print_stats_for_factories(std::cout, "L2", alloc.second_level);
+    
     print_stat_line(std::cout, "SIMULATION_CYCLES", SIM_CURRENT_CYCLE);
     print_stat_line(std::cout, "MAGIC_STATES_CONSUMED", SIM_MAGIC_STATES_CONSUMED);
     print_stat_line(std::cout, "ESTIMATED_THROUGHPUT_PER_SECOND", estimated_throughput);
