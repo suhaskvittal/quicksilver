@@ -33,11 +33,16 @@ extern std::chrono::steady_clock::time_point GL_SIM_WALL_START;
 extern std::mt19937_64 GL_RNG;
 
 /*
+ * Number of compute cycles per progress print
+ * */
+extern int64_t GL_PRINT_PROGRESS_FREQUENCY;
+
+/*
  * Maximum number of simulation cycles with no progress
  * before declaring deadlock and killing the program 
  * (see `operable.h` and `operable.cpp`)
  * */
-extern cycle_type GL_MAX_CYCLES_WITH_NO_PROGRESS;
+extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -54,6 +59,17 @@ std::string walltime();
 
 // returns the number of seconds elapsed since `GL_SIM_WALL_START`
 double walltime_s();
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+class COMPUTE_SUBSYSTEM;
+class CLIENT;
+
+/*
+ * Utility function for printing out client stats:
+ * */
+void print_client_stats(std::ostream&, COMPUTE_SUBSYSTEM*, CLIENT*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

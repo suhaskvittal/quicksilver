@@ -76,7 +76,8 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
             outgoing_buffer.erase(begin, end);
         }
 
-        if ((inst_done % conf.print_progress_frequency) < (inst_done_before % conf.print_progress_frequency))
+        if (conf.print_progress_frequency > 0
+            && (inst_done % conf.print_progress_frequency) < (inst_done_before % conf.print_progress_frequency))
         {
             auto front_layer = dag->get_front_layer();
 

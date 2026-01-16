@@ -10,6 +10,7 @@
 #include "generic_io.h"
 #include "globals.h"
 
+#include <limits>
 #include <memory>
 
 namespace sim
@@ -29,7 +30,7 @@ public:
     uint64_t s_inst_read{0};
     uint64_t s_inst_done{0};
     uint64_t s_unrolled_inst_done{0};
-    uint64_t s_cycle_complete{0};
+    uint64_t s_cycle_complete{std::numeric_limits<uint64_t>::max()};
 
     const std::string    trace_file;
     const client_id_type id;

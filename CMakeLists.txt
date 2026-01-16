@@ -197,3 +197,16 @@ target_link_libraries(qs_tpest PRIVATE qs_simulator)
 
 ###################################################
 ###################################################
+
+# Main simulator (quicksilver)
+
+add_executable(quicksilver main/quicksilver.cpp
+                            src/compiler/memory_scheduler.cpp
+                            src/compiler/memory_scheduler/eif.cpp
+                            src/compiler/memory_scheduler/hint.cpp)
+target_include_directories(quicksilver PRIVATE "src")
+target_compile_options(quicksilver PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(quicksilver PRIVATE qs_simulator)
+
+###################################################
+###################################################

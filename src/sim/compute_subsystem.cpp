@@ -53,7 +53,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     std::vector<std::vector<QUBIT*>> qubits_by_client(total_clients);
     std::transform(c_begin, c_end, qubits_by_client.begin(), [] (const auto* c) { return c->qubits(); });
     std::vector<STORAGE*> all_storage{local_memory_.get()};
-    all_storage.insert(all_storage.end(), memory_hierarchy_->storages().begin(), memory_hierarchy_->storages().end());
+    std::copy(memory_hierarchy_->storages().begin(), memory_hierarchy_->storages().end(), std::back_inserter(all_storage));
     storage_striped_initialization(all_storage, qubits_by_client, concurrent_clients);
 
     // initialize context for all inactive clients:
@@ -85,6 +85,43 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
 void
 COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
 {
+    for (auto* f : top_level_t_factories_)
+        f->print_deadlock_info(ostrm);
+
+    std::cout << "local memory contents:";
+    for (auto* q : local_memory_->contents())
+        std::cout << " " << *q;
+    std::cout << "\n";
+
+    for (auto* c : active_clients_)
+    {
+        std::cout << "Client " << static_cast<int>(c->id) << " front layer:\n";
+        for (const auto* inst : c->dag()->get_front_layer())
+            std::cout << "\t" << *inst << "\n";
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_SUBSYSTEM::done() const
+{
+    bool all_done{true};
+    for (auto* c : all_clients_)
+    {
+        bool d = _client_is_done(c, simulation_instructions);
+        if (d)
+            c->s_cycle_complete = std::min(current_cycle(), c->s_cycle_complete);
+        all_done &= d;
+    }
+    return all_done;
+}
+
+const std::vector<CLIENT*>&
+COMPUTE_SUBSYSTEM::clients() const
+{
+    return all_clients_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -156,6 +193,7 @@ COMPUTE_SUBSYSTEM::handle_completed_clients()
         CLIENT* c = *c_it;
         if (_client_is_done(c, simulation_instructions))
         {
+            c->s_cycle_complete = current_cycle();
             if (!inactive_clients_.empty())
             {
                 // note that `do_context_switch` will set `*c_it`, so we only

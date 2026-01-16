@@ -26,13 +26,6 @@ public:
     using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
     using ctx_switch_condition_type = std::pair<CLIENT*, CLIENT*>;
 
-    struct config_type
-    {
-        /*
-         * Local memory configuration:
-         * */
-    };
-
     /*
      * Information about a CLIENT's context:
      * */
@@ -88,7 +81,7 @@ public:
     void print_progress(std::ostream&) const override;
     void print_deadlock_info(std::ostream&) const override;
 
-    const bool done() const;
+    bool done() const;
     const std::vector<CLIENT*>& clients() const;
 protected:
     long operate() override;
