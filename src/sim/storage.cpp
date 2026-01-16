@@ -5,6 +5,9 @@
 
 #include "sim/storage.h"
 
+#include <algorithm>
+#include <cassert>
+
 namespace sim
 {
 
@@ -25,7 +28,7 @@ std::string _storage_name(size_t n, size_t k, size_t d);
  * */
 void _fill_up_storage_round_robin(STORAGE*, 
                                     std::vector<size_t>& qubits_allocated,
-                                    const std::vector<size_t>& qubit_counts, 
+                                    const std::vector<std::vector<QUBIT*>>& qubits, 
                                     size_t idx_upper_bound);
 
 } // anon
@@ -39,17 +42,11 @@ STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type _load
     logical_qubit_count(k),
     code_distance(d),
     load_latency(_load_latency),
-    store_latency_(_store_latency),
+    store_latency(_store_latency),
     contents_{},
     cycle_available_(k,0)
 {
     contents_.reserve(k);
-}
-
-~STORAGE::STORAGE()
-{
-    for (auto* q : contents_)
-        delete q;
 }
 
 ////////////////////////////////////////////////////////////
@@ -104,19 +101,19 @@ STORAGE::operate()
 
 void
 storage_striped_initialization(const std::vector<STORAGE*>& storage_array,
-                                const std::vector<QUBIT*>& qubits,
+                                const std::vector<std::vector<QUBIT*>>& qubits,
                                 size_t num_active_clients)
 {
     std::vector<size_t> qubits_allocated(qubits.size(), 0);
 
     // first handle compute subsystem's local memory:
     _fill_up_storage_round_robin(storage_array[0], qubits_allocated, qubits, num_active_clients);
-    for (size_t i = 1; i < qubit_counts.size(); i++)
-        _fill_up_storage_round_robin(storage_array[i], qubits_allocated, qubits, qubit_counts.size());
+    for (size_t i = 1; i < qubits.size(); i++)
+        _fill_up_storage_round_robin(storage_array[i], qubits_allocated, qubits, qubits.size());
 
     // verify that all clients have been fully allocated
     bool any_clients_incomplete = false;
-    for (size_t i = 0; i < qubit_counts.size(); i++)
+    for (size_t i = 0; i < qubits.size(); i++)
         any_clients_incomplete |= qubits_allocated[i] < qubits[i].size();
     if (any_clients_incomplete)
     {
@@ -158,7 +155,7 @@ _fill_up_storage_round_robin(STORAGE* storage,
     size_t client_idx{0};
 
     // helper to check if any client needs allocation
-    auto needs_allocation = [qubits_allocated, qubits]()
+    auto needs_allocation = [&qubits_allocated, &qubits, idx_upper_bound]()
     {
         for (size_t i{0}; i < idx_upper_bound; i++)
             if (qubits_allocated[i] < qubits[i].size())

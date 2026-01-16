@@ -208,7 +208,7 @@ _estimate_throughput_cultivation(const std::vector<T_FACTORY_BASE*>& fact)
                                         [] (T_FACTORY_BASE* _f)
                                         {
                                             auto* f = static_cast<T_CULTIVATION*>(_f);
-                                            return (1e3 / f->freq_khz) * f->probability_of_success;
+                                            return (1e3 * f->freq_khz) * f->probability_of_success;
                                         });
     return tp;
 }
@@ -223,7 +223,7 @@ _estimate_throughput_distillation(const std::vector<T_FACTORY_BASE*>& fact)
                                             auto* f = static_cast<T_DISTILLATION*>(_f);
                                             const size_t num_steps = 1 + f->num_rotation_steps;
                                             const double eff_freq_khz = f->freq_khz / static_cast<double>(num_steps);
-                                            return (1e3 / eff_freq_khz) * f->output_count;
+                                            return (1e3 * eff_freq_khz) * f->output_count;
                                         });
     return tp;
 }
@@ -240,7 +240,7 @@ _estimate_consumption_rate(const std::vector<T_FACTORY_BASE*>& fact)
                                         const size_t states_consumed = f->initial_input_count + f->num_rotation_steps;
 
                                         const double eff_freq_khz = f->freq_khz / static_cast<double>(num_steps);
-                                        return (1e3 / eff_freq_khz) * states_consumed;
+                                        return (1e3 * eff_freq_khz) * states_consumed;
                                     });
     return r;
 }

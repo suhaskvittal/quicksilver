@@ -51,14 +51,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
 
     // initialize all the memory:
     std::vector<std::vector<QUBIT*>> qubits_by_client(total_clients);
-    std::transform(c_begin, c_end, qubits_by_client.begin(),
-            [] (const auto* c)
-            {
-                std::vector<QUBIT*> qubits(c->num_qubits);
-                for (qubit_type i = 0; i < c->num_qubits; i++)
-                    qubits[i] = new QUBIT{i, c->id};
-                return qubits;
-            });
+    std::transform(c_begin, c_end, qubits_by_client.begin(), [] (const auto* c) { return c->qubits(); });
     std::vector<STORAGE*> all_storage{local_memory_.get()};
     all_storage.insert(all_storage.end(), memory_hierarchy_->storages().begin(), memory_hierarchy_->storages().end());
     storage_striped_initialization(all_storage, qubits_by_client, concurrent_clients);
@@ -67,14 +60,14 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     const size_t active_qubits_per_client = local_memory_capacity / concurrent_clients;
     for (auto* c : inactive_clients_)
     {
-        auto q_begin = all_storage[c->id]->begin();
+        auto q_begin = c->qubits().begin();
         auto q_end = q_begin + active_qubits_per_client;
         client_context_table_[c->id].active_qubits.assign(q_begin, q_end);
     }
     context_switch_memory_access_buffer_.reserve(active_qubits_per_client);
 }
 
-~COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM()
+COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
 {
     for (auto* c : all_clients_)
         delete c;
@@ -208,7 +201,7 @@ COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
     // need to get lists of active qubits for `in` and `out`
     const context_type& in_ctx = client_context_table_[in->id];
     std::vector<QUBIT*> out_active_qubits;
-    out_active_qubits.reserve(qubit_capacity / concurrent_clients);
+    out_active_qubits.reserve(local_memory_capacity / concurrent_clients);
     std::copy_if(local_memory_->contents().begin(), local_memory_->contents().end(), out_active_qubits.begin(),
                 [out_id=out->id] (QUBIT* q) { return q->client_id == out_id; });
 
@@ -236,7 +229,7 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const r
     in_mem_qubits.reserve(4);
 
     auto front_layer = c->get_ready_instructions(
-                            [&ready_qubits, &in_mem_qubits, c_id=c->id, cc=current_cycle()] 
+                            [&ready_qubits, &in_mem_qubits, &c, cc=current_cycle()] 
                             (const auto* inst)
                             {
                                 if (is_memory_access(inst->type))
@@ -247,9 +240,8 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const r
                                                      outgoing_id = inst->qubits[1];
 
                                     // retrieve pointer to requested qubit from memory
-                                    auto* in_memory_qubit = memory_hierarchy_->retrieve_qubit(c_id, incoming_id); 
-                                    assert(in_memory_qubit != nullptr);
-                                    in_mem_qubits.insert({incoming_id, in_memory_qubit);
+                                    auto* in_memory_qubit = c->qubits()[incoming_id];
+                                    in_mem_qubits.insert({incoming_id, in_memory_qubit});
                                     
                                     const bool incoming_ready = in_memory_qubit->cycle_available <= cc;
                                     const bool outgoing_ready = ready_qubits.count(outgoing_id);
@@ -292,7 +284,7 @@ namespace
 {
 
 bool
-_client_is_done(CLIENT* c, uint64_t s)
+_client_is_done(const CLIENT* c, uint64_t s)
 {
     return c->s_unrolled_inst_done >= s;
 }

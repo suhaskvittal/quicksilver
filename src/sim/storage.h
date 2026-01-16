@@ -64,7 +64,6 @@ private:
     std::vector<cycle_type> cycle_available_;
 public:
     STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type load_latency, cycle_type store_latency);
-    ~STORAGE();
     
     /*
      * Adds the given qubit to `contents_`. Should be used

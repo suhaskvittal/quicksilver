@@ -22,6 +22,7 @@ class CLIENT
 {
 public:
     using inst_ptr = DAG::inst_ptr;
+
     /*
      * Statistics (only variables prefixed by `s_`)
      * */
@@ -44,6 +45,8 @@ public:
 private:
     std::unique_ptr<DAG> dag_;
     bool                 has_hit_eof_once_{false};
+
+    std::vector<QUBIT*> qubits_;
 public:
     CLIENT(std::string trace_file, client_id_type);
     ~CLIENT();
@@ -68,6 +71,7 @@ public:
 
     const std::unique_ptr<DAG>& dag() const;
     const double                ipc() const;
+    const std::vector<QUBIT*>&  qubits() const;
 private:
     size_t   open_file_and_read_qubit_count();
     inst_ptr read_instruction_from_trace();

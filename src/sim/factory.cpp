@@ -78,9 +78,7 @@ T_FACTORY_BASE::print_deadlock_info(std::ostream& out) const
 long
 T_FACTORY_BASE::operate()
 {
-    if (buffer_occupancy_ >= buffer_capacity)
-        return 0;  // no progress can be made if buffer is full
-    if (production_step())
+    if (buffer_occupancy_ >= buffer_capacity || production_step())
         return 1;
     else 
         return 0;
@@ -104,7 +102,7 @@ T_DISTILLATION::T_DISTILLATION(double freq_khz,
     :T_FACTORY_BASE(_distillation_name(_initial_input_count, _output_count, _num_rotation_steps),
                         freq_khz,
                         output_error_probability,
-                        buffer_capacity)
+                        buffer_capacity),
     initial_input_count(_initial_input_count),
     output_count(_output_count),
     num_rotation_steps(_num_rotation_steps)
@@ -124,7 +122,7 @@ T_DISTILLATION::production_step()
     const bool is_lowest_level = previous_level.empty();
 
     size_t magic_states_needed = (step_ == 0) ? initial_input_count : 1; 
-    const double p_limit = FPR(GL_RNG);
+    const double p_sampled = FPR(GL_RNG);
 
     // get the magic states that we need and compute the error probability of these magic states.
     double p_error{0.0};
@@ -157,7 +155,7 @@ T_DISTILLATION::production_step()
         }
     }        
 
-    step_ = (p_error < p_limit) ? 0 : step_+1;
+    step_ = (p_sampled < p_error) ? 0 : step_+1;
     if (step_ == num_rotation_steps+1)
     {
         buffer_occupancy_++;
@@ -176,8 +174,7 @@ T_CULTIVATION::T_CULTIVATION(double freq_khz,
     :T_FACTORY_BASE(_cultivation_name(_probability_of_success),
                      freq_khz,
                      output_error_probability,
-                     buffer_capacity,
-                     {}),
+                     buffer_capacity),
     probability_of_success(_probability_of_success)
 {}
 
@@ -207,7 +204,7 @@ std::string
 _cultivation_name(double probability_of_success)
 {
     std::ostringstream oss;
-    oss << "C_p=" << std::scientific << probability_of_success;
+    oss << "C_p=" << static_cast<int>(100*probability_of_success) << "%";
     return oss.str();
 }
 

@@ -47,11 +47,11 @@ public:
     MEMORY_SUBSYSTEM*                   memory_hierarchy() const;
 protected:
     virtual bool execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
-private:
-    bool do_h_or_s_gate(inst_ptr, QUBIT*);
-    bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
-    bool do_t_like_gate(inst_ptr, QUBIT*);
-    bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
+
+    virtual bool do_h_or_s_gate(inst_ptr, QUBIT*);
+    virtual bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
+    virtual bool do_t_like_gate(inst_ptr, QUBIT*);
+    virtual bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
 };
 
 ////////////////////////////////////////////////////////////

@@ -16,12 +16,19 @@ CLIENT::CLIENT(std::string _trace_file, int8_t _id)
     id(_id),
     tristrm_(),
     num_qubits(open_file_and_read_qubit_count()),
-    dag_{new DAG(num_qubits)}
-{}
+    dag_{new DAG(num_qubits)},
+    qubits_(num_qubits)
+{
+    for (qubit_type q_id = 0; q_id < num_qubits; q_id++)
+        qubits_[q_id] = new QUBIT{q_id, id};
+}
 
 CLIENT::~CLIENT()
 {
     generic_strm_close(tristrm_);
+
+    for (auto* q : qubits_)
+        delete q;
 }
 
 ////////////////////////////////////////////////////////////
@@ -52,6 +59,12 @@ const double
 CLIENT::ipc() const
 {
     return mean(s_unrolled_inst_done, s_cycle_complete);
+}
+
+const std::vector<QUBIT*>&
+CLIENT::qubits() const
+{
+    return qubits_;
 }
 
 ////////////////////////////////////////////////////////////

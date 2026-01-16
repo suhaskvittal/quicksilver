@@ -103,6 +103,7 @@ main(int argc, char* argv[])
      * The fastest factory determines the simulation frequency. We need
      * to convert cycles to time.
      * */
+
     double max_freq_khz = 0.0;
     for (auto* f : alloc.first_level)
         max_freq_khz = std::max(max_freq_khz, f->freq_khz);
@@ -115,8 +116,11 @@ main(int argc, char* argv[])
     /*
      * Print statistics:
      * */
+
     print_stat_line(std::cout, "PHYSICAL_QUBIT_BUDGET", physical_qubit_budget);
+    print_stat_line(std::cout, "L1_FACTORY_FREQ_KHZ", alloc.first_level[0]->freq_khz);
     print_stat_line(std::cout, "L1_FACTORY_COUNT", alloc.first_level.size());
+    print_stat_line(std::cout, "L2_FACTORY_FREQ_KHZ", alloc.second_level[0]->freq_khz);
     print_stat_line(std::cout, "L2_FACTORY_COUNT", alloc.second_level.size());
     print_stat_line(std::cout, "SIMULATION_CYCLES", SIM_CURRENT_CYCLE);
     print_stat_line(std::cout, "MAGIC_STATES_CONSUMED", SIM_MAGIC_STATES_CONSUMED);
@@ -140,10 +144,9 @@ void
 sim_init(sim::configuration::FACTORY_ALLOCATION& alloc)
 {
     std::vector<sim::OPERABLE*> operables;
-    for (auto* f : alloc.first_level)
-        operables.push_back(f);
-    for (auto* f : alloc.second_level)
-        operables.push_back(f);
+    operables.reserve(alloc.first_level.size() + alloc.second_level.size());
+    std::copy(alloc.first_level.begin(), alloc.first_level.end(), std::back_inserter(operables));
+    std::copy(alloc.second_level.begin(), alloc.second_level.end(), std::back_inserter(operables));
     sim::coordinate_clock_scale(operables);
 }
 
@@ -162,11 +165,8 @@ sim_tick(sim::configuration::FACTORY_ALLOCATION& alloc)
     for (auto* f : alloc.second_level)
     {
         size_t avail = f->buffer_occupancy();
-        if (avail > 0)
-        {
-            f->consume(avail);
-            SIM_MAGIC_STATES_CONSUMED += avail;
-        }
+        f->consume(avail);
+        SIM_MAGIC_STATES_CONSUMED += avail;
     }
 }
 
