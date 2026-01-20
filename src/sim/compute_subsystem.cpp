@@ -80,6 +80,25 @@ void
 COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
 {
     std::cout << "cycle " << current_cycle() << " -------------------------------------------------------------\n";
+
+    for (auto* c : all_clients_)
+    {
+        auto active_it = std::find(active_clients_.begin(), active_clients_.end(), c);
+        bool is_active = (active_it != active_clients_.end());
+
+        if (is_active)
+            ostrm << " * client " << static_cast<int>(c->id);
+        else
+            ostrm << "   client " << static_cast<int>(c->id);
+
+        double ipc = mean(c->s_unrolled_inst_done, current_cycle());
+        double kips = mean(c->s_unrolled_inst_done / 1000, current_cycle() / (1e3*freq_khz));
+
+        ostrm << "\n\tinstructions completed = " << c->s_unrolled_inst_done
+                << "\n\tipc = " << ipc
+                << "\n\tkips = " << kips
+                << "\n";
+    }
 }
 
 void

@@ -36,7 +36,8 @@ void _fill_up_storage_round_robin(STORAGE*,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type _load_latency, cycle_type _store_latency)
+STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d, 
+                size_t num_adapters, cycle_type _load_latency, cycle_type _store_latency)
     :OPERABLE(_storage_name(n,k,d), freq_khz),
     physical_qubit_count(n),
     logical_qubit_count(k),
@@ -44,7 +45,7 @@ STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type _load
     load_latency(_load_latency),
     store_latency(_store_latency),
     contents_{},
-    cycle_available_(k,0)
+    cycle_available_(num_adapters,0)
 {
     contents_.reserve(k);
 }
@@ -79,6 +80,31 @@ STORAGE::do_memory_access(QUBIT* ld, QUBIT* st)
     contents_.erase(ld);
     contents_.insert(st);
     return access_result_type{.success=true, .latency=load_latency+store_latency, .storage_freq_khz=freq_khz};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+STORAGE::has_free_adapter() const
+{
+    return std::any_of(cycle_available_.begin(), cycle_available_.end(),
+                    [cc=current_cycle()] (cycle_type c) { return c <= cc; });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+STORAGE::print_adapter_debug_info(std::ostream& out) const
+{
+    out << name << " adapters (free cycle delta):";
+    for (cycle_type c : cycle_available_)
+    {
+        int64_t delta = static_cast<int64_t>(c) - static_cast<int64_t>(current_cycle());
+        out << " " << delta;
+    }
+    out << "\n";
 }
 
 ////////////////////////////////////////////////////////////

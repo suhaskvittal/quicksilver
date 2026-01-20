@@ -151,6 +151,7 @@ _throughput_aware_alloc_step(FACTORY_ALLOCATION& alloc, size_t b, FACTORY_SPECIF
 
     const double initial_throughput = estimate_throughput_of_allocation(alloc, s1.is_cultivation);
     alloc.second_level.push_back(_alloc_factory(s2));
+    alloc.physical_qubit_count += pq_count_second_level;
     b -= pq_count_second_level;
 
     /* 2. Add first level factories while within budget */
@@ -162,6 +163,7 @@ _throughput_aware_alloc_step(FACTORY_ALLOCATION& alloc, size_t b, FACTORY_SPECIF
     {
         prev_tp = curr_tp;
         alloc.first_level.push_back(_alloc_factory(s1));
+        alloc.physical_qubit_count += pq_count_first_level;
         b -= pq_count_first_level;
         num_added++;
         curr_tp = estimate_throughput_of_allocation(alloc, s1.is_cultivation);
@@ -174,6 +176,7 @@ _throughput_aware_alloc_step(FACTORY_ALLOCATION& alloc, size_t b, FACTORY_SPECIF
         // since it adds no benefit
         delete alloc.first_level.back();
         alloc.first_level.pop_back();
+        alloc.physical_qubit_count -= pq_count_first_level;
         b += pq_count_first_level;
         num_added--;
         curr_tp = estimate_throughput_of_allocation(alloc, s1.is_cultivation);

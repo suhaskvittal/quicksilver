@@ -39,11 +39,12 @@ COMPUTE_BASE::COMPUTE_BASE(std::string_view             name,
 {
     // initialize local memory:
     local_memory_ = std::make_unique<STORAGE>(freq_khz,
-                                                0,                      // n (does not matter)
-                                                _local_memory_capacity, // k (matters)
-                                                0,                      // d (does not matter)
-                                                1,                      // load latency
-                                                1);                     // store latency
+                                            0,                      // n (does not matter)
+                                            _local_memory_capacity, // k (matters)
+                                            0,                      // d (does not matter)
+                                            _local_memory_capacity, // num_adapters 
+                                            0,                      // load latency (0, we model with cycle available)
+                                            0);                     // store latency (0, we model with cycle available)
 }
 
 ////////////////////////////////////////////////////////////
@@ -160,8 +161,14 @@ COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
     {
         // need to convert storage latency to compute cycles:
         cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, freq_khz);
-        local_memory_->do_memory_access(st, ld);
-        _update_available_cycle({ld, st}, current_cycle() + latency);
+        auto local_result = local_memory_->do_memory_access(st, ld);
+        if (!local_result.success)
+        {
+            std::cerr << "COMPUTE_BASE::do_memory_access: local memory access failed.\n";
+            local_memory_->print_adapter_debug_info(std::cerr);
+            std::cerr << _die{};
+        }
+        _update_available_cycle({ld, st}, current_cycle() + latency + 2);
     }
     return result.success;
 }

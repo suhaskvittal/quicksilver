@@ -63,7 +63,11 @@ private:
      * */
     std::vector<cycle_type> cycle_available_;
 public:
-    STORAGE(double freq_khz, size_t n, size_t k, size_t d, cycle_type load_latency, cycle_type store_latency);
+    STORAGE(double freq_khz, 
+            size_t n, size_t k, size_t d, 
+            size_t num_adapters, 
+            cycle_type load_latency, 
+            cycle_type store_latency);
     
     /*
      * Adds the given qubit to `contents_`. Should be used
@@ -81,6 +85,13 @@ public:
      * or other functionality is implemented.
      * */
     virtual access_result_type do_memory_access(QUBIT* ld, QUBIT* st);
+
+    /*
+     * Returns true if any adapter is free this cycle.
+     * */
+    bool has_free_adapter() const;
+
+    void print_adapter_debug_info(std::ostream&) const;
 
     const backing_buffer_type& contents() const;
 protected:

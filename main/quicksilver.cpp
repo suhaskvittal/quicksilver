@@ -102,6 +102,13 @@ main(int argc, char* argv[])
         for (std::string& trace : traces)
             jit_compile(trace, inst_sim, compute_local_memory_capacity);
 
+    if (ratemode > 1)
+    {
+        std::string trace{traces[0]};
+        traces.resize(ratemode);
+        std::fill(traces.begin(), traces.end(), trace);
+    }
+
     /* initialize magic state factories */
 
     sim::configuration::FACTORY_SPECIFICATION l1_spec
@@ -148,8 +155,10 @@ main(int argc, char* argv[])
                                             MEMORY_BLOCK_PHYSICAL_QUBITS,
                                             MEMORY_BLOCK_CAPACITY,
                                             MEMORY_CODE_DISTANCE,
-                                            2,
-                                            1};
+                                            1, // num adapters
+                                            2, // load latency
+                                            1 // store latency
+        };
     }
 
     sim::MEMORY_SUBSYSTEM* memory_subsystem = new sim::MEMORY_SUBSYSTEM(std::move(memory_blocks));
@@ -208,8 +217,20 @@ main(int argc, char* argv[])
     while (!compute_subsystem->done());
 
     /* print stats */
+    size_t compute_physical_qubits = sim::configuration::surface_code_physical_qubit_count(COMPUTE_CODE_DISTANCE)
+                                            * compute_local_memory_capacity;
+    size_t memory_physical_qubits = std::transform_reduce(memory_subsystem->storages().begin(), 
+                                                            memory_subsystem->storages().end(),
+                                                            size_t{0},
+                                                            std::plus<size_t>{},
+                                                            [] (auto* s) { return s->physical_qubit_count; });
+    size_t factory_physical_qubits = alloc.physical_qubit_count;
+
     for (auto* c : compute_subsystem->clients())
         sim::print_client_stats(std::cout, compute_subsystem, c);
+    print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
+    print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
+    print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", factory_physical_qubits);
 
     /* cleanup simulation */
 
@@ -257,6 +278,8 @@ split_trace_string(std::string s)
 void
 jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
 {
+    constexpr auto MEMORY_ACCESS_SCHEDULER{compile::memory_scheduler::eif};
+
     std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
     std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
 
@@ -285,7 +308,7 @@ jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
     conf.dag_inst_capacity = 100000;
     conf.hint_lookahead_depth = 256;
 
-    run(ostrm, istrm, compile::memory_scheduler::hint, conf);
+    run(ostrm, istrm, MEMORY_ACCESS_SCHEDULER, conf);
 
     generic_strm_close(istrm);
     generic_strm_close(ostrm);
