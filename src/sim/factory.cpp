@@ -153,13 +153,25 @@ T_DISTILLATION::production_step()
             if (magic_states_needed == 0)
                 break;
         }
-    }        
+    }
 
-    step_ = (p_sampled < p_error) ? 0 : step_+1;
-    if (step_ == num_rotation_steps+1)
+    bool error_occurred = (p_sampled < p_error);
+    if (error_occurred)
     {
-        buffer_occupancy_++;
         step_ = 0;
+        s_production_attempts++;
+        s_failures++;
+    }
+    else
+    {
+        step_++;
+        if (step_ == num_rotation_steps+1)
+        {
+            buffer_occupancy_++;
+            step_ = 0;
+
+            s_production_attempts++;
+        }
     }
     return true;
 }
@@ -183,6 +195,9 @@ T_CULTIVATION::production_step()
 {
     if (FPR(GL_RNG) <= probability_of_success)
         buffer_occupancy_++;
+    else
+        s_failures++;
+    s_production_attempts++;
     return true;
 }
 
