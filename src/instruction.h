@@ -66,6 +66,8 @@ public:
         NIL
     };
 
+    using urotseq_type = std::vector<INSTRUCTION::TYPE>;
+
     /*
      * `type` corresponds to some basic instruction.
      * This can be a Clifford=T gate (i.e., T, H, etc.),
@@ -93,8 +95,19 @@ public:
      * need to be changed during compilation (to support asynchrnous 
      * synthesis).
      * */
-    const fpa_type    angle;
-    std::vector<TYPE> urotseq;
+    const fpa_type angle;
+    urotseq_type   urotseq;
+
+    /*
+     * `corr_urotseq_array` contains corrective sequences for the given rotation,
+     * assuming that the entire rotation was teleported at once.
+     *  -- idx 0 is a correction for the angle defined by `urotseq`
+     *  -- idx 1 is a correction for idx 0
+     *  -- (etc.)
+     *
+     * By default, this is not initialized since it is a niche use case.
+     * */
+    std::vector<urotseq_type> corr_urotseq_array{};
 
     /*
      * Same value as `get_inst_qubit_count(type)`

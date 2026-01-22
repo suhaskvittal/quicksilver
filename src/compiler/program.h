@@ -7,6 +7,7 @@
 #define COMPILER_PROGRAM_h
 
 #include "generic_io.h"
+#include "globals.h"
 #include "instruction.h"
 #include "compiler/program/expression.h"
 #include "compiler/program/rotation_manager.h"
@@ -27,6 +28,10 @@
 namespace prog
 {
 
+/*
+ * `GL_PRINT_PROGRESS` causes the compiler to print updates every `GL_PRINT_PROGRESS` instructions
+ * processed. Set to `0` to disable./
+ * */
 extern int64_t GL_PRINT_PROGRESS;
 
 /*
@@ -225,6 +230,12 @@ private:
 
     void   complete_rotation_gates();
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
+
+    /*
+     * This function retrieves a `urotseq` for a given rotation, either from the `rotation_cache_`
+     * or the rotation manager on a `rotation_cache_` miss.
+     * */
+    INSTRUCTION::urotseq_type retrieve_urotseq(const fpa_type&);
 
     /*
      * Returns the statistics for the current `instructions_` contents.

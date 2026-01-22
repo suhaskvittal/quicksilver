@@ -56,6 +56,7 @@ int main(int argc, char* argv[])
         .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
         .optional("-t", "--threads", "the number of threads to use", num_threads, 8)
         .optional("-p", "--print-progress", "the number of instructions to print progress", prog::GL_PRINT_PROGRESS, 1'000'000)
+        .optional("-rpc", "--rotation-recomputation-isa", "use RPC isa (argument of this option is the level)", GL_USE_RPC_ISA, 0)
         .parse(argc, argv);
 
     prog::rotation_manager_init(num_threads);

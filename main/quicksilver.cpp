@@ -101,6 +101,9 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
+    if (conf.rpc_enabled)
+        GL_USE_RPC_ISA = 1;
+
     conf.rpc_freq_khz = sim::compute_freq_khz(11 * compute_syndrome_extraction_round_time_ns);
 
     /* Parse trace string and do jit compilation if neeeded */

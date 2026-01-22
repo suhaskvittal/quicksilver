@@ -2,11 +2,30 @@ import os
 
 files = [f for f in os.listdir('bisquit/qasm') if f.endswith('.qasm') or f.endswith('.qasm.xz')]
 
-for f in files:
-    f_part = f.split('.')
-    filename = f_part[0]
-    output_file = f'benchmarks/bin/BQ_{filename}'
-    stats_file = f'benchmarks/stats/BQ_{filename}.txt'
-    cmd = f'./build/qs_gen_binary bisquit/qasm/{f} {output_file} -s {stats_file} -t 16 -p 1000000 && xz -z -T 8 {output_file}'
-    print(cmd)
-    os.system(cmd)
+NUM_THREADS = 16
+
+def build_binaries(tag=None, extra_options=''):
+    for f in files:
+        f_part = f.split('.')
+        filename = f_part[0]
+        if tag is None:
+            output_file = f'benchmarks/bin/BQ_{filename}'
+            stats_file = f'benchmarks/stats/BQ_{filename}.txt'
+        else:
+            output_file = f'benchmarks/bin/BQ_{filename}.{tag}'
+            stats_file = f'benchmarks/stats/BQ_{filename}.{tag}.txt'
+
+        cmd = f'./build/qs_gen_binary bisquit/qasm/{f} {output_file} -s {stats_file} -t {NUM_THREADS-1} -p 1000000 {extra_options} && xz -z -T {NUM_THREADS} {output_file}'
+        print(cmd)
+        os.system(cmd)
+
+from sys import argv
+
+compile_mode = argv[1]
+
+if compile_mode == 'rpc':
+    print('COMPILING FOR RPC ISA')
+    build_binaries('rpc', '-rpc 1')
+else:
+    print('DEFAULT COMPILE MODE')
+    build_binaries()

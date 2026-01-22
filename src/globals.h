@@ -21,6 +21,27 @@ using cycle_type =     uint64_t;
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+
+/*
+ * Modifies the instruction representation for RPC (Rotation Pre-Computation)
+ * The value of `GL_USE_RPC_ISA` indicates the level.
+ *
+ * Level 0 = do not use
+ *       1 = only add 2*phi to the instruction representation
+ *       2 = add both 2*phi and 4*phi to the instruction representation
+ *       (etc.)
+ *
+ * So higher levels increase compile times and binary sizes.
+ *
+ * This affects `instruction.h` and `compile/program.h`.
+ * If the level is set to 0 (default), then corrective rotations
+ * are not used.
+ * */
+extern int64_t GL_USE_RPC_ISA;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 namespace sim
 {
 

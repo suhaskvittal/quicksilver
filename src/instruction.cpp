@@ -34,6 +34,7 @@ struct io_encoding
 {
     constexpr static size_t MAX_QUBITS{INSTRUCTION::MAX_QUBITS};
     constexpr static size_t UROTSEQ_CAPACITY{256};
+    constexpr static size_t MAX_CORR_UROTSEQ{4};
 
     using fpa_type = INSTRUCTION::fpa_type;
 
@@ -41,9 +42,18 @@ struct io_encoding
     qubit_type          qubits[MAX_QUBITS]{-1,-1,-1};
     uint16_t            fpa_word_count{fpa_type::NUM_WORDS};  // needed in case `FPA_PRECISION` changes
     fpa_type::word_type angle[fpa_type::NUM_WORDS];
-    uint32_t            urotseq_size{0};
-    uint8_t             urotseq[UROTSEQ_CAPACITY];
+
+    uint32_t urotseq_size;
+    uint8_t  urotseq[UROTSEQ_CAPACITY];
+
+    uint8_t  corr_urotseq_count{0};
+    uint32_t corr_urotseq_sizes[MAX_CORR_UROTSEQ];
+    uint8_t  corr_urotseq[MAX_CORR_UROTSEQ][UROTSEQ_CAPACITY];
+
 };
+
+INSTRUCTION::urotseq_type _retrieve_urotseq_from_encoded_data(uint32_t size, uint8_t*);
+void                      _write_urotseq_to_encoded_data(uint32_t& size, uint8_t*, const INSTRUCTION::urotseq_type&);
 
 /*
  * `_fill_or_consume_serialized_instruction` either sets the data in `io_encoding` (if using an input stream),
@@ -51,6 +61,13 @@ struct io_encoding
  * */
 template <class IO_FUNCTION>
 void _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type&, const IO_FUNCTION&);
+
+/*
+ * Function for writing or reading a unrolled rotation sequence. This is a helper for
+ * `_fill_or_consume_serialized_instruction()`
+ * */
+template <class IO_FUNCTION>
+void _fill_or_consume_urotseq(generic_strm_type&, uint32_t*, uint8_t*, const IO_FUNCTION&);
 
 }  // anon namespace
 
@@ -241,16 +258,24 @@ read_instruction_from_stream(generic_strm_type& istrm)
     io_encoding enc;
     _fill_or_consume_serialized_instruction(enc, istrm, generic_strm_read);
 
-    INSTRUCTION::TYPE              type = static_cast<INSTRUCTION::TYPE>(enc.type_id);
-    auto                           q_begin = std::begin(enc.qubits);
-    auto                           q_end = q_begin + get_inst_qubit_count(type);
-    INSTRUCTION::fpa_type          angle(std::begin(enc.angle), std::end(enc.angle));
-    std::vector<INSTRUCTION::TYPE> urotseq(enc.urotseq_size);
-
-    std::transform(enc.urotseq, enc.urotseq+enc.urotseq_size, urotseq.begin(),
-                [] (auto t) { return static_cast<INSTRUCTION::TYPE>(t); });
+    INSTRUCTION::TYPE         type = static_cast<INSTRUCTION::TYPE>(enc.type_id);
+    auto                      q_begin = std::begin(enc.qubits);
+    auto                      q_end = q_begin + get_inst_qubit_count(type);
+    INSTRUCTION::fpa_type     angle(std::begin(enc.angle), std::end(enc.angle));
+    INSTRUCTION::urotseq_type urotseq = _retrieve_urotseq_from_encoded_data(enc.urotseq_size, enc.urotseq);
 
     INSTRUCTION* inst = new INSTRUCTION{type, q_begin, q_end, angle, urotseq.begin(), urotseq.end()};
+
+    // if there any corrective urotseq, handle now:
+    if (GL_USE_RPC_ISA)
+    {
+        for (size_t i = 0; i < enc.corr_urotseq_count; i++)
+        {
+            auto cu = _retrieve_urotseq_from_encoded_data(enc.corr_urotseq_sizes[i], enc.corr_urotseq[i]);
+            inst->corr_urotseq_array.push_back(cu);
+        }
+    }
+
     return inst;
 }
 
@@ -270,9 +295,15 @@ write_instruction_to_stream(generic_strm_type& ostrm, const INSTRUCTION* inst)
     std::move(words.begin(), words.end(), std::begin(enc.angle));
 
     // urotseq:
-    enc.urotseq_size = inst->urotseq.size();
-    std::transform(inst->urotseq.begin(), inst->urotseq.end(), std::begin(enc.urotseq),
-                    [] (const auto t) { return static_cast<uint8_t>(t); });
+    _write_urotseq_to_encoded_data(enc.urotseq_size, enc.urotseq, inst->urotseq);
+
+    // corrective urotseq:
+    if (GL_USE_RPC_ISA)
+    {
+        enc.corr_urotseq_count = inst->corr_urotseq_array.size();
+        for (size_t i = 0; i < inst->corr_urotseq_array.size(); i++)
+            _write_urotseq_to_encoded_data(enc.corr_urotseq_sizes[i], enc.corr_urotseq[i], inst->corr_urotseq_array[i]);
+    }
 
     _fill_or_consume_serialized_instruction(enc, ostrm, generic_strm_write);
 }
@@ -284,6 +315,27 @@ write_instruction_to_stream(generic_strm_type& ostrm, const INSTRUCTION* inst)
 
 namespace
 {
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+INSTRUCTION::urotseq_type
+_retrieve_urotseq_from_encoded_data(uint32_t size, uint8_t* data)
+{
+    INSTRUCTION::urotseq_type out(size);
+    std::transform(data, data+size, out.begin(), [] (auto t) { return static_cast<INSTRUCTION::TYPE>(t); });
+    return out;
+}
+
+void
+_write_urotseq_to_encoded_data(uint32_t& size, uint8_t* data, const INSTRUCTION::urotseq_type& urotseq)
+{
+    size = urotseq.size();
+    std::transform(urotseq.begin(), urotseq.end(), data, [] (auto t) { return static_cast<uint8_t>(t); });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 template <class IO_FUNCTION> void
 _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& strm, const IO_FUNCTION& io_fn)
@@ -302,11 +354,32 @@ _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& str
         io_fn(strm, enc.angle, sizeof(io_encoding::fpa_type::word_type) * enc.fpa_word_count);
 
         // rotation sequence
-        io_fn(strm, &enc.urotseq_size, sizeof(enc.urotseq_size));
-        assert(enc.urotseq_size <= io_encoding::UROTSEQ_CAPACITY);
-        io_fn(strm, enc.urotseq, sizeof(uint8_t)*enc.urotseq_size);
+        _fill_or_consume_urotseq(strm, &enc.urotseq_size, enc.urotseq, io_fn);
+
+        // corrective rotation sequences:
+        if (GL_USE_RPC_ISA)
+        {
+            io_fn(strm, &enc.corr_urotseq_count, sizeof(enc.corr_urotseq_count));
+            assert(enc.corr_urotseq_count <= io_encoding::MAX_CORR_UROTSEQ);
+            for (size_t i = 0; i < enc.corr_urotseq_count; i++)
+                _fill_or_consume_urotseq(strm, enc.corr_urotseq_sizes+i, enc.corr_urotseq[i], io_fn);
+        }
     }
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class IO_FUNCTION> void
+_fill_or_consume_urotseq(generic_strm_type& strm, uint32_t* size_p, uint8_t* urotseq, const IO_FUNCTION& io_fn)
+{
+    io_fn(strm, size_p, sizeof(uint32_t));
+    assert(*size_p <= io_encoding::UROTSEQ_CAPACITY);
+    io_fn(strm, urotseq, sizeof(uint8_t)*(*size_p));
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 } // anon
 

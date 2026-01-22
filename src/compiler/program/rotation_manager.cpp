@@ -20,6 +20,17 @@
 #include <unordered_map>
 #include <vector>
 
+// Platform-specific headers for thread pinning
+#if defined(__linux__)
+    #include <pthread.h>
+    #include <sched.h>
+#elif defined(_WIN32)
+    #include <windows.h>
+#elif defined(__APPLE__)
+    #include <mach/thread_policy.h>
+    #include <pthread.h>
+#endif
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -162,6 +173,12 @@ constexpr INSTRUCTION::TYPE _flip_basis(INSTRUCTION::TYPE g);
 constexpr int8_t _get_rotation_value(INSTRUCTION::TYPE g);
 
 /*
+ * Pins the calling thread to a specific logical core.
+ * Returns true on success, false if platform unsupported or operation fails.
+ * */
+bool _pin_thread_to_core(size_t core_id);
+
+/*
  * In `_thread_iteration`, a thread will start synthesizing some pending
  * synthesis request.
  * */
@@ -208,8 +225,12 @@ rotation_manager_init(size_t num_threads)
     // spawn `num_threads` and detach them:
     for (size_t i = 0; i < num_threads; i++)
     {
-        std::thread th{ [] ()
+        std::thread th{ [i] ()
         {
+            // Pin thread to core (wraps around if more threads than cores)
+            size_t core_id = i % std::thread::hardware_concurrency();
+            _pin_thread_to_core(core_id);
+
             while (!RM_SIG_DONE.load())
                 _thread_iteration();
         }};
@@ -288,6 +309,48 @@ _make_angle(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     return comparable_float_type{convert_fpa_to_float(rotation), precision};
 #else
     return INSTRUCTION::fpa_type(rotation);
+#endif
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+_pin_thread_to_core(size_t core_id)
+{
+#if defined(__linux__)
+    // Linux: Use pthread_setaffinity_np with cpu_set_t
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+
+    pthread_t current_thread = pthread_self();
+    int result = pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
+    return result == 0;
+
+#elif defined(_WIN32)
+    // Windows: Use SetThreadAffinityMask with bitmask
+    DWORD_PTR mask = 1ULL << core_id;
+    DWORD_PTR result = SetThreadAffinityMask(GetCurrentThread(), mask);
+    return result != 0;
+
+#elif defined(__APPLE__)
+    // macOS: Use thread_policy_set with THREAD_AFFINITY_POLICY
+    thread_affinity_policy_data_t policy;
+    policy.affinity_tag = static_cast<integer_t>(core_id);
+
+    kern_return_t result = thread_policy_set(
+        pthread_mach_thread_np(pthread_self()),
+        THREAD_AFFINITY_POLICY,
+        reinterpret_cast<thread_policy_t>(&policy),
+        THREAD_AFFINITY_POLICY_COUNT
+    );
+    return result == KERN_SUCCESS;
+
+#else
+    // Unsupported platform
+    (void)core_id;  // Suppress unused parameter warning
+    return false;
 #endif
 }
 
@@ -485,6 +548,10 @@ _synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     {
         std::cout << "\treduced urotseq size from " << urotseq_original_size
                 << " to " << urotseq_reduced_size << "\n";
+        std::cout << "final sequence =";
+        for (auto t : out)
+            std::cout << " " << BASIS_GATES[static_cast<int>(t)];
+        std::cout << "\n";
     }
 
     return out;

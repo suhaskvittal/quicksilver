@@ -388,11 +388,19 @@ PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& an
 {
     // Given our basis gates, there can only be one parameter for rotation gates.
     fpa_type rotation = evaluate_expression(angle_expr).readout_fixed_point_angle();
+
     // ignore gates with an angle of 0:
     if (rotation.popcount() == 0)
         return fpa_type{};  // return zero angle
+                            
     // schedule the rotation's synthesis:
     rotation_manager_schedule_synthesis(rotation, _get_required_precision(rotation));
+    for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
+    {
+        auto corrective_rotation = fpa::scalar_mul(rotation, 2*(i+1));
+        rotation_manager_schedule_synthesis(corrective_rotation, _get_required_precision(corrective_rotation));
+    }
+
     return rotation;
 }
 
@@ -669,22 +677,38 @@ PROGRAM_INFO::complete_rotation_gates()
         ii++;
         if (is_rotation_instruction(inst->type))
         {
-            auto it = rotation_cache_.find(inst->angle);
-            if (it != rotation_cache_.end())
-            {
-                inst->urotseq = it->second;
-            }
-            else
-            {
-                inst->urotseq = rotation_manager_find(inst->angle, _get_required_precision(inst->angle));
-                rotation_cache_.insert({inst->angle, inst->urotseq});
-            }
-
+            inst->urotseq = retrieve_urotseq(inst->angle);
             if (inst->urotseq.empty())
                 std::cerr << "[alert] rotation synthesis yielded empty sequence for " << *inst << "\n";
+
+            // handle corrective rotations
+            for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
+            {
+                auto corrective_angle = fpa::scalar_mul(inst->angle, 2*(i+1));
+                inst->corr_urotseq_array.push_back(retrieve_urotseq(corrective_angle));
+            }
         }
     }
     std::cout << "\n";
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+INSTRUCTION::urotseq_type
+PROGRAM_INFO::retrieve_urotseq(const fpa_type& angle)
+{
+    auto it = rotation_cache_.find(angle);
+    if (it == rotation_cache_.end()) // miss
+    {
+        auto urotseq = rotation_manager_find(angle, _get_required_precision(angle));
+        rotation_cache_.insert({angle, urotseq});
+        return urotseq;
+    }
+    else
+    {
+        return it->second;
+    }
 }
 
 ////////////////////////////////////////////////////////////
