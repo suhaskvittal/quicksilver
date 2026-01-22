@@ -54,13 +54,15 @@ void
 print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIENT* c)
 {
     double ipc = c->ipc();
-
-    // kilo-instructions per second may be useful in some scenarios:
     double kips = mean(c->s_unrolled_inst_done / 1000, c->s_cycle_complete / (compute_subsystem->freq_khz*1e3));
+
+    double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
 
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
     print_stat_line(out, "    KIPS", kips);
+    print_stat_line(out, "    CYCLES", c->s_cycle_complete);
+    print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
 }
 
 void

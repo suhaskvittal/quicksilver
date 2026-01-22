@@ -36,7 +36,7 @@ class COMPUTE_SUBSYSTEM : public COMPUTE_BASE
 {
 public:
     using inst_ptr = COMPUTE_BASE::inst_ptr;
-    using ready_qubits_map = std::unordered_map<qubit_type, QUBIT*>;
+    using execute_result_type = COMPUTE_BASE::execute_result_type;
     using ctx_switch_condition_type = std::pair<CLIENT*, CLIENT*>;
 
     /*
@@ -60,6 +60,10 @@ public:
     uint64_t s_magic_state_produced_sum{0}; // note that this is used to compute T bandwidth
     uint64_t s_context_switches{0};
     uint64_t s_t_gate_teleports{0};
+
+    uint64_t s_successful_rpc{0};
+    uint64_t s_total_rpc{0};
+    uint64_t s_cycles_with_rpc_stalls{0};
 private:
     std::vector<CLIENT*> all_clients_;
 
@@ -95,7 +99,12 @@ private:
     /*
      * Subsystem for pre-computed rotation gates. If `nullptr`, then it is disabled.
      * */
-    ROTATION_SUBSYSTEM* rotation_subsystem_;
+    ROTATION_SUBSYSTEM* rotation_subsystem_{nullptr};
+
+    /*
+     * `had_rpc_stall_this_cycle_` is used to update `s_cycles_with_rpc_stalls`
+     * */
+    bool had_rpc_stall_this_cycle_;
 public:
     COMPUTE_SUBSYSTEM(double                         freq_khz,
                         std::vector<std::string>     client_trace_files,
@@ -125,6 +134,12 @@ private:
     void handle_completed_clients();
 
     /*
+     * This is a wrapper for `CLIENT::retire_instruction` that
+     * handles stats before retiring the instruction.
+     * */
+    void retire_instruction(CLIENT*, inst_ptr, cycle_type instruction_latency);
+
+    /*
      * During each `tick()`, the `OS` will check
      * if a context switch should occur using 
      * `context_switch_condition()`.
@@ -134,13 +149,20 @@ private:
     ctx_switch_condition_type context_switch_condition() const;
     void                      do_context_switch(CLIENT* incoming, CLIENT* outgoing);
 
-    size_t fetch_and_execute_instructions_from_client(CLIENT*, const ready_qubits_map&);
+    long fetch_and_execute_instructions_from_client(CLIENT*);
 
     /*
      * Executes the uops for a rotation gate. Upon a success, additional gates
      * are teleported onto the gate (max is `GL_T_TELEPORTATION_MAX`)
      * */
-    size_t do_rotation_gate_with_teleportation(inst_ptr, QUBIT*);
+    execute_result_type do_rotation_gate_with_teleportation(inst_ptr, QUBIT*);
+
+    /*
+     * Performs all rpc operations on an instruction (logical flow is handled within function).
+     * Returns true if instruction should be skipped in the iteration of 
+     * `fetch_and_execute_instructions_from_client()`
+     * */
+    bool rpc_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
 
     /*
      * On the first pass to a rotation gate, this function does:

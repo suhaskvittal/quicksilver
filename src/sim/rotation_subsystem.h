@@ -18,6 +18,7 @@ class ROTATION_SUBSYSTEM : public COMPUTE_BASE
 {
 public:
     using inst_ptr = COMPUTE_BASE::inst_ptr;
+    using execute_result_type = COMPUTE_BASE::execute_result_type;
 
     uint64_t s_rotations_completed{0};
 private:
@@ -79,7 +80,7 @@ public:
 protected:
     long operate() override;
 
-    bool do_t_like_gate(inst_ptr, QUBIT*) override;
+    execute_result_type do_t_like_gate(inst_ptr, QUBIT*) override;
 };
 
 ////////////////////////////////////////////////////////////

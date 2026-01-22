@@ -111,7 +111,8 @@ public:
     /*
      * Other exposed variables that may be useful:
      * */
-    bool deletable{false};
+    bool     deletable{false};
+    uint64_t first_ready_cycle{std::numeric_limits<uint64_t>::max()};
 
     /*
      * `rpc_*` variables correspond to variables used for
@@ -119,8 +120,12 @@ public:
      *
      * `rpc_has_been_visited` is used to track whether this
      * is the first time a given instruction has been seen.
+     *
+     * `rpc_is_critical` is set for a pending rotation that
+     * is currently in the DAG's front layer.
      * */
     bool rpc_has_been_visited{false};
+    bool rpc_is_critical{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

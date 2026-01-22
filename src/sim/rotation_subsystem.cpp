@@ -46,6 +46,8 @@ ROTATION_SUBSYSTEM::can_accept_rotation_request() const
 bool
 ROTATION_SUBSYSTEM::submit_rotation_request(inst_ptr inst)
 {
+    assert(!is_rotation_pending(inst));
+
     if (free_qubits_.empty())
         return false;
     QUBIT* q = free_qubits_.back();
@@ -104,16 +106,17 @@ ROTATION_SUBSYSTEM::operate()
             continue;
         if (q->cycle_available > current_cycle())
             continue;
-        bool success = execute_instruction(inst->current_uop(), {q});
-        if (success)
+        auto result = execute_instruction(inst->current_uop(), {q});
+        if (result.progress)
         {
-            progress++;
+            progress += result.progress;
             if (inst->retire_current_uop())
             {
                 // instruction is done -- reset uop progress for safety
                 inst->reset_uops();
                 free_qubits_.push_back(q);
                 q = nullptr;
+                assert(rotation_assignment_map_[inst] == nullptr);
             }
         }
     }
@@ -124,12 +127,12 @@ ROTATION_SUBSYSTEM::operate()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+ROTATION_SUBSYSTEM::execute_result_type
 ROTATION_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
 {
     const size_t m = count_available_magic_states();
-    if (m < watermark_*total_magic_state_count_at_cycle_start_ || m <= 1)
-        return false;
+    if (!inst->rpc_is_critical && (m < watermark_*total_magic_state_count_at_cycle_start_ || m <= 1))
+        return execute_result_type{};
     else
         return COMPUTE_BASE::do_t_like_gate(inst, q);
 }

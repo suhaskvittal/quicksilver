@@ -77,11 +77,11 @@ COMPUTE_BASE::memory_hierarchy() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
 {
     if (is_software_instruction(inst->type))
-        return true;
+        return execute_result_type{.progress=1, .latency=0};
 
     switch (inst->type)
     {
@@ -109,51 +109,52 @@ COMPUTE_BASE::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
         std::cerr << "COMPUTE_BASE::execute_instruction: unknown instruction: " << *inst << _die{};
     }
 
-    return false;
+    return execute_result_type{};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_h_or_s_gate(inst_ptr inst, QUBIT* q)
 {
     _update_available_cycle({q}, current_cycle()+2);
-    return true;
+    return execute_result_type{.progress=1, .latency=2};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_cx_like_gate(inst_ptr inst, QUBIT* q1, QUBIT* q2)
 {
     _update_available_cycle({q1, q2}, current_cycle()+2);
-    return true;
+    return execute_result_type{.progress=1, .latency=2};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
 {
     // search for an available magic state:
     auto f_it = std::find_if(top_level_t_factories_.begin(), top_level_t_factories_.end(),
                         [] (const auto* f) { return f->buffer_occupancy() > 0; });
     if (f_it == top_level_t_factories_.end())
-        return false;
+        return execute_result_type{};
 
     (*f_it)->consume(1);
     cycle_type latency = (GL_RNG() & 1) ? 4 : 2;
     _update_available_cycle({q}, current_cycle() + latency);
-    return true;
+    s_t_gates++;
+    return execute_result_type{.progress=1, .latency=latency};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
 {
     auto result = memory_hierarchy_->do_memory_access(ld, st);
@@ -169,8 +170,9 @@ COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
             std::cerr << _die{};
         }
         _update_available_cycle({ld, st}, current_cycle() + latency + 2);
+        return execute_result_type{.progress=1, .latency=latency+2};
     }
-    return result.success;
+    return execute_result_type{};
 }
 
 ////////////////////////////////////////////////////////////

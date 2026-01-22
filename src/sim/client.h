@@ -32,6 +32,9 @@ public:
     uint64_t s_unrolled_inst_done{0};
     uint64_t s_cycle_complete{std::numeric_limits<uint64_t>::max()};
 
+    uint64_t s_rotation_latency{0};
+    uint64_t s_total_rotation_uops{0};
+
     const std::string    trace_file;
     const client_id_type id;
 private:

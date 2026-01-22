@@ -40,6 +40,13 @@ CLIENT::retire_instruction(inst_ptr inst)
     s_inst_done++;
     s_unrolled_inst_done += inst->unrolled_inst_count();
     dag_->remove_instruction_from_front_layer(inst);
+
+    if (is_rotation_instruction(inst->type))
+    {
+        s_rotation_latency += inst->cycle_done - inst->first_ready_cycle;
+        s_total_rotation_uops += inst->uop_count();
+    }
+
     delete inst;
 }
 
@@ -90,6 +97,13 @@ CLIENT::read_instruction_from_trace()
 
     inst_ptr inst = read_instruction_from_stream(tristrm_);
     inst->number = s_inst_read++;
+
+    // go through and remove all software instructions from the `urotseq` if this is a
+    // rotation instruction:
+    auto it = std::remove_if(inst->urotseq.begin(), inst->urotseq.end(),
+                    [] (auto t) { return is_software_instruction(t); });
+    inst->urotseq.erase(it, inst->urotseq.end());
+
     return inst;
 }
 

@@ -66,6 +66,7 @@ main(int argc, char* argv[])
 
     int64_t memory_syndrome_extraction_round_time_ns;
 
+    int64_t factory_l2_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
     sim::compute_extended_config conf;
@@ -93,12 +94,14 @@ main(int argc, char* argv[])
                       "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
                       memory_syndrome_extraction_round_time_ns, 1300)
 
+        .optional("", "--factory-l2-buffer-capacity", "Number of magic states stored in an L2 factory buffer",
+                      factory_l2_buffer_capacity, 4)
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
 
         .parse(argc, argv);
 
-    conf.rpc_freq_khz = sim::compute_freq_khz(15 * compute_syndrome_extraction_round_time_ns);
+    conf.rpc_freq_khz = sim::compute_freq_khz(11 * compute_syndrome_extraction_round_time_ns);
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -134,7 +137,7 @@ main(int argc, char* argv[])
     {
         .is_cultivation=false,
         .syndrome_extraction_round_time_ns=compute_syndrome_extraction_round_time_ns,
-        .buffer_capacity=4,
+        .buffer_capacity=factory_l2_buffer_capacity,
         .output_error_rate=1e-12,
         .dx=25,
         .dz=11,
@@ -243,7 +246,15 @@ main(int argc, char* argv[])
                                                             [] (auto* s) { return s->physical_qubit_count; });
     size_t factory_physical_qubits = alloc.physical_qubit_count;
 
+    print_stat_line(std::cout, "TOTAL_SIMULATION_CYCLES", compute_subsystem->current_cycle());
+
+    print_stat_line(std::cout, "T_GATES_EXECUTED", compute_subsystem->s_t_gates);
     print_stat_line(std::cout, "T_GATE_TELEPORTATIONS", compute_subsystem->s_t_gate_teleports);
+
+    print_stat_line(std::cout, "RPC_TOTAL", compute_subsystem->s_total_rpc);
+    print_stat_line(std::cout, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
+    print_stat_line(std::cout, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
+
     for (auto* c : compute_subsystem->clients())
         sim::print_client_stats(std::cout, compute_subsystem, c);
 

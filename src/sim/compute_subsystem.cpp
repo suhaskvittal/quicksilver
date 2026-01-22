@@ -188,6 +188,7 @@ COMPUTE_SUBSYSTEM::operate()
 
     const size_t magic_states_before_exec{count_available_magic_states()};
     s_magic_state_produced_sum += magic_states_before_exec - magic_states_avail_last_cycle_;
+    had_rpc_stall_this_cycle_ = false;
 
     /* 1. Update clients and execute context switch if needed */
 
@@ -207,7 +208,7 @@ COMPUTE_SUBSYSTEM::operate()
                         {
                             const auto [q1, q2] = p;  // don't be fooled -- `q1` and `q2` are pointers.
                             if (q1->cycle_available <= current_cycle() && q2->cycle_available <= current_cycle())
-                                return do_memory_access(nullptr, q1, q2);
+                                return do_memory_access(nullptr, q1, q2).progress > 0;
                             else
                                 return false;
                         });
@@ -217,20 +218,12 @@ COMPUTE_SUBSYSTEM::operate()
 
     /* 3. Handle pending instructions for any active clients */
 
-    // construct the ready qubits map for each client:
-    std::vector<ready_qubits_map> ready_qubits_by_client(total_clients);
-    for (auto& m : ready_qubits_by_client)
-        m.reserve(local_memory_capacity / concurrent_clients);
-    for (auto* q : local_memory_->contents())
-        if (q->cycle_available <= current_cycle())
-            ready_qubits_by_client[q->client_id].insert({q->qubit_id, q});
-
     // process instructions for each client
     size_t ii{last_used_client_idx_};
     for (size_t i = 0; i < concurrent_clients; i++)
     {
         CLIENT* c = active_clients_[ii];
-        progress += fetch_and_execute_instructions_from_client(c, ready_qubits_by_client[c->id]);
+        progress += fetch_and_execute_instructions_from_client(c);
         ii++;
         if (ii >= concurrent_clients)
             ii = 0;
@@ -241,6 +234,8 @@ COMPUTE_SUBSYSTEM::operate()
 
     const size_t magic_states_after_exec{count_available_magic_states()};
     magic_states_avail_last_cycle_ = magic_states_after_exec;
+    if (had_rpc_stall_this_cycle_)
+        s_cycles_with_rpc_stalls++;
 
     return progress;
 }
@@ -275,6 +270,16 @@ COMPUTE_SUBSYSTEM::handle_completed_clients()
             c_it++;
         }
     }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE_SUBSYSTEM::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_latency)
+{
+    inst->cycle_done = current_cycle() + inst_latency;
+    c->retire_instruction(inst);
 }
 
 ////////////////////////////////////////////////////////////
@@ -323,96 +328,49 @@ COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t
-COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const ready_qubits_map& ready_qubits)
+long
+COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 {
-    ready_qubits_map in_mem_qubits;
-    in_mem_qubits.reserve(4);
-
     auto front_layer = c->get_ready_instructions(
-                            [&ready_qubits, &in_mem_qubits, &c, cc=current_cycle()] 
-                            (const auto* inst)
+                            [&c, cc=current_cycle()] (const auto* inst)
                             {
-                                if (is_memory_access(inst->type))
-                                {
-                                    // memory accesses need to be handled specially since one of the qubits
-                                    // is not in the active set.
-                                    const qubit_type incoming_id = inst->qubits[0],
-                                                     outgoing_id = inst->qubits[1];
-
-                                    // retrieve pointer to requested qubit from memory
-                                    auto* in_memory_qubit = c->qubits()[incoming_id];
-                                    in_mem_qubits.insert({incoming_id, in_memory_qubit});
-                                    
-                                    const bool incoming_ready = in_memory_qubit->cycle_available <= cc;
-                                    const bool outgoing_ready = ready_qubits.count(outgoing_id);
-
-                                    return incoming_ready && outgoing_ready;
-                                }
-                                else
-                                {
-                                    return std::all_of(inst->q_begin(), inst->q_end(),
-                                                [&ready_qubits] (auto q_id) { return ready_qubits.count(q_id) > 0; });
-                                }
+                                return std::all_of(inst->q_begin(), inst->q_end(),
+                                            [&c, cc] (auto q_id) { return c->qubits()[q_id]->cycle_available <= cc; });
                             });
 
-    size_t success_count{0};
+    long success_count{0};
     for (auto* inst : front_layer)
     {
+        inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
+
+        auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
+        std::array<QUBIT*, 3> operands{};
+        std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
+                [&c] (auto q_id) { return c->qubits()[q_id]; });
+        
         // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
         // and do other actions:
-        if (is_rotation_instruction(inst->type) && !inst->rpc_has_been_visited)
-        {
-            QUBIT* q = ready_qubits.at(inst->qubits[0]);
-            RPC_LOOKUP_RESULT lookup_result = rpc_lookup_rotation(inst, q);
-            if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
-            {
-                success_count++;
-                c->retire_instruction(inst);
-            }
-            else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
-            {
-                /*
-                std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client: todo"
-                        << " -- rpc lookup result returned in progress for " << *inst 
-                        << ", uops retired = " << rotation_subsystem_->get_rotation_progress(inst)
-                        << _die{};
-                        */
-            }
-            else
-            {
-                rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
-                inst->rpc_has_been_visited = true;
-            }
-            continue;
-        }
+        if (is_rpc_enabled() && is_rotation_instruction(inst->type) && !inst->rpc_has_been_visited)
+            if (rpc_handle_instruction(c, inst, operands[0]))
+                continue;
             
         // RZ and RX gates are a special case since multiple uops of progress can be done
         if (is_rotation_instruction(inst->type) && GL_T_GATE_TELEPORTATION_MAX > 0)
         {
-            QUBIT* q = ready_qubits.at(inst->qubits[0]);
-            size_t uops_retired_this_cycle = do_rotation_gate_with_teleportation(inst, q);
-            success_count += uops_retired_this_cycle;
+            QUBIT* q = operands[0];
+            auto result = do_rotation_gate_with_teleportation(inst, q);
+            success_count += result.progress;
             if (inst->uops_retired() == inst->uop_count())
-                c->retire_instruction(inst);
+                retire_instruction(c, inst, result.latency);
         }
         else
         {
-            auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-
-            std::array<QUBIT*, 3> operands{};
-            std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
-                    [&ready_qubits, &in_mem_qubits] (auto q_id) 
-                    { 
-                        return ready_qubits.count(q_id) > 0 ? ready_qubits.at(q_id) : in_mem_qubits.at(q_id);
-                    });
-            bool success = execute_instruction(executed_inst, std::move(operands));
-
-            if (success)
+            auto result = execute_instruction(executed_inst, std::move(operands));
+            if (result.progress)
             {
-                success_count++;
+                success_count += result.progress;
                 if (inst->uop_count() == 0 || inst->retire_current_uop())
-                    c->retire_instruction(inst);
+                    retire_instruction(c, inst, result.latency);
             }
         }
     }
@@ -422,19 +380,25 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const r
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t
+COMPUTE_BASE::execute_result_type
 COMPUTE_SUBSYSTEM::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q)
 {
     int tp_remaining{GL_T_GATE_TELEPORTATION_MAX+1};  // add +1 for initial uop (not counted for teleportation)
-    size_t count{0};
-    while (tp_remaining--)
+    long progress{0};
+    cycle_type latency{0};
+    while (tp_remaining)
     {
-        bool success = execute_instruction(inst->current_uop(), {q});
-        if (success)
+        auto result = execute_instruction(inst->current_uop(), {q});
+        if (result.progress)
         {
-            if (count)
-                s_t_gate_teleports++;
-            count++;
+            if (is_t_like_instruction(inst->current_uop()->type))
+            {
+                tp_remaining--;
+                if (progress)
+                    s_t_gate_teleports++;
+            }
+            progress += result.progress;
+            latency = result.latency;
             if (inst->retire_current_uop())
                 break;
         }
@@ -443,7 +407,33 @@ COMPUTE_SUBSYSTEM::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q)
             break;
         }
     }
-    return count;
+    return execute_result_type{.progress=progress, .latency=latency};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
+{
+    RPC_LOOKUP_RESULT lookup_result = rpc_lookup_rotation(inst, q);
+    if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
+    {
+        retire_instruction(c, inst, 2);
+        return true;
+    }
+    else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
+    {
+        inst->rpc_is_critical = true;
+        had_rpc_stall_this_cycle_ = true;
+        return true;
+    }
+    else
+    {
+        rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
+        inst->rpc_has_been_visited = true;
+    }
+    return false;
 }
 
 ////////////////////////////////////////////////////////////
@@ -460,6 +450,11 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
     {
         bool success = (GL_RNG()&1) > 0;
         q->cycle_available = current_cycle() + 2; // it takes 2 cycles to attempt the teleportation.
+
+        s_total_rpc++;
+        if (success)
+            s_successful_rpc++;
+
         return success ? RPC_LOOKUP_RESULT::RETIRE : RPC_LOOKUP_RESULT::NEEDS_CORRECTION;
     }
     else if (rotation_subsystem_->is_rotation_pending(inst))
@@ -481,16 +476,17 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{1};
     constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{8};
 
-    if (!is_rpc_enabled())
+    if (!is_rpc_enabled() || !rotation_subsystem_->can_accept_rotation_request())
         return;
     assert(is_rotation_instruction(inst->type));
 
     auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
-                                    [inst] (inst_ptr x) 
+                                    [inst, rs=rotation_subsystem_] (inst_ptr x) 
                                     { 
                                         return x != inst 
                                                 && is_rotation_instruction(x->type)
-                                                && !x->rpc_has_been_visited;
+                                                && !x->rpc_has_been_visited
+                                                && !rs->is_rotation_pending(x);
                                     }, 
                                     inst, 
                                     RPC_DAG_LOOKAHEAD_START_LAYER,

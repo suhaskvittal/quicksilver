@@ -30,6 +30,17 @@ class COMPUTE_BASE : public OPERABLE
 public:
     using inst_ptr = CLIENT::inst_ptr;
 
+    /*
+     * Results of `execute_instruction()`
+     * */
+    struct execute_result_type
+    {
+        long       progress{0};
+        cycle_type latency;
+    };
+
+    uint64_t s_t_gates{0};
+
     const size_t local_memory_capacity;
 protected:
     std::unique_ptr<STORAGE>     local_memory_;
@@ -46,12 +57,12 @@ public:
     const std::vector<T_FACTORY_BASE*>& top_level_t_factories() const;
     MEMORY_SUBSYSTEM*                   memory_hierarchy() const;
 protected:
-    virtual bool execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
+    virtual execute_result_type execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
 
-    virtual bool do_h_or_s_gate(inst_ptr, QUBIT*);
-    virtual bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
-    virtual bool do_t_like_gate(inst_ptr, QUBIT*);
-    virtual bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
+    virtual execute_result_type do_h_or_s_gate(inst_ptr, QUBIT*);
+    virtual execute_result_type do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
+    virtual execute_result_type do_t_like_gate(inst_ptr, QUBIT*);
+    virtual execute_result_type do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
 
     size_t count_available_magic_states() const;
 };
