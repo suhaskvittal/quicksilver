@@ -7,6 +7,7 @@
 #define SIM_COMPUTE_SUBSYSTEM_h
 
 #include "sim/compute_base.h"
+#include "sim/rotation_subsystem.h"
 
 #include <array>
 #include <deque>
@@ -15,6 +16,18 @@
 
 namespace sim
 {
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+struct compute_extended_config
+{
+    /* RPC parameters */
+    bool   rpc_enabled{false};
+    double rpc_freq_khz;
+    int64_t rpc_capacity{2};
+    double rpc_watermark{0.5};
+};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -35,6 +48,8 @@ public:
         cycle_type          cycle_saved{};
     };
 
+    enum class RPC_LOOKUP_RESULT { NOT_FOUND, IN_PROGRESS, NEEDS_CORRECTION, RETIRE };
+
     const size_t   concurrent_clients;
     const size_t   total_clients;
     const uint64_t simulation_instructions;
@@ -42,7 +57,9 @@ public:
     /*
      * Statistics:
      * */
+    uint64_t s_magic_state_produced_sum{0}; // note that this is used to compute T bandwidth
     uint64_t s_context_switches{0};
+    uint64_t s_t_gate_teleports{0};
 private:
     std::vector<CLIENT*> all_clients_;
 
@@ -68,6 +85,17 @@ private:
      * */
     std::vector<context_type>              client_context_table_;
     std::vector<std::pair<QUBIT*, QUBIT*>> context_switch_memory_access_buffer_;
+
+    /*
+     * For calculating `s_magic_state_avail_sum` -- this is the number of magic states
+     * available last cycle
+     * */
+    size_t magic_states_avail_last_cycle_{0};
+
+    /*
+     * Subsystem for pre-computed rotation gates. If `nullptr`, then it is disabled.
+     * */
+    ROTATION_SUBSYSTEM* rotation_subsystem_;
 public:
     COMPUTE_SUBSYSTEM(double                         freq_khz,
                         std::vector<std::string>     client_trace_files,
@@ -75,7 +103,8 @@ public:
                         size_t                       concurrent_clients,
                         uint64_t                     simulation_instructions,
                         std::vector<T_FACTORY_BASE*> top_level_t_factories,
-                        MEMORY_SUBSYSTEM*            memory_hierarchy);
+                        MEMORY_SUBSYSTEM*            memory_hierarchy,
+                        compute_extended_config);
     ~COMPUTE_SUBSYSTEM();
 
     void print_progress(std::ostream&) const override;
@@ -83,6 +112,13 @@ public:
 
     bool done() const;
     const std::vector<CLIENT*>& clients() const;
+
+    ROTATION_SUBSYSTEM* rotation_subsystem() const;
+
+    /*
+     * rpc = "Rotation Pre-Computation". This returns true if `rotation_subsystem_ != nullptr`
+     * */
+    bool is_rpc_enabled() const;
 protected:
     long operate() override;
 private:
@@ -99,6 +135,37 @@ private:
     void                      do_context_switch(CLIENT* incoming, CLIENT* outgoing);
 
     size_t fetch_and_execute_instructions_from_client(CLIENT*, const ready_qubits_map&);
+
+    /*
+     * Executes the uops for a rotation gate. Upon a success, additional gates
+     * are teleported onto the gate (max is `GL_T_TELEPORTATION_MAX`)
+     * */
+    size_t do_rotation_gate_with_teleportation(inst_ptr, QUBIT*);
+
+    /*
+     * On the first pass to a rotation gate, this function does:
+     *  (1) If the rotation is already precomputed, then the gate is teleported onto the
+     *      given qubit.
+     *          Upon success, this function returns `RPC_LOOKUP_RESULT::RETIRE`.
+     *          Upon failure, this function returns `RPC_LOOKUP_RESULT::NEEDS_CORRECTION`
+     *          to indicate that the corrective gate must be applied.
+     *
+     *  (2) If the rotation is partially recomputed, then `RPC_LOOKUP_RESULT::IN_PROGRESS`
+     *      is returned. The compute subsystem can either choose to invalidate the rotation or
+     *      wait until the rotation gate completes.
+     *
+     *  (3) If the rotation is not present, then `RPC_LOOKUP_RESULT::NOT_FOUND` is returned
+     *      and the rotation must execute as normal.
+     * */
+    RPC_LOOKUP_RESULT rpc_lookup_rotation(inst_ptr, QUBIT*);
+
+    /*
+     * This function finds a rotation dependent on the given instruction
+     * deeper into the given client's DAG.
+     * If a rotation is found, then the function will try to allocate
+     * a qubit for it in `rotation_subsystem_`.
+     * */
+    void rpc_find_and_attempt_allocate_for_future_rotation(CLIENT*, inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////
@@ -106,4 +173,4 @@ private:
 
 }  // namespace sim
 
-#endif  // SIME_COMPUTE_SUBSYSTEM_h
+#endif  // SIM_COMPUTE_SUBSYSTEM_h

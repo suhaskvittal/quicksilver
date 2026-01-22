@@ -81,10 +81,23 @@ public:
     std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
 
     /*
-     * Executes the given callback for up-to `max_layer`
+     * Executes the given callback for `min_layer` to `max_layer`
      * */
     template <class CALLBACK>
-    void for_each_instruction_in_layer_order(const CALLBACK&, size_t max_layer) const;
+    void for_each_instruction_in_layer_order(const CALLBACK&, size_t min_layer, size_t max_layer) const;
+
+    /*
+     * Finds the earliest instruction dependent on the given instruction in the front layer
+     * that satisfies the given predicate (not including the input instruction).
+     *
+     * Search is limited from `min_layer` to `max_layer`. If no such instruction is found, then
+     * `nullptr` is returned.
+     * */
+    template <class PRED>
+    inst_ptr find_earliest_dependent_instruction_such_that(const PRED&, 
+                                                            inst_ptr, 
+                                                            size_t min_layer,
+                                                            size_t max_layer) const;
 
     size_t inst_count() const;
 };

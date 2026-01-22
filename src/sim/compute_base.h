@@ -52,6 +52,8 @@ protected:
     virtual bool do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
     virtual bool do_t_like_gate(inst_ptr, QUBIT*);
     virtual bool do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
+
+    size_t count_available_magic_states() const;
 };
 
 ////////////////////////////////////////////////////////////

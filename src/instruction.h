@@ -112,6 +112,15 @@ public:
      * Other exposed variables that may be useful:
      * */
     bool deletable{false};
+
+    /*
+     * `rpc_*` variables correspond to variables used for
+     * rotation precomputation. 
+     *
+     * `rpc_has_been_visited` is used to track whether this
+     * is the first time a given instruction has been seen.
+     * */
+    bool rpc_has_been_visited{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute
@@ -156,6 +165,11 @@ public:
      * This function returns true if all uops are done.
      * */
     bool retire_current_uop();
+    
+    /*
+     * This instruction resets the number of uops retired
+     * */
+    void reset_uops();
 
     size_t       uops_retired() const;
     INSTRUCTION* current_uop() const;

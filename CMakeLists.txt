@@ -116,6 +116,7 @@ set(SIM_FILES
     src/sim/factory.cpp
     src/sim/memory_subsystem.cpp
     src/sim/operable.cpp
+    src/sim/rotation_subsystem.cpp
     src/sim/storage.cpp
     src/sim.cpp)
 

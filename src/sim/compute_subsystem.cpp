@@ -28,7 +28,8 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
                                      size_t                       _concurrent_clients,
                                      uint64_t                     _simulation_instructions,
                                      std::vector<T_FACTORY_BASE*> top_level_t_factories,
-                                     MEMORY_SUBSYSTEM*            memory_hierarchy)
+                                     MEMORY_SUBSYSTEM*            memory_hierarchy,
+                                     compute_extended_config      conf)
     :COMPUTE_BASE("compute_subsystem", freq_khz, local_memory_capacity, top_level_t_factories, memory_hierarchy),
     concurrent_clients(_concurrent_clients),
     total_clients(client_trace_files.size()),
@@ -65,12 +66,25 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
         client_context_table_[c->id].active_qubits.assign(q_begin, q_end);
     }
     context_switch_memory_access_buffer_.reserve(active_qubits_per_client);
+
+    /* Extended config setup */
+    if (conf.rpc_enabled)
+    {
+        rotation_subsystem_ = new ROTATION_SUBSYSTEM(conf.rpc_freq_khz, 
+                                                    conf.rpc_capacity,
+                                                    top_level_t_factories,
+                                                    memory_hierarchy,
+                                                    conf.rpc_watermark);
+    }
 }
 
 COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
 {
     for (auto* c : all_clients_)
         delete c;
+
+    if (rotation_subsystem_ != nullptr)
+        delete rotation_subsystem_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -79,7 +93,14 @@ COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
 void
 COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
 {
-    std::cout << "cycle " << current_cycle() << " -------------------------------------------------------------\n";
+    std::cout << "cycle " << current_cycle() << " -------------------------------------------------------------";
+
+    double t_bandwidth = mean(s_magic_state_produced_sum, current_cycle());
+    double t_bandwidth_per_s = mean(s_magic_state_produced_sum, current_cycle() / (1e3*freq_khz));
+
+    ostrm << "\nwalltime = " << sim::walltime_s() << "s"
+        << "\nt bandwidth (#/cycle) = " << t_bandwidth << " (#/s) = " << t_bandwidth_per_s
+        << "\n";
 
     for (auto* c : all_clients_)
     {
@@ -143,6 +164,18 @@ COMPUTE_SUBSYSTEM::clients() const
     return all_clients_;
 }
 
+ROTATION_SUBSYSTEM*
+COMPUTE_SUBSYSTEM::rotation_subsystem() const
+{
+    return rotation_subsystem_;
+}
+
+bool
+COMPUTE_SUBSYSTEM::is_rpc_enabled() const
+{
+    return rotation_subsystem_ != nullptr;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -150,6 +183,11 @@ long
 COMPUTE_SUBSYSTEM::operate()
 {
     long progress{0};
+
+    /* Update stats (pre-execution) */
+
+    const size_t magic_states_before_exec{count_available_magic_states()};
+    s_magic_state_produced_sum += magic_states_before_exec - magic_states_avail_last_cycle_;
 
     /* 1. Update clients and execute context switch if needed */
 
@@ -198,6 +236,12 @@ COMPUTE_SUBSYSTEM::operate()
             ii = 0;
     }
     last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
+
+    /* Update stats (post-execution) */
+
+    const size_t magic_states_after_exec{count_available_magic_states()};
+    magic_states_avail_last_cycle_ = magic_states_after_exec;
+
     return progress;
 }
 
@@ -315,23 +359,147 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c, const r
     size_t success_count{0};
     for (auto* inst : front_layer)
     {
-        auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-
-        std::array<QUBIT*, 3> operands{};
-        std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
-                [&ready_qubits, &in_mem_qubits] (auto q_id) 
-                { 
-                    return ready_qubits.count(q_id) > 0 ? ready_qubits.at(q_id) : in_mem_qubits.at(q_id);
-                });
-        bool success = execute_instruction(executed_inst, std::move(operands));
-        if (success)
+        // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
+        // and do other actions:
+        if (is_rotation_instruction(inst->type) && !inst->rpc_has_been_visited)
         {
-            success_count++;
-            if (inst->uop_count() == 0 || inst->retire_current_uop())
+            QUBIT* q = ready_qubits.at(inst->qubits[0]);
+            RPC_LOOKUP_RESULT lookup_result = rpc_lookup_rotation(inst, q);
+            if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
+            {
+                success_count++;
                 c->retire_instruction(inst);
+            }
+            else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
+            {
+                /*
+                std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client: todo"
+                        << " -- rpc lookup result returned in progress for " << *inst 
+                        << ", uops retired = " << rotation_subsystem_->get_rotation_progress(inst)
+                        << _die{};
+                        */
+            }
+            else
+            {
+                rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
+                inst->rpc_has_been_visited = true;
+            }
+            continue;
+        }
+            
+        // RZ and RX gates are a special case since multiple uops of progress can be done
+        if (is_rotation_instruction(inst->type) && GL_T_GATE_TELEPORTATION_MAX > 0)
+        {
+            QUBIT* q = ready_qubits.at(inst->qubits[0]);
+            size_t uops_retired_this_cycle = do_rotation_gate_with_teleportation(inst, q);
+            success_count += uops_retired_this_cycle;
+            if (inst->uops_retired() == inst->uop_count())
+                c->retire_instruction(inst);
+        }
+        else
+        {
+            auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
+
+            std::array<QUBIT*, 3> operands{};
+            std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
+                    [&ready_qubits, &in_mem_qubits] (auto q_id) 
+                    { 
+                        return ready_qubits.count(q_id) > 0 ? ready_qubits.at(q_id) : in_mem_qubits.at(q_id);
+                    });
+            bool success = execute_instruction(executed_inst, std::move(operands));
+
+            if (success)
+            {
+                success_count++;
+                if (inst->uop_count() == 0 || inst->retire_current_uop())
+                    c->retire_instruction(inst);
+            }
         }
     }
     return success_count;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+COMPUTE_SUBSYSTEM::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q)
+{
+    int tp_remaining{GL_T_GATE_TELEPORTATION_MAX+1};  // add +1 for initial uop (not counted for teleportation)
+    size_t count{0};
+    while (tp_remaining--)
+    {
+        bool success = execute_instruction(inst->current_uop(), {q});
+        if (success)
+        {
+            if (count)
+                s_t_gate_teleports++;
+            count++;
+            if (inst->retire_current_uop())
+                break;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return count;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE_SUBSYSTEM::RPC_LOOKUP_RESULT
+COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
+{
+    if (!is_rpc_enabled())
+        return RPC_LOOKUP_RESULT::NOT_FOUND;
+    assert(is_rotation_instruction(inst->type));
+
+    if (rotation_subsystem_->find_and_delete_rotation_if_done(inst))
+    {
+        bool success = (GL_RNG()&1) > 0;
+        q->cycle_available = current_cycle() + 2; // it takes 2 cycles to attempt the teleportation.
+        return success ? RPC_LOOKUP_RESULT::RETIRE : RPC_LOOKUP_RESULT::NEEDS_CORRECTION;
+    }
+    else if (rotation_subsystem_->is_rotation_pending(inst))
+    {
+        return RPC_LOOKUP_RESULT::IN_PROGRESS;
+    }
+    else
+    {
+        return RPC_LOOKUP_RESULT::NOT_FOUND;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
+{
+    constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{1};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{8};
+
+    if (!is_rpc_enabled())
+        return;
+    assert(is_rotation_instruction(inst->type));
+
+    auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
+                                    [inst] (inst_ptr x) 
+                                    { 
+                                        return x != inst 
+                                                && is_rotation_instruction(x->type)
+                                                && !x->rpc_has_been_visited;
+                                    }, 
+                                    inst, 
+                                    RPC_DAG_LOOKAHEAD_START_LAYER,
+                                    RPC_DAG_LOOKAHEAD_DEPTH);
+    if (dependent_inst != nullptr)
+    {
+        assert(dependent_inst != inst);
+        rotation_subsystem_->submit_rotation_request(dependent_inst);
+    }
 }
 
 ////////////////////////////////////////////////////////////

@@ -52,6 +52,15 @@ extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
 ////////////////////////////////////////////////////////////
 
 /*
+ * Enable T gate teleportation via GHZ gates (default 0 -- T gates are directly applied on
+ * target qubit).
+ * */
+extern int64_t GL_T_GATE_TELEPORTATION_MAX;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
  * Implementation flags -- use this to setup your own designs
  * */
 

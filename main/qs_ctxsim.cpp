@@ -419,7 +419,7 @@ ctxsim_do_context_switch(sim::CLIENT* c, cycle_type ctx_switch_latency)
                                     {
                                         if (is_rotation_instruction(inst->type))
                                             future_rotations.push_back(inst);
-                                    }, 128);
+                                    }, 0, 128);
         size_t idx = 0;
         auto& rb = CTX_ROTATION_BUFFER[CTX_ACTIVE_CLIENT->id];
         for (auto& e : rb)

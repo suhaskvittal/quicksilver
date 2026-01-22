@@ -176,6 +176,18 @@ COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+size_t
+COMPUTE_BASE::count_available_magic_states() const
+{
+    return std::transform_reduce(top_level_t_factories_.begin(), top_level_t_factories_.end(),
+                                size_t{0},
+                                std::plus<size_t>{},
+                                [] (const auto* f) { return f->buffer_occupancy(); });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 /* HELPER FUNCTION DEFINITIONS START HERE */
 
 namespace
@@ -188,7 +200,7 @@ void
 _update_available_cycle(std::vector<QUBIT*> qubits, cycle_type c)
 {
     for (auto* q : qubits)
-        q->cycle_available = c;
+        q->cycle_available = std::max(q->cycle_available, c);
 }
 
 ////////////////////////////////////////////////////////////

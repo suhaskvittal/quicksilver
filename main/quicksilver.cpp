@@ -68,6 +68,8 @@ main(int argc, char* argv[])
 
     int64_t factory_physical_qubit_budget;
 
+    sim::compute_extended_config conf;
+
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
@@ -82,6 +84,10 @@ main(int argc, char* argv[])
         .optional("", "--compute-syndrome-extraction-round-time-ns", 
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_syndrome_extraction_round_time_ns, 1200)
+        .optional("-ttpl", "--t-teleport-limit", "Max number of T gate teleportations after initial T gate", sim::GL_T_GATE_TELEPORTATION_MAX, 0)
+        .optional("-rpc", "--rpc", "Enable rotation precomputation", conf.rpc_enabled, false)
+        .optional("", "--rpc-capacity", "Amount of rotation precomputation storage", conf.rpc_capacity, 2)
+        .optional("", "--rpc-watermark", "Watermark for rotation precomputation", conf.rpc_watermark, 0.5)
 
         .optional("", "--memory-syndrome-extraction-round-time-ns", 
                       "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
@@ -91,6 +97,8 @@ main(int argc, char* argv[])
                       factory_physical_qubit_budget, 50000)
 
         .parse(argc, argv);
+
+    conf.rpc_freq_khz = sim::compute_freq_khz(15 * compute_syndrome_extraction_round_time_ns);
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -118,7 +126,7 @@ main(int argc, char* argv[])
         .buffer_capacity=1,
         .output_error_rate=1e-6,
         .escape_distance=13,
-        .round_length=25,
+        .round_length=18,
         .probability_of_success=0.2
     };
 
@@ -172,7 +180,8 @@ main(int argc, char* argv[])
                                                                              concurrent_clients,
                                                                              inst_sim,
                                                                              alloc.second_level,
-                                                                             memory_subsystem};
+                                                                             memory_subsystem,
+                                                                             conf};
 
     /* initialize simulation */
 
@@ -181,6 +190,10 @@ main(int argc, char* argv[])
     std::copy(memory_subsystem->storages().begin(), memory_subsystem->storages().end(), std::back_inserter(all_operables));
     std::copy(alloc.first_level.begin(), alloc.first_level.end(), std::back_inserter(all_operables));
     std::copy(alloc.second_level.begin(), alloc.second_level.end(), std::back_inserter(all_operables));
+
+    if (compute_subsystem->is_rpc_enabled())
+        all_operables.push_back(compute_subsystem->rotation_subsystem());
+
     sim::coordinate_clock_scale(all_operables);
 
     std::cout << "simulation parameters:"
@@ -192,6 +205,7 @@ main(int argc, char* argv[])
 
     /* run simulation */
 
+    sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
     uint64_t last_print_cycle{0};
     do
     {
@@ -212,6 +226,9 @@ main(int argc, char* argv[])
             f->tick();
 
         memory_subsystem->tick();
+        
+        if (compute_subsystem->is_rpc_enabled())
+            compute_subsystem->rotation_subsystem()->tick();
         compute_subsystem->tick();
     }
     while (!compute_subsystem->done());
@@ -226,8 +243,13 @@ main(int argc, char* argv[])
                                                             [] (auto* s) { return s->physical_qubit_count; });
     size_t factory_physical_qubits = alloc.physical_qubit_count;
 
+    print_stat_line(std::cout, "T_GATE_TELEPORTATIONS", compute_subsystem->s_t_gate_teleports);
     for (auto* c : compute_subsystem->clients())
         sim::print_client_stats(std::cout, compute_subsystem, c);
+
+    sim::print_stats_for_factories(std::cout, "L1_FACTORY", alloc.first_level);
+    sim::print_stats_for_factories(std::cout, "L2_FACTORY", alloc.second_level);
+
     print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
     print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
     print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", factory_physical_qubits);

@@ -20,6 +20,8 @@ std::mt19937_64 GL_RNG{0};
 int64_t GL_PRINT_PROGRESS_FREQUENCY{1'000'000};
 int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{5000};
 
+int64_t GL_T_GATE_TELEPORTATION_MAX{0};
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -59,6 +61,7 @@ print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIE
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
     print_stat_line(out, "    KIPS", kips);
+}
 
 void
 print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<T_FACTORY_BASE*> factories)
