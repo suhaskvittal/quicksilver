@@ -35,6 +35,7 @@ public:
      * */
     uint64_t s_production_attempts{0};
     uint64_t s_failures{0};
+    uint64_t s_consumed{0};
 protected:
     /*
      * Number of magic states in local buffer (max `buffer_capacity`)

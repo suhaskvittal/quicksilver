@@ -145,7 +145,11 @@ COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
         return execute_result_type{};
 
     (*f_it)->consume(1);
-    cycle_type latency = (GL_RNG() & 1) ? 4 : 2;
+    cycle_type latency;
+    if (GL_ZERO_LATENCY_T_GATES)
+        latency = 0;
+    else
+        latency = (GL_RNG() & 1) ? 4 : 2;
     _update_available_cycle({q}, current_cycle() + latency);
     s_t_gates++;
     return execute_result_type{.progress=1, .latency=latency};
@@ -173,6 +177,16 @@ COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
         return execute_result_type{.progress=1, .latency=latency+2};
     }
     return execute_result_type{};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+COMPUTE_BASE::execute_result_type
+COMPUTE_BASE::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q, size_t max_teleports)
+{
+    return do_rotation_gate_with_teleportation_while_predicate_holds(inst, q, max_teleports,
+                [] (const auto*, const auto*) { return true; });
 }
 
 ////////////////////////////////////////////////////////////

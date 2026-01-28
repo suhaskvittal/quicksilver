@@ -79,8 +79,6 @@ public:
     size_t get_rotation_progress(inst_ptr) const;
 protected:
     long operate() override;
-
-    execute_result_type do_t_like_gate(inst_ptr, QUBIT*) override;
 };
 
 ////////////////////////////////////////////////////////////

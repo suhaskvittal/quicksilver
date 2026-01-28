@@ -11,6 +11,7 @@
 #include "globals.h"
 
 #include <array>
+#include <deque>
 #include <iosfwd>
 #include <vector>
 
@@ -107,7 +108,7 @@ public:
      *
      * By default, this is not initialized since it is a niche use case.
      * */
-    std::vector<urotseq_type> corr_urotseq_array{};
+    std::deque<urotseq_type> corr_urotseq_array{};
 
     /*
      * Same value as `get_inst_qubit_count(type)`
@@ -123,9 +124,13 @@ public:
 
     /*
      * Other exposed variables that may be useful:
+     *  `deletable` is useful for `std::remove + std::erase` patterns
+     *  `first_ready_cycle` is useful for computing instruction latency
+     *  `original_unrolled_inst_count` is useful for rotation instructions as `urotseq` may be modified
      * */
     bool     deletable{false};
     uint64_t first_ready_cycle{std::numeric_limits<uint64_t>::max()};
+    uint64_t original_unrolled_inst_count{};
 
     /*
      * `rpc_*` variables correspond to variables used for

@@ -71,6 +71,8 @@ main(int argc, char* argv[])
 
     sim::compute_extended_config conf;
 
+    bool bsol_sync_to_l2_factory;
+
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
@@ -99,12 +101,19 @@ main(int argc, char* argv[])
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
 
+        /*
+         * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of
+         * it
+         * */
+        .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
+        .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
+        .optional("", "--bsol-sync", "BW SoL: sync compute to L2 factory", bsol_sync_to_l2_factory, false)
+
         .parse(argc, argv);
 
-    if (conf.rpc_enabled)
-        GL_USE_RPC_ISA = 1;
+    GL_USE_RPC_ISA = 1;
 
-    conf.rpc_freq_khz = sim::compute_freq_khz(11 * compute_syndrome_extraction_round_time_ns);
+    conf.rpc_freq_khz = sim::compute_freq_khz(17 * compute_syndrome_extraction_round_time_ns);
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -179,7 +188,12 @@ main(int argc, char* argv[])
 
     /* initialize compute subsystem */
 
-    const double c_freq_khz = sim::compute_freq_khz(COMPUTE_CODE_DISTANCE * compute_syndrome_extraction_round_time_ns);
+    double c_freq_khz;
+    if (bsol_sync_to_l2_factory)
+        c_freq_khz = sim::compute_freq_khz(l2_spec.dm * compute_syndrome_extraction_round_time_ns);
+    else
+        c_freq_khz = sim::compute_freq_khz(COMPUTE_CODE_DISTANCE * compute_syndrome_extraction_round_time_ns);
+
     sim::COMPUTE_SUBSYSTEM* compute_subsystem = new sim::COMPUTE_SUBSYSTEM{c_freq_khz,
                                                                              traces,
                                                                              compute_local_memory_capacity,
@@ -240,26 +254,20 @@ main(int argc, char* argv[])
     while (!compute_subsystem->done());
 
     /* print stats */
+
     size_t compute_physical_qubits = sim::configuration::surface_code_physical_qubit_count(COMPUTE_CODE_DISTANCE)
                                             * compute_local_memory_capacity;
-    size_t memory_physical_qubits = std::transform_reduce(memory_subsystem->storages().begin(), 
+    size_t memory_physical_qubits = std::transform_reduce(memory_subsystem->storages().begin(),
                                                             memory_subsystem->storages().end(),
                                                             size_t{0},
                                                             std::plus<size_t>{},
                                                             [] (auto* s) { return s->physical_qubit_count; });
     size_t factory_physical_qubits = alloc.physical_qubit_count;
+    double t_throughput_per_cycle = estimate_throughput_of_allocation(alloc, true)
+                                        * (1.0/(1e3*compute_subsystem->freq_khz));
 
-    print_stat_line(std::cout, "TOTAL_SIMULATION_CYCLES", compute_subsystem->current_cycle());
 
-    print_stat_line(std::cout, "T_GATES_EXECUTED", compute_subsystem->s_t_gates);
-    print_stat_line(std::cout, "T_GATE_TELEPORTATIONS", compute_subsystem->s_t_gate_teleports);
-
-    print_stat_line(std::cout, "RPC_TOTAL", compute_subsystem->s_total_rpc);
-    print_stat_line(std::cout, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
-    print_stat_line(std::cout, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
-
-    for (auto* c : compute_subsystem->clients())
-        sim::print_client_stats(std::cout, compute_subsystem, c);
+    sim::print_compute_subsystem_stats(std::cout, compute_subsystem);
 
     sim::print_stats_for_factories(std::cout, "L1_FACTORY", alloc.first_level);
     sim::print_stats_for_factories(std::cout, "L2_FACTORY", alloc.second_level);
@@ -267,6 +275,8 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
     print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
     print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", factory_physical_qubits);
+    print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_CYCLE", t_throughput_per_cycle);
+    print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", estimate_throughput_of_allocation(alloc, true));
 
     /* cleanup simulation */
 
@@ -339,7 +349,7 @@ jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
 
     compile::memory_scheduler::config_type conf;
     conf.active_set_capacity = active_set_capacity;
-    conf.inst_compile_limit = static_cast<int64_t>(1.2 * inst_sim);
+    conf.inst_compile_limit = static_cast<int64_t>(5 * inst_sim);
     conf.print_progress_frequency = 0;
     conf.dag_inst_capacity = 100000;
     conf.hint_lookahead_depth = 256;

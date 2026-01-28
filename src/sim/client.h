@@ -74,7 +74,7 @@ public:
     bool eof() const;
 
     const std::unique_ptr<DAG>& dag() const;
-    const double                ipc() const;
+    double                      ipc() const;
     const std::vector<QUBIT*>&  qubits() const;
 private:
     size_t   open_file_and_read_qubit_count();

@@ -57,6 +57,12 @@ extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
  * */
 extern int64_t GL_T_GATE_TELEPORTATION_MAX;
 
+/*
+ * These variables are just for debugging/speed-of-light analysis:
+ * */
+extern bool GL_ELIDE_CLIFFORDS;
+extern bool GL_ZERO_LATENCY_T_GATES;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -80,7 +86,7 @@ double walltime_s();
  * Stat printing utilities:
  * */
 
-void print_client_stats(std::ostream&, COMPUTE_SUBSYSTEM*, CLIENT*);
+void print_compute_subsystem_stats(std::ostream&, COMPUTE_SUBSYSTEM*);
 void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<T_FACTORY_BASE*>);
 
 ////////////////////////////////////////////////////////////

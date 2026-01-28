@@ -262,12 +262,15 @@ read_instruction_from_stream(generic_strm_type& istrm)
     auto                      q_begin = std::begin(enc.qubits);
     auto                      q_end = q_begin + get_inst_qubit_count(type);
     INSTRUCTION::fpa_type     angle(std::begin(enc.angle), std::end(enc.angle));
-    INSTRUCTION::urotseq_type urotseq = _retrieve_urotseq_from_encoded_data(enc.urotseq_size, enc.urotseq);
+    INSTRUCTION::urotseq_type urotseq;
+
+    if (is_rotation_instruction(type))
+        urotseq = _retrieve_urotseq_from_encoded_data(enc.urotseq_size, enc.urotseq);
 
     INSTRUCTION* inst = new INSTRUCTION{type, q_begin, q_end, angle, urotseq.begin(), urotseq.end()};
 
     // if there any corrective urotseq, handle now:
-    if (GL_USE_RPC_ISA)
+    if (GL_USE_RPC_ISA && is_rotation_instruction(type))
     {
         for (size_t i = 0; i < enc.corr_urotseq_count; i++)
         {

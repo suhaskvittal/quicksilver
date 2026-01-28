@@ -14,6 +14,9 @@
 namespace sim
 {
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 std::chrono::steady_clock::time_point GL_SIM_WALL_START;
 std::mt19937_64 GL_RNG{0};
 
@@ -21,6 +24,22 @@ int64_t GL_PRINT_PROGRESS_FREQUENCY{1'000'000};
 int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{5000};
 
 int64_t GL_T_GATE_TELEPORTATION_MAX{0};
+
+bool GL_ELIDE_CLIFFORDS{false};
+bool GL_ZERO_LATENCY_T_GATES{false};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+/*
+ * Utility function for printing stats for each client.
+ * */
+void _print_client_stats(std::ostream&, COMPUTE_SUBSYSTEM*, CLIENT*);
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -30,12 +49,12 @@ walltime()
 {
     auto duration = std::chrono::duration<double>(std::chrono::steady_clock::now() - GL_SIM_WALL_START);
     double total_seconds = duration.count();
-    
+
     int minutes = static_cast<int>(total_seconds) / 60;
     double remaining_seconds = total_seconds - (minutes * 60);
     int seconds = static_cast<int>(remaining_seconds);
     int milliseconds = static_cast<int>((remaining_seconds - seconds) * 1000);
-    
+
     std::ostringstream oss;
     oss << minutes << "m " << seconds << "s " << milliseconds << "ms";
     return oss.str();
@@ -51,7 +70,80 @@ walltime_s()
 ////////////////////////////////////////////////////////////
 
 void
-print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIENT* c)
+print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem)
+{
+    const auto* rotation_subsystem = compute_subsystem->rotation_subsystem();
+
+    uint64_t total_t_consumption{compute_subsystem->s_t_gates};
+    uint64_t total_t_teleports{compute_subsystem->s_t_gate_teleports};
+    uint64_t total_t_gate_episodes{compute_subsystem->s_t_gate_teleport_episodes};
+
+    if (rotation_subsystem != nullptr)
+    {
+        total_t_consumption += rotation_subsystem->s_t_gates;
+        total_t_teleports += rotation_subsystem->s_t_gate_teleports;
+        total_t_gate_episodes += rotation_subsystem->s_t_gate_teleport_episodes;
+    }
+
+    double t_consumption_rate = mean(total_t_consumption, compute_subsystem->current_cycle());
+    double t_consumption_rate_per_s = mean(total_t_consumption, compute_subsystem->current_cycle() / (1e3*compute_subsystem->freq_khz));
+    double t_teleports_per_episode = mean(total_t_teleports, total_t_gate_episodes);
+
+    print_stat_line(out, "COMPUTE_FREQ_KHZ", compute_subsystem->freq_khz);
+    print_stat_line(out, "TOTAL_SIMULATION_CYCLES", compute_subsystem->current_cycle());
+
+    print_stat_line(out, "T_GATES_EXECUTED", total_t_consumption);
+    print_stat_line(out, "T_GATE_TELEPORTATIONS", total_t_teleports);
+    print_stat_line(out, "T_GATE_TELEPORTATIONS_PER_EPISODE", t_teleports_per_episode);
+    print_stat_line(out, "T_CONSUMPTION_RATE_PER_CYCLE", t_consumption_rate);
+    print_stat_line(out, "T_CONSUMPTION_RATE_PER_S", t_consumption_rate_per_s);
+
+    print_stat_line(out, "TOTAL_ROTATIONS", compute_subsystem->s_total_rotations);
+    print_stat_line(out, "RPC_TOTAL", compute_subsystem->s_total_rpc);
+    print_stat_line(out, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
+    print_stat_line(out, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
+
+    for (auto* c : compute_subsystem->clients())
+        _print_client_stats(out, compute_subsystem, c);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<T_FACTORY_BASE*> factories)
+{
+    out << header << "\n";
+    
+    // accumulate stats:
+    double freq_khz = factories[0]->freq_khz;
+    uint64_t total_attempts{0},
+             total_failures{0};
+    for (auto* f : factories)
+    {
+        total_attempts += f->s_production_attempts;
+        total_failures += f->s_failures;
+    }
+    double kill_rate = mean(total_failures, total_attempts);
+
+    print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
+    print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
+    print_stat_line(std::cout, "    KILL_RATE", kill_rate);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+/* Helper functions start here */
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+_print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIENT* c)
 {
     double ipc = c->ipc();
     double kips = mean(c->s_unrolled_inst_done / 1000, c->s_cycle_complete / (compute_subsystem->freq_khz*1e3));
@@ -65,25 +157,10 @@ print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIE
     print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
 }
 
-void
-print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<T_FACTORY_BASE*> factories)
-{
-    out << header << "\n";
-    
-    // accumulate stats:
-    double freq_khz = factories[0]->freq_khz;
-    uint64_t total_attempts = std::transform_reduce(factories.begin(), factories.end(), uint64_t{0},
-                                                    std::plus<uint64_t>{},
-                                                    [] (const auto* f) { return f->s_production_attempts; });
-    uint64_t total_failures = std::transform_reduce(factories.begin(), factories.end(), uint64_t{0},
-                                                    std::plus<uint64_t>{},
-                                                    [] (const auto* f) { return f->s_failures; });
-    double kill_rate = mean(total_failures, total_attempts);
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
-    print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
-    print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
-    print_stat_line(std::cout, "    KILL_RATE", kill_rate);
-}
+}   // anonymous namespace
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

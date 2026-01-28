@@ -40,6 +40,8 @@ public:
     };
 
     uint64_t s_t_gates{0};
+    uint64_t s_t_gate_teleports{0};
+    uint64_t s_t_gate_teleport_episodes{0};
 
     const size_t local_memory_capacity;
 protected:
@@ -64,8 +66,78 @@ protected:
     virtual execute_result_type do_t_like_gate(inst_ptr, QUBIT*);
     virtual execute_result_type do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
 
+    /*
+     * Executes the uops for a rotation gate. Upon a success, additional gates
+     * are teleported onto the gate (max is `GL_T_TELEPORTATION_MAX`)
+     * */
+    virtual execute_result_type do_rotation_gate_with_teleportation(inst_ptr, QUBIT*, size_t max_teleports);
+
+    /*
+     * This is an extension of `do_rotation_gate_with_teleportation` that stops
+     * applying T gates if the given predicate becomes false.
+     *
+     * The predicate should return a boolean (obviously), and takes the rotation instruction (`inst_ptr`)
+     * and the current uop.
+     * */
+    template <class PRED> 
+    execute_result_type do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr, 
+                                                                                    QUBIT*, 
+                                                                                    size_t max_teleports, 
+                                                                                    const PRED&);
+
     size_t count_available_magic_states() const;
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Implementation of `do_rotation_gate_with_teleportation_while_predicate_holds`
+ * */
+
+template <class PRED> COMPUTE_BASE::execute_result_type
+COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr inst, 
+                                                                            QUBIT* q, 
+                                                                            size_t tp_remaining, 
+                                                                            const PRED& pred)
+{
+    if (!pred(inst, inst->current_uop()))
+        return execute_result_type{};
+    execute_result_type out = execute_instruction(inst->current_uop(), {q});
+    if (!out.progress || inst->retire_current_uop())
+        return out;
+
+    bool any_teleports{false};
+    while (tp_remaining > 0 && pred(inst, inst->current_uop()))
+    {
+        auto result = execute_instruction(inst->current_uop(), {q});
+        if (result.progress)
+        {
+            if (is_t_like_instruction(inst->current_uop()->type))
+            {
+                tp_remaining--;
+                s_t_gate_teleports++;
+                out.latency += 3;
+                any_teleports = true;
+            }
+            out.progress += result.progress;
+            if (inst->retire_current_uop())
+                break;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if (any_teleports)
+        s_t_gate_teleport_episodes++;
+
+    if (GL_ZERO_LATENCY_T_GATES)
+        out.latency = 0;
+
+    return out;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

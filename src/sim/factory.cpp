@@ -67,6 +67,7 @@ T_FACTORY_BASE::consume(size_t count)
 {
     assert(count <= buffer_occupancy_);
     buffer_occupancy_ -= count;
+    s_consumed += count;
 }
 
 void

@@ -59,8 +59,8 @@ public:
      * */
     uint64_t s_magic_state_produced_sum{0}; // note that this is used to compute T bandwidth
     uint64_t s_context_switches{0};
-    uint64_t s_t_gate_teleports{0};
 
+    uint64_t s_total_rotations{0};
     uint64_t s_successful_rpc{0};
     uint64_t s_total_rpc{0};
     uint64_t s_cycles_with_rpc_stalls{0};
@@ -150,12 +150,6 @@ private:
     void                      do_context_switch(CLIENT* incoming, CLIENT* outgoing);
 
     long fetch_and_execute_instructions_from_client(CLIENT*);
-
-    /*
-     * Executes the uops for a rotation gate. Upon a success, additional gates
-     * are teleported onto the gate (max is `GL_T_TELEPORTATION_MAX`)
-     * */
-    execute_result_type do_rotation_gate_with_teleportation(inst_ptr, QUBIT*);
 
     /*
      * Performs all rpc operations on an instruction (logical flow is handled within function).

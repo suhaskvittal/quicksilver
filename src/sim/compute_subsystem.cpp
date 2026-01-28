@@ -278,6 +278,9 @@ COMPUTE_SUBSYSTEM::handle_completed_clients()
 void
 COMPUTE_SUBSYSTEM::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_latency)
 {
+    if (is_rotation_instruction(inst->type))
+        s_total_rotations++;
+
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);
 }
@@ -358,7 +361,7 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         if (is_rotation_instruction(inst->type) && GL_T_GATE_TELEPORTATION_MAX > 0)
         {
             QUBIT* q = operands[0];
-            auto result = do_rotation_gate_with_teleportation(inst, q);
+            auto result = do_rotation_gate_with_teleportation(inst, q, GL_T_GATE_TELEPORTATION_MAX);
             success_count += result.progress;
             if (inst->uops_retired() == inst->uop_count())
                 retire_instruction(c, inst, result.latency);
@@ -380,39 +383,6 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_BASE::execute_result_type
-COMPUTE_SUBSYSTEM::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q)
-{
-    int tp_remaining{GL_T_GATE_TELEPORTATION_MAX+1};  // add +1 for initial uop (not counted for teleportation)
-    long progress{0};
-    cycle_type latency{0};
-    while (tp_remaining)
-    {
-        auto result = execute_instruction(inst->current_uop(), {q});
-        if (result.progress)
-        {
-            if (is_t_like_instruction(inst->current_uop()->type))
-            {
-                tp_remaining--;
-                if (progress)
-                    s_t_gate_teleports++;
-            }
-            progress += result.progress;
-            latency = result.latency;
-            if (inst->retire_current_uop())
-                break;
-        }
-        else
-        {
-            break;
-        }
-    }
-    return execute_result_type{.progress=progress, .latency=latency};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 bool
 COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
 {
@@ -420,20 +390,28 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
     {
         retire_instruction(c, inst, 2);
-        return true;
+    }
+    else if (lookup_result == RPC_LOOKUP_RESULT::NEEDS_CORRECTION)
+    {
+        assert(!inst->corr_urotseq_array.empty());
+
+        inst->urotseq = inst->corr_urotseq_array.front();
+        inst->corr_urotseq_array.pop_front();
+
+        // since we will have to do a corrective rotation, search for future rotations
+        // to schedule:
+        rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
         inst->rpc_is_critical = true;
         had_rpc_stall_this_cycle_ = true;
-        return true;
     }
     else
     {
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
-        inst->rpc_has_been_visited = true;
     }
-    return false;
+    return (lookup_result == RPC_LOOKUP_RESULT::RETIRE) || (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS);
 }
 
 ////////////////////////////////////////////////////////////
@@ -473,28 +451,37 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
 void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
-    constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{1};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{8};
+    constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
+    
+    inst->rpc_has_been_visited = true;
 
-    if (!is_rpc_enabled() || !rotation_subsystem_->can_accept_rotation_request())
+    if (!is_rpc_enabled())
         return;
     assert(is_rotation_instruction(inst->type));
 
-    auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
-                                    [inst, rs=rotation_subsystem_] (inst_ptr x) 
-                                    { 
-                                        return x != inst 
-                                                && is_rotation_instruction(x->type)
-                                                && !x->rpc_has_been_visited
-                                                && !rs->is_rotation_pending(x);
-                                    }, 
-                                    inst, 
-                                    RPC_DAG_LOOKAHEAD_START_LAYER,
-                                    RPC_DAG_LOOKAHEAD_DEPTH);
-    if (dependent_inst != nullptr)
+    while (rotation_subsystem_->can_accept_rotation_request())
     {
-        assert(dependent_inst != inst);
-        rotation_subsystem_->submit_rotation_request(dependent_inst);
+        auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
+                                        [inst, rs=rotation_subsystem_] (inst_ptr x) 
+                                        { 
+                                            return x != inst 
+                                                    && is_rotation_instruction(x->type)
+                                                    && !x->rpc_has_been_visited
+                                                    && !rs->is_rotation_pending(x);
+                                        }, 
+                                        inst, 
+                                        RPC_DAG_LOOKAHEAD_START_LAYER,
+                                        RPC_DAG_LOOKAHEAD_DEPTH);
+        if (dependent_inst != nullptr)
+        {
+            assert(dependent_inst != inst);
+            rotation_subsystem_->submit_rotation_request(dependent_inst);
+        }
+        else
+        {
+            break;
+        }
     }
 }
 

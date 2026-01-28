@@ -93,7 +93,10 @@ ROTATION_SUBSYSTEM::get_rotation_progress(inst_ptr inst) const
 long
 ROTATION_SUBSYSTEM::operate()
 {
-    if (rotation_assignment_map_.empty())
+    bool any_pending_rotations = std::any_of(rotation_assignment_map_.begin(),
+                                             rotation_assignment_map_.end(),
+                                             [] (const auto& p) { return p.second != nullptr; });
+    if (!any_pending_rotations)
         return 1;
 
     total_magic_state_count_at_cycle_start_ = count_available_magic_states();
@@ -106,35 +109,26 @@ ROTATION_SUBSYSTEM::operate()
             continue;
         if (q->cycle_available > current_cycle())
             continue;
-        auto result = execute_instruction(inst->current_uop(), {q});
-        if (result.progress)
+
+        auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, 0,
+                        [this] (const inst_ptr x, const inst_ptr uop)
+                        {
+                            const size_t m = count_available_magic_states();
+                            const size_t min_t_count = static_cast<size_t>(std::ceil(watermark_*total_magic_state_count_at_cycle_start_));
+                            return x->rpc_is_critical || (m > min_t_count);
+                        });
+        progress += result.progress;
+        if (result.progress > 0 && inst->uops_retired() == inst->uop_count())
         {
-            progress += result.progress;
-            if (inst->retire_current_uop())
-            {
-                // instruction is done -- reset uop progress for safety
-                inst->reset_uops();
-                free_qubits_.push_back(q);
-                q = nullptr;
-                assert(rotation_assignment_map_[inst] == nullptr);
-            }
+            // instruction is done -- reset uop progress for safety
+            inst->reset_uops();
+            free_qubits_.push_back(q);
+            q = nullptr;
+            assert(rotation_assignment_map_[inst] == nullptr);
         }
     }
 
     return progress;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-ROTATION_SUBSYSTEM::execute_result_type
-ROTATION_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
-{
-    const size_t m = count_available_magic_states();
-    if (!inst->rpc_is_critical && (m < watermark_*total_magic_state_count_at_cycle_start_ || m <= 1))
-        return execute_result_type{};
-    else
-        return COMPUTE_BASE::do_t_like_gate(inst, q);
 }
 
 ////////////////////////////////////////////////////////////

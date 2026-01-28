@@ -8,6 +8,18 @@
 namespace sim
 {
 
+extern bool GL_ELIDE_CLIFFORDS;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+void _clean_urotseq(INSTRUCTION::urotseq_type&);
+
+} // anon
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -38,13 +50,13 @@ void
 CLIENT::retire_instruction(inst_ptr inst)
 {
     s_inst_done++;
-    s_unrolled_inst_done += inst->unrolled_inst_count();
+    s_unrolled_inst_done += inst->original_unrolled_inst_count;
     dag_->remove_instruction_from_front_layer(inst);
 
     if (is_rotation_instruction(inst->type))
     {
         s_rotation_latency += inst->cycle_done - inst->first_ready_cycle;
-        s_total_rotation_uops += inst->uop_count();
+        s_total_rotation_uops += inst->original_unrolled_inst_count;
     }
 
     delete inst;
@@ -62,7 +74,7 @@ CLIENT::dag() const
     return dag_;
 }
 
-const double
+double
 CLIENT::ipc() const
 {
     return mean(s_unrolled_inst_done, s_cycle_complete);
@@ -98,13 +110,36 @@ CLIENT::read_instruction_from_trace()
     inst_ptr inst = read_instruction_from_stream(tristrm_);
     inst->number = s_inst_read++;
 
+    if (GL_ELIDE_CLIFFORDS && !is_rotation_instruction(inst->type))
+    {
+        delete inst;
+        return read_instruction_from_trace();
+    }
+
     // go through and remove all software instructions from the `urotseq` if this is a
     // rotation instruction:
-    auto it = std::remove_if(inst->urotseq.begin(), inst->urotseq.end(),
-                    [] (auto t) { return is_software_instruction(t); });
-    inst->urotseq.erase(it, inst->urotseq.end());
+    _clean_urotseq(inst->urotseq);
+    for (auto& u : inst->corr_urotseq_array)
+        _clean_urotseq(u);
+
+    inst->original_unrolled_inst_count = inst->unrolled_inst_count();
 
     return inst;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+void
+_clean_urotseq(INSTRUCTION::urotseq_type& u)
+{
+    auto it = std::remove_if(u.begin(), u.end(), [] (auto t) { return is_software_instruction(t); });
+    u.erase(it, u.end());
+}
+
 }
 
 ////////////////////////////////////////////////////////////
