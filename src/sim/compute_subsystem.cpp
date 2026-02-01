@@ -404,6 +404,13 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
+        // if there is too little progress (<= 4 uops), then invalidate and return false
+        if (rotation_subsystem_->get_rotation_progress(inst) <= 4)
+        {
+            rotation_subsystem_->invalidate_rotation(inst);
+            return false;
+        }
+
         inst->rpc_is_critical = true;
         had_rpc_stall_this_cycle_ = true;
     }

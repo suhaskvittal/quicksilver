@@ -77,6 +77,11 @@ public:
      * Returns number of uops retired for the given rotation
      * */
     size_t get_rotation_progress(inst_ptr) const;
+
+    /*
+     * Invalidates the rotation entry
+     * */
+    void invalidate_rotation(inst_ptr);
 protected:
     long operate() override;
 };

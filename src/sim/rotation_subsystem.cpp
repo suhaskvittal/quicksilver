@@ -87,6 +87,15 @@ ROTATION_SUBSYSTEM::get_rotation_progress(inst_ptr inst) const
         return 0;
 }
 
+void
+ROTATION_SUBSYSTEM::invalidate_rotation(inst_ptr inst)
+{
+    auto it = rotation_assignment_map_.find(inst);
+    assert(it != rotation_assignment_map_.end());
+    free_qubits_.push_back(it->second);
+    rotation_assignment_map_.erase(it);
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -110,11 +119,12 @@ ROTATION_SUBSYSTEM::operate()
         if (q->cycle_available > current_cycle())
             continue;
 
-        auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, 0,
+        auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, 
+                        (inst->rpc_is_critical ? GL_T_GATE_TELEPORTATION_MAX : 0), // t_teleport_max
                         [this] (const inst_ptr x, const inst_ptr uop)
                         {
                             const size_t m = count_available_magic_states();
-                            const size_t min_t_count = static_cast<size_t>(std::ceil(watermark_*total_magic_state_count_at_cycle_start_));
+                            const size_t min_t_count = 1;
                             return x->rpc_is_critical || (m > min_t_count);
                         });
         progress += result.progress;
