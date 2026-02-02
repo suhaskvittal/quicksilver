@@ -71,7 +71,7 @@ coordinate_clock_scale(std::vector<OPERABLE*> operables)
     std::transform(operables.begin(), operables.end(), freq_array.begin(), [] (auto* op) { return op->freq_khz; });
     double max_freq = *std::max_element(freq_array.begin(), freq_array.end());
     for (auto* op : operables)
-        op->clock_scale_ = max_freq / op->freq_khz;
+        op->clock_scale_ = max_freq / op->freq_khz - 1.0;
 }
 
 cycle_type

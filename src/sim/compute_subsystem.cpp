@@ -479,6 +479,13 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
         return;
     assert(is_rotation_instruction(inst->type));
 
+    double t_teleports_per_episode = mean(s_t_gate_teleports, s_t_gate_teleport_episodes);
+    double t_gate_consumed = mean(rotation_subsystem_->s_t_gates, current_cycle());
+    double slack = static_cast<double>(GL_T_GATE_TELEPORTATION_MAX) - t_teleports_per_episode - t_gate_consumed;
+
+    if (t_teleports_per_episode + t_gate_consumed < GL_T_GATE_TELEPORTATION_MAX)
+        return;
+
     while (rotation_subsystem_->can_accept_rotation_request())
     {
         auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
