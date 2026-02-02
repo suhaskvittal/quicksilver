@@ -28,4 +28,8 @@ test.qasm
 
 plots/
 
+.cache/
+.clangd
 .claude.todo
+.vscode/
+
