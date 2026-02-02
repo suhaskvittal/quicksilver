@@ -9,6 +9,7 @@
 #include "globals.h"
 #include "sim/operable.h"
 
+#include <deque>
 #include <vector>
 
 namespace sim
@@ -36,11 +37,17 @@ public:
     uint64_t s_production_attempts{0};
     uint64_t s_failures{0};
     uint64_t s_consumed{0};
+    uint64_t s_total_buffer_lifetime{0};
 protected:
     /*
      * Number of magic states in local buffer (max `buffer_capacity`)
      * */
     size_t buffer_occupancy_{0};
+
+    /*
+     * Cycle of magic state install
+     * */
+    std::deque<uint64_t> buffer_install_timestamp_{};
 public:
     T_FACTORY_BASE(std::string_view name, 
                     double freq_khz, 
@@ -57,6 +64,11 @@ public:
     size_t buffer_occupancy() const;
 protected:
     long operate() override;
+
+    /*
+     * Adds a magic state to the buffer.
+     * */
+    virtual void install_magic_state();
 
     /*
      * `operate()` calls `production_step`, which advances

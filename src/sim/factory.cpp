@@ -60,7 +60,8 @@ T_FACTORY_BASE::T_FACTORY_BASE(std::string_view name,
     :OPERABLE(name, freq_khz),
     output_error_probability(_output_error_probability),
     buffer_capacity(_buffer_capacity)
-{}
+{
+}
 
 void
 T_FACTORY_BASE::consume(size_t count)
@@ -68,6 +69,12 @@ T_FACTORY_BASE::consume(size_t count)
     assert(count <= buffer_occupancy_);
     buffer_occupancy_ -= count;
     s_consumed += count;
+
+    while (count--)
+    {
+        s_total_buffer_lifetime += current_cycle() - buffer_install_timestamp_.front();
+        buffer_install_timestamp_.pop_front();
+    }
 }
 
 void
@@ -83,6 +90,14 @@ T_FACTORY_BASE::operate()
         return 1;
     else 
         return 0;
+}
+
+void
+T_FACTORY_BASE::install_magic_state()
+{
+    assert(buffer_occupancy_ < buffer_capacity);
+    buffer_occupancy_++;
+    buffer_install_timestamp_.push_back(current_cycle());
 }
 
 size_t
@@ -168,7 +183,7 @@ T_DISTILLATION::production_step()
         step_++;
         if (step_ == num_rotation_steps+1)
         {
-            buffer_occupancy_++;
+            install_magic_state();
             step_ = 0;
 
             s_production_attempts++;
@@ -195,7 +210,7 @@ bool
 T_CULTIVATION::production_step()
 {
     if (FPR(GL_RNG) <= probability_of_success)
-        buffer_occupancy_++;
+        install_magic_state();
     else
         s_failures++;
     s_production_attempts++;

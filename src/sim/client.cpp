@@ -49,9 +49,11 @@ CLIENT::~CLIENT()
 void
 CLIENT::retire_instruction(inst_ptr inst)
 {
+    if (is_memory_access(inst->type))
+        goto kill_instruction;
+
     s_inst_done++;
     s_unrolled_inst_done += inst->original_unrolled_inst_count;
-    dag_->remove_instruction_from_front_layer(inst);
 
     if (is_rotation_instruction(inst->type))
     {
@@ -59,6 +61,8 @@ CLIENT::retire_instruction(inst_ptr inst)
         s_total_rotation_uops += inst->original_unrolled_inst_count;
     }
 
+kill_instruction:
+    dag_->remove_instruction_from_front_layer(inst);
     delete inst;
 }
 
@@ -110,7 +114,7 @@ CLIENT::read_instruction_from_trace()
     inst_ptr inst = read_instruction_from_stream(tristrm_);
     inst->number = s_inst_read++;
 
-    if (GL_ELIDE_CLIFFORDS && !is_rotation_instruction(inst->type))
+    if (GL_ELIDE_CLIFFORDS && !is_rotation_instruction(inst->type) && !is_memory_access(inst->type))
     {
         delete inst;
         return read_instruction_from_trace();
@@ -136,7 +140,8 @@ namespace
 void
 _clean_urotseq(INSTRUCTION::urotseq_type& u)
 {
-    auto it = std::remove_if(u.begin(), u.end(), [] (auto t) { return is_software_instruction(t); });
+    auto it = std::remove_if(u.begin(), u.end(), 
+            [] (auto t) { return is_software_instruction(t) || (GL_ELIDE_CLIFFORDS && !is_t_like_instruction(t)); });
     u.erase(it, u.end());
 }
 

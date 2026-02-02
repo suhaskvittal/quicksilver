@@ -25,6 +25,8 @@ int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{5000};
 
 int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
+bool GL_RPC_RS_ALWAYS_USE_TELEPORTATION{false};
+
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
 
@@ -118,17 +120,25 @@ print_stats_for_factories(std::ostream& out, std::string_view header, std::vecto
     // accumulate stats:
     double freq_khz = factories[0]->freq_khz;
     uint64_t total_attempts{0},
-             total_failures{0};
+             total_failures{0},
+             total_consumed{0},
+             total_ms_lifetime_in_buffer{0};
     for (auto* f : factories)
     {
         total_attempts += f->s_production_attempts;
         total_failures += f->s_failures;
+        total_consumed += f->s_consumed;
+        total_ms_lifetime_in_buffer += f->s_total_buffer_lifetime;
     }
     double kill_rate = mean(total_failures, total_attempts);
+    double mean_ms_lifetime_in_buffer = mean(total_ms_lifetime_in_buffer, total_consumed);
 
     print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
     print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
+    print_stat_line(std::cout, "    PRODUCED", total_attempts - total_failures);
+    print_stat_line(std::cout, "    CONSUMED", total_consumed);
     print_stat_line(std::cout, "    KILL_RATE", kill_rate);
+    print_stat_line(std::cout, "    MEAN_LIFETIME_IN_BUFFER", mean_ms_lifetime_in_buffer);
 }
 
 ////////////////////////////////////////////////////////////

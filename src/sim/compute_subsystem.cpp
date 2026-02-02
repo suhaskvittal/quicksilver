@@ -344,12 +344,20 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
     long success_count{0};
     for (auto* inst : front_layer)
     {
+        if (GL_ELIDE_CLIFFORDS && !(is_rotation_instruction(inst->type) || is_t_like_instruction(inst->type) || is_memory_access(inst->type)))
+            std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
+    
         inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
 
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
         std::array<QUBIT*, 3> operands{};
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
+
+        bool any_not_in_memory = std::any_of(operands.begin(), operands.begin() + inst->qubit_count,
+                                        [this] (QUBIT* q) { return !local_memory_->contains(q); });
+        if (any_not_in_memory && !is_memory_access(inst->type))
+            continue; 
         
         // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
         // and do other actions:
@@ -377,6 +385,10 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
             }
         }
     }
+
+    // recursively call `fetch_and_execute_instruction_from_client` if progress was made
+    if (success_count)
+        success_count += fetch_and_execute_instructions_from_client(c);
     return success_count;
 }
 

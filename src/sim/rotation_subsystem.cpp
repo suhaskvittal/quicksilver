@@ -120,7 +120,7 @@ ROTATION_SUBSYSTEM::operate()
             continue;
 
         auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, 
-                        (inst->rpc_is_critical ? GL_T_GATE_TELEPORTATION_MAX : 0), // t_teleport_max
+                        (inst->rpc_is_critical || GL_RPC_RS_ALWAYS_USE_TELEPORTATION ? GL_T_GATE_TELEPORTATION_MAX : 0), // t_teleport_max
                         [this] (const inst_ptr x, const inst_ptr uop)
                         {
                             const size_t m = count_available_magic_states();

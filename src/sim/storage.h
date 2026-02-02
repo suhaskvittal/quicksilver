@@ -69,6 +69,8 @@ public:
             cycle_type load_latency, 
             cycle_type store_latency);
     
+    bool contains(QUBIT*) const;
+    
     /*
      * Adds the given qubit to `contents_`. Should be used
      * only when initializing the storage.

@@ -53,6 +53,12 @@ STORAGE::STORAGE(double freq_khz, size_t n, size_t k, size_t d,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+STORAGE::contains(QUBIT* q) const
+{
+    return contents_.count(q) > 0;
+}
+
 void
 STORAGE::insert(QUBIT* q)
 {

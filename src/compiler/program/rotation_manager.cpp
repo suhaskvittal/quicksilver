@@ -336,6 +336,7 @@ _pin_thread_to_core(size_t core_id)
 
 #elif defined(__APPLE__)
     // macOS: Use thread_policy_set with THREAD_AFFINITY_POLICY
+    /*
     thread_affinity_policy_data_t policy;
     policy.affinity_tag = static_cast<integer_t>(core_id);
 
@@ -346,6 +347,8 @@ _pin_thread_to_core(size_t core_id)
         THREAD_AFFINITY_POLICY_COUNT
     );
     return result == KERN_SUCCESS;
+    */
+    return true;
 
 #else
     // Unsupported platform
