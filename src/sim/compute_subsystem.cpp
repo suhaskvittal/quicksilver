@@ -443,6 +443,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
         if (rotation_subsystem_->get_rotation_progress(inst) <= 4)
         {
             rotation_subsystem_->invalidate_rotation(inst);
+            rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
             return false;
         }
 
@@ -494,7 +495,8 @@ void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{48};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
+    constexpr size_t RPC_DEGREE{2};
     
     inst->rpc_has_been_visited = true;
 
@@ -502,17 +504,10 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
         return;
     assert(is_rotation_instruction(inst->type));
 
-    double t_teleports_per_episode = mean(s_t_gate_teleports, s_t_gate_teleport_episodes);
-    double t_gate_consumed = mean(rotation_subsystem_->s_t_gates, current_cycle());
-    double slack = static_cast<double>(GL_T_GATE_TELEPORTATION_MAX) - t_teleports_per_episode - t_gate_consumed;
-
-    double p = (GL_T_GATE_TELEPORTATION_MAX-t_teleports_per_episode) / t_gate_consumed;
-    p = std::min(1.0, p);
-
-    while (rotation_subsystem_->can_accept_rotation_request())
+    for (size_t i = 0; i < RPC_DEGREE; i++)
     {
-//      if (FPR(GL_RNG) > p && current_cycle() > 10000)
-//          break;
+        if (!rotation_subsystem_->can_accept_rotation_request())
+            break;
         
         auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
                                         [inst, rs=rotation_subsystem_] (inst_ptr x) 
@@ -526,14 +521,9 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                         RPC_DAG_LOOKAHEAD_START_LAYER,
                                         RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
-        {
-            assert(dependent_inst != inst);
             rotation_subsystem_->submit_rotation_request(dependent_inst);
-        }
         else
-        {
             break;
-        }
     }
 }
 

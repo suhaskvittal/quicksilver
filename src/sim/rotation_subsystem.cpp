@@ -24,7 +24,6 @@ ROTATION_SUBSYSTEM::ROTATION_SUBSYSTEM(double freq_khz,
     watermark_(watermark),
     parent_(parent)
 {
-    rotation_assignment_map_.reserve(capacity);
     free_qubits_.reserve(capacity);
 
     for (qubit_type i = 0; i < capacity; i++)
@@ -52,6 +51,7 @@ bool
 ROTATION_SUBSYSTEM::submit_rotation_request(inst_ptr inst)
 {
     assert(!is_rotation_pending(inst));
+    assert(is_rotation_instruction(inst->type));
 
     if (free_qubits_.empty())
         return false;
@@ -79,6 +79,7 @@ ROTATION_SUBSYSTEM::find_and_delete_rotation_if_done(inst_ptr inst)
         s_rotation_service_cycles += it->second.cycle_done - it->second.cycle_installed;
         s_rotation_idle_cycles += parent_->current_cycle() - it->second.cycle_done;
         s_rotations_completed++;
+        free_qubits_.push_back(it->second.allocated_qubit);
         rotation_assignment_map_.erase(it);
         return true;
     }
@@ -119,41 +120,36 @@ ROTATION_SUBSYSTEM::operate()
     if (pending_count_ == 0)
         return 1;
 
-    total_magic_state_count_at_cycle_start_ = count_available_magic_states();
-
-    /* Make progress on any pending rotations */
     long progress{0};
-    for (auto& [inst, e] : rotation_assignment_map_)
+
+    auto it = std::find_if(rotation_assignment_map_.begin(),
+                            rotation_assignment_map_.end(),
+                            [] (const auto& p) { return !p.second.done; });
+    assert(it != rotation_assignment_map_.end());
+    auto& [inst, e] = *it;
+    auto* q = e.allocated_qubit;
+    if (q->cycle_available > current_cycle())
+        return 0;
+
+    const size_t num_teleports = (inst->rpc_is_critical || GL_RPC_RS_ALWAYS_USE_TELEPORTATION) 
+                                    ? GL_T_GATE_TELEPORTATION_MAX
+                                    : 0;
+
+    auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, num_teleports,
+                    [this] (const inst_ptr x, const inst_ptr uop)
+                    {
+                        const size_t m = count_available_magic_states();
+                        const size_t min_t_count = 1;
+                        return x->rpc_is_critical || (m > min_t_count);
+                    });
+    progress += result.progress;
+    if (result.progress > 0 && inst->uops_retired() == inst->uop_count())
     {
-        auto* q = e.allocated_qubit;
-        if (q == nullptr)
-            continue;
-        if (q->cycle_available > current_cycle())
-            continue;
-
-        const size_t num_teleports = (inst->rpc_is_critical || GL_RPC_RS_ALWAYS_USE_TELEPORTATION) 
-                                        ? GL_T_GATE_TELEPORTATION_MAX 
-                                        : 0;
-
-        auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, num_teleports,
-                        [this] (const inst_ptr x, const inst_ptr uop)
-                        {
-                            const size_t m = count_available_magic_states();
-                            const size_t min_t_count = 1;
-                            return x->rpc_is_critical || (m > min_t_count);
-                        });
-        progress += result.progress;
-        if (result.progress > 0 && inst->uops_retired() == inst->uop_count())
-        {
-            // instruction is done -- reset uop progress for safety
-            inst->reset_uops();
-            free_qubits_.push_back(q);
-            e.allocated_qubit = nullptr;
-            e.done = true;
-            e.cycle_done = parent_->current_cycle();
-
-            pending_count_--;
-        }
+        // instruction is done -- reset uop progress for safety
+        inst->reset_uops();
+        e.done = true;
+        e.cycle_done = parent_->current_cycle();
+        pending_count_--;
     }
 
     return progress;
