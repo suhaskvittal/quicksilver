@@ -15,6 +15,8 @@ namespace sim
 namespace
 {
 
+static std::uniform_real_distribution FPR{0.0,1.0};
+
 bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
 
 } // anon
@@ -72,8 +74,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     {
         rotation_subsystem_ = new ROTATION_SUBSYSTEM(conf.rpc_freq_khz, 
                                                     conf.rpc_capacity,
-                                                    top_level_t_factories,
-                                                    memory_hierarchy,
+                                                    this,
                                                     conf.rpc_watermark);
     }
 }
@@ -137,7 +138,30 @@ COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
     {
         std::cout << "Client " << static_cast<int>(c->id) << " front layer:\n";
         for (const auto* inst : c->dag()->get_front_layer())
-            std::cout << "\t" << *inst << "\n";
+        {
+            std::cout << "\t" << *inst;
+            if (inst->uop_count() > 0)
+            {
+                std::cout << "\tcurrent uop = " << *inst->current_uop() << ", " << inst->uops_retired()
+                            << " of " << inst->uop_count();
+            }
+
+            std::cout << "\tcycle ready (current cycle = " << current_cycle() << "):";
+            std::for_each(inst->q_begin(), inst->q_end(),
+                        [this, c] (auto q_id)
+                        {
+                            QUBIT* q = c->qubits()[q_id];
+                            std::cout << " " << q->cycle_available;
+                        });
+            std::cout << "\tin memory: ";
+            std::for_each(inst->q_begin(), inst->q_end(),
+                        [this, c] (auto q_id)
+                        {
+                            QUBIT* q = c->qubits()[q_id];
+                            std::cout << static_cast<int>(local_memory_->contains(q));
+                        });
+            std::cout << "\n";
+        }
     }
 }
 
@@ -350,11 +374,12 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
 
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-        std::array<QUBIT*, 3> operands{};
+
+        std::array<QUBIT*, 3> operands;
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
-        bool any_not_in_memory = std::any_of(operands.begin(), operands.begin() + inst->qubit_count,
+        bool any_not_in_memory = std::any_of(operands.begin(), operands.begin() + executed_inst->qubit_count,
                                         [this] (QUBIT* q) { return !local_memory_->contains(q); });
         if (any_not_in_memory && !is_memory_access(inst->type))
             continue; 
@@ -377,12 +402,10 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         else
         {
             auto result = execute_instruction(executed_inst, std::move(operands));
+            success_count += result.progress;
             if (result.progress)
-            {
-                success_count += result.progress;
                 if (inst->uop_count() == 0 || inst->retire_current_uop())
                     retire_instruction(c, inst, result.latency);
-            }
         }
     }
 
@@ -471,7 +494,7 @@ void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{48};
     
     inst->rpc_has_been_visited = true;
 
@@ -483,11 +506,14 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
     double t_gate_consumed = mean(rotation_subsystem_->s_t_gates, current_cycle());
     double slack = static_cast<double>(GL_T_GATE_TELEPORTATION_MAX) - t_teleports_per_episode - t_gate_consumed;
 
-    if (t_teleports_per_episode + t_gate_consumed < GL_T_GATE_TELEPORTATION_MAX)
-        return;
+    double p = (GL_T_GATE_TELEPORTATION_MAX-t_teleports_per_episode) / t_gate_consumed;
+    p = std::min(1.0, p);
 
     while (rotation_subsystem_->can_accept_rotation_request())
     {
+//      if (FPR(GL_RNG) > p && current_cycle() > 10000)
+//          break;
+        
         auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
                                         [inst, rs=rotation_subsystem_] (inst_ptr x) 
                                         { 
@@ -498,7 +524,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                         }, 
                                         inst, 
                                         RPC_DAG_LOOKAHEAD_START_LAYER,
-                                        RPC_DAG_LOOKAHEAD_DEPTH);
+                                        RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
         {
             assert(dependent_inst != inst);

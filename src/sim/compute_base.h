@@ -110,6 +110,9 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
     bool any_teleports{false};
     while (tp_remaining > 0 && pred(inst, inst->current_uop()))
     {
+        // need to keep resetting available so instructions keep getting executed:
+        q->cycle_available = current_cycle();
+
         auto result = execute_instruction(inst->current_uop(), {q});
         if (result.progress)
         {
@@ -117,7 +120,8 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
             {
                 tp_remaining--;
                 s_t_gate_teleports++;
-                out.latency += 3;
+                if (!GL_T_GATE_DO_AUTOCORRECT)
+                    out.latency += (GL_RNG() & 3) ? 2 : 0; // any possible correction incurs a 2 cycle latency
                 any_teleports = true;
             }
             out.progress += result.progress;
@@ -131,10 +135,16 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
     }
 
     if (any_teleports)
+    {
         s_t_gate_teleport_episodes++;
+        if (GL_T_GATE_DO_AUTOCORRECT)
+            out.latency += 2;
+    }
 
     if (GL_ZERO_LATENCY_T_GATES)
         out.latency = 0;
+
+    q->cycle_available = current_cycle()+out.latency;
 
     return out;
 }

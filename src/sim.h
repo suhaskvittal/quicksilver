@@ -52,6 +52,11 @@ extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
 ////////////////////////////////////////////////////////////
 
 /*
+ * Assume auto-correction is used for T gates.
+ * */
+extern bool GL_T_GATE_DO_AUTOCORRECT;
+
+/*
  * Enable T gate teleportation via GHZ gates (default 0 -- T gates are directly applied on
  * target qubit).
  * */

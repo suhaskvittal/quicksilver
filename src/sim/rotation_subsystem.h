@@ -20,15 +20,35 @@ public:
     using inst_ptr = COMPUTE_BASE::inst_ptr;
     using execute_result_type = COMPUTE_BASE::execute_result_type;
 
+    /*
+     * A pending rotation request.
+     * */
+    struct rotation_request_entry
+    {
+        QUBIT* allocated_qubit{nullptr};
+        bool done{false};
+
+        /*
+         * These are compute cycles, not cycles of the `ROTATION_SUBSYSTEM`
+         * */
+        cycle_type cycle_installed;
+        cycle_type cycle_done;
+    };
+
     uint64_t s_rotations_completed{0};
+    uint64_t s_rotation_service_cycles{0};
+    uint64_t s_rotation_idle_cycles{0};
+    uint64_t s_invalidates{0};
 private:
     /*
      * Stores assignment of rotation gates to logical qubits.
-     * If a rotation instruction points to a null qubit, then
-     * the rotation is done.
      * */
-    std::unordered_map<inst_ptr, QUBIT*> rotation_assignment_map_;
-    std::vector<QUBIT*>                  free_qubits_;
+    std::unordered_map<inst_ptr, rotation_request_entry> rotation_assignment_map_;
+
+    /*
+     * Qubits available for serving rotation requests.
+     * */
+    std::vector<QUBIT*> free_qubits_;
 
     /*
      * This limits the amount of bandwidth that this object can
@@ -43,11 +63,17 @@ private:
      * (or reaches 1)
      * */
     size_t total_magic_state_count_at_cycle_start_;
+
+    /*
+     * `parent_` is mostly used to update stats.
+     * */
+    const COMPUTE_SUBSYSTEM* parent_;
+
+    size_t pending_count_{0};
 public:
     ROTATION_SUBSYSTEM(double freq_khz, 
                         size_t capacity,
-                        std::vector<T_FACTORY_BASE*> top_level_t_factories,
-                        MEMORY_SUBSYSTEM* /* useless, but still provide */,
+                        COMPUTE_SUBSYSTEM* parent,
                         double watermark);
     ~ROTATION_SUBSYSTEM();
 

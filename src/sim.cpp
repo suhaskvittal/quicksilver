@@ -23,6 +23,8 @@ std::mt19937_64 GL_RNG{0};
 int64_t GL_PRINT_PROGRESS_FREQUENCY{1'000'000};
 int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{5000};
 
+bool GL_T_GATE_DO_AUTOCORRECT{false};
+
 int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
 bool GL_RPC_RS_ALWAYS_USE_TELEPORTATION{false};
@@ -105,6 +107,17 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
     print_stat_line(out, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
     print_stat_line(out, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
 
+    if (rotation_subsystem != nullptr)
+    {
+        double mean_rpc_cycle_latency = mean(rotation_subsystem->s_rotation_service_cycles, 
+                                            rotation_subsystem->s_rotations_completed),
+               mean_rpc_idle_cycles = mean(rotation_subsystem->s_rotation_idle_cycles,
+                                            rotation_subsystem->s_rotations_completed);
+        print_stat_line(out, "RPC_SERVICE_CYCLES", mean_rpc_cycle_latency);
+        print_stat_line(out, "RPC_IDLE_CYCLES", mean_rpc_idle_cycles);
+        print_stat_line(out, "RPC_INVALIDATES", rotation_subsystem->s_invalidates);
+    }
+
     for (auto* c : compute_subsystem->clients())
         _print_client_stats(out, compute_subsystem, c);
 }
@@ -163,6 +176,7 @@ _print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLI
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
     print_stat_line(out, "    KIPS", kips);
+    print_stat_line(out, "    INSTRUCTIONS", c->s_unrolled_inst_done);
     print_stat_line(out, "    CYCLES", c->s_cycle_complete);
     print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
 }

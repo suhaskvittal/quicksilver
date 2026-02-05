@@ -148,6 +148,8 @@ COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
     cycle_type latency;
     if (GL_ZERO_LATENCY_T_GATES)
         latency = 0;
+    else if (GL_T_GATE_DO_AUTOCORRECT)
+        latency = 2;
     else
         latency = (GL_RNG() & 1) ? 4 : 2;
     _update_available_cycle({q}, current_cycle() + latency);
