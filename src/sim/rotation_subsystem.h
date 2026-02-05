@@ -25,6 +25,7 @@ public:
      * */
     struct rotation_request_entry
     {
+        inst_ptr inst{nullptr};
         QUBIT* allocated_qubit{nullptr};
         bool done{false};
 
@@ -44,6 +45,7 @@ private:
      * Stores assignment of rotation gates to logical qubits.
      * */
     std::unordered_map<inst_ptr, rotation_request_entry> rotation_assignment_map_;
+    std::vector<rotation_request_entry> requests_;
 
     /*
      * Qubits available for serving rotation requests.
