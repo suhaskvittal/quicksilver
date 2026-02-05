@@ -4,6 +4,7 @@
  * */
 
 #include "sim/memory_subsystem.h"
+#include "sim/routing_model/multi_channel_bus.h"
 
 #include <algorithm>
 
@@ -15,23 +16,20 @@ namespace sim
 
 MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
     :storages_(std::move(storages))
-{}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-MEMORY_SUBSYSTEM::tick()
 {
-    for (STORAGE* s : storages_)
-        s->tick();
+    using MBC = routing::MULTI_CHANNEL_BUS<STORAGE>;
+
+    routing_ = std::make_unique<MBC>(storages_, 2);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, QUBIT* st)
+MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, 
+                                    QUBIT* st,
+                                    cycle_type c_current_cycle,
+                                    double c_freq_khz)
 {
     auto storage_it = lookup(ld);
     if (storage_it == storages_.end())
@@ -45,7 +43,20 @@ MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, QUBIT* st)
         }
         std::cerr << _die{};
     }
-    return (*storage_it)->do_memory_access(ld, st);
+
+    if (routing_->can_route_to(*storage_it, c_current_cycle))
+    {
+        auto result = (*storage_it)->do_memory_access(ld, st);
+        if (result.success)
+        {
+            cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, c_freq_khz);
+            routing_->lock_route_to(*storage_it, c_current_cycle+latency);
+            result.latency = latency;
+        }
+        return result;
+    }
+    
+    return access_result_type{};
 }
 
 ////////////////////////////////////////////////////////////

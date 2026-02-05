@@ -270,17 +270,9 @@ main(int argc, char* argv[])
                 last_print_cycle = compute_subsystem->current_cycle();
             }
         }
-
-        for (auto* f : alloc.first_level)
-            f->tick();
-        for (auto* f : alloc.second_level)
-            f->tick();
-
-        memory_subsystem->tick();
         
-        if (compute_subsystem->is_rpc_enabled())
-            compute_subsystem->rotation_subsystem()->tick();
-        compute_subsystem->tick();
+        for (auto* x : all_operables)
+            x->tick();
     }
     while (!compute_subsystem->done());
 

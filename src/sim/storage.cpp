@@ -26,7 +26,9 @@ std::string _storage_name(size_t n, size_t k, size_t d);
  * Fills up the storage by allocating qubits for each client in a round robin.
  * Only considers clients from `0 <= i < idx_upper_bound`
  * */
-void _fill_up_storage_round_robin(STORAGE*, 
+template <class ITER>
+void _fill_up_storage_round_robin(ITER st_begin,
+                                    ITER st_end, 
                                     std::vector<size_t>& qubits_allocated,
                                     const std::vector<std::vector<QUBIT*>>& qubits, 
                                     size_t idx_upper_bound);
@@ -138,10 +140,12 @@ storage_striped_initialization(const std::vector<STORAGE*>& storage_array,
 {
     std::vector<size_t> qubits_allocated(qubits.size(), 0);
 
+    auto st_begin = storage_array.begin(),
+         st_end = storage_array.end();
+
     // first handle compute subsystem's local memory:
-    _fill_up_storage_round_robin(storage_array[0], qubits_allocated, qubits, num_active_clients);
-    for (size_t i = 1; i < storage_array.size(); i++)
-        _fill_up_storage_round_robin(storage_array[i], qubits_allocated, qubits, qubits.size());
+    _fill_up_storage_round_robin(st_begin, st_begin+1, qubits_allocated, qubits, num_active_clients);
+    _fill_up_storage_round_robin(st_begin+1, st_end, qubits_allocated, qubits, qubits.size());
 
     // verify that all clients have been fully allocated
     bool any_clients_incomplete = false;
@@ -172,50 +176,44 @@ _storage_name(size_t n, size_t k, size_t d)
     return "[[" + std::to_string(n) + ", " + std::to_string(k) + ", " + std::to_string(d) + "]]";
 }
 
-void
-_fill_up_storage_round_robin(STORAGE* storage,
+template <class ITER> void
+_fill_up_storage_round_robin(ITER st_begin,
+                              ITER st_end,
                               std::vector<size_t>& qubits_allocated,
                               const std::vector<std::vector<QUBIT*>>& qubits,
                               size_t idx_upper_bound)
 {
-    // handle edge cases
-    if (idx_upper_bound == 0 || storage->logical_qubit_count == 0)
-        return;
+    /* 
+     * Do the following:
+     *      For each storage from `st_begin` to `st_end`, add one qubit
+     *      from each client (up-to `idx_upper_bound`)
+     * */
 
-    // initialize tracking
-    size_t qubits_inserted{0};
-    size_t client_idx{0};
-
-    // helper to check if any client needs allocation
-    auto needs_allocation = [&qubits_allocated, &qubits, idx_upper_bound]()
+    bool done;
+    do
     {
-        for (size_t i{0}; i < idx_upper_bound; i++)
-            if (qubits_allocated[i] < qubits[i].size())
-                return true;
-        return false;
-    };
-
-    // main round-robin allocation loop
-    while (qubits_inserted < storage->logical_qubit_count && needs_allocation())
-    {
-        // skip clients that are fully allocated
-        if (qubits_allocated[client_idx] >= qubits[client_idx].size())
+        bool any_qubit_inserted{false};
+        for (auto it = st_begin; it != st_end; it++)
         {
-            client_idx = (client_idx + 1) % idx_upper_bound;
-            continue;
+            STORAGE* s = *it;
+            for (size_t i = 0; i < idx_upper_bound; i++)
+            {
+                if (s->contents().size() == s->logical_qubit_count)
+                    break;
+                if (qubits_allocated[i] >= qubits[i].size())
+                    continue;
+                // get next qubit for client and place it into `s`
+                QUBIT* q = qubits[i][qubits_allocated[i]];
+                qubits_allocated[i]++;
+                s->insert(q);
+
+                any_qubit_inserted = true;
+            }
         }
 
-        // allocate one qubit for current client
-        QUBIT* q = qubits[client_idx][qubits_allocated[client_idx]];
-        storage->insert(q);
-
-        // update tracking
-        qubits_allocated[client_idx]++;
-        qubits_inserted++;
-
-        // move to next client (round-robin)
-        client_idx = (client_idx + 1) % idx_upper_bound;
+        done = !any_qubit_inserted;
     }
+    while (!done);
 }
 
 }

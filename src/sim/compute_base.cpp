@@ -163,11 +163,10 @@ COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
 COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
 {
-    auto result = memory_hierarchy_->do_memory_access(ld, st);
+    auto result = memory_hierarchy_->do_memory_access(ld, st, current_cycle(), freq_khz);
     if (result.success)
     {
         // need to convert storage latency to compute cycles:
-        cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, freq_khz);
         auto local_result = local_memory_->do_memory_access(st, ld);
         if (!local_result.success)
         {
@@ -175,8 +174,8 @@ COMPUTE_BASE::do_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
             local_memory_->print_adapter_debug_info(std::cerr);
             std::cerr << _die{};
         }
-        _update_available_cycle({ld, st}, current_cycle() + latency + 2);
-        return execute_result_type{.progress=1, .latency=latency+2};
+        _update_available_cycle({ld, st}, current_cycle() + result.latency + 2);
+        return execute_result_type{.progress=1, .latency=result.latency+2};
     }
     return execute_result_type{};
 }
