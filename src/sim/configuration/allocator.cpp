@@ -48,6 +48,28 @@ double _estimate_consumption_rate(const std::vector<T_FACTORY_BASE*>&);
 ////////////////////////////////////////////////////////////
 
 FACTORY_ALLOCATION
+l1_factory_allocation(size_t budget, FACTORY_SPECIFICATION spec)
+{
+    const size_t pq_count = spec.is_cultivation
+                                ? magic_state_cultivation_physical_qubit_count(spec.escape_distance)
+                                : magic_state_distillation_physical_qubit_count(spec.input_count,
+                                                                                spec.output_count,
+                                                                                spec.dx, 
+                                                                                spec.dz);
+    FACTORY_ALLOCATION factory_alloc;
+    while (budget >= pq_count)
+    {
+        factory_alloc.first_level.push_back(_alloc_factory(spec));
+        factory_alloc.physical_qubit_count += pq_count;
+        budget -= pq_count;
+    }
+    return factory_alloc;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+FACTORY_ALLOCATION
 throughput_aware_factory_allocation(size_t physical_qubit_budget,
                                     FACTORY_SPECIFICATION l1_spec,
                                     FACTORY_SPECIFICATION l2_spec)

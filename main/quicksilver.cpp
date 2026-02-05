@@ -23,15 +23,6 @@
 namespace 
 {
 
-constexpr size_t COMPUTE_CODE_DISTANCE{21};
-constexpr size_t MEMORY_CODE_DISTANCE{24};
-
-constexpr size_t MEMORY_BLOCK_PHYSICAL_QUBITS = 
-    sim::configuration::bivariate_bicycle_code_physical_qubit_count(MEMORY_CODE_DISTANCE);
-
-constexpr size_t MEMORY_BLOCK_CAPACITY = 
-    sim::configuration::bivariate_bicycle_code_logical_qubit_count(MEMORY_CODE_DISTANCE);
-
 std::vector<std::string> split_trace_string(std::string);
 
 /*
@@ -59,6 +50,7 @@ main(int argc, char* argv[])
     int64_t print_progress;
     int64_t ratemode;
     bool    jit;
+    std::string regime;
 
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
@@ -80,6 +72,9 @@ main(int argc, char* argv[])
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
         .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
+        .optional("", "--regime", 
+                    "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
+                    regime, "T")
 
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
@@ -93,7 +88,7 @@ main(int argc, char* argv[])
 
 
         .optional("-rpc", "--rpc", "Enable rotation precomputation", conf.rpc_enabled, false)
-        .optional("-rpc-ttp-always", "", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_RS_ALWAYS_USE_TELEPORTATION, false)
+        .optional("", "--rpc-ttp-always", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_RS_ALWAYS_USE_TELEPORTATION, false)
         .optional("", "--rpc-capacity", "Amount of rotation precomputation storage", conf.rpc_capacity, 2)
         .optional("", "--rpc-watermark", "Watermark for rotation precomputation", conf.rpc_watermark, 0.5)
 
@@ -117,8 +112,6 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     GL_USE_RPC_ISA = 1;
-
-    conf.rpc_freq_khz = sim::compute_freq_khz(17 * compute_syndrome_extraction_round_time_ns);
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -164,8 +157,41 @@ main(int argc, char* argv[])
         .rotations=11
     };
 
-    sim::configuration::FACTORY_ALLOCATION alloc =
-        sim::configuration::throughput_aware_factory_allocation(factory_physical_qubit_budget, l1_spec, l2_spec);
+    // from `regime`, set parameters:
+    size_t compute_code_distance,
+           memory_code_distance;
+    if (regime == "M")  // 1e-6 error rate
+    {
+        compute_code_distance = 9;
+        memory_code_distance = 12;
+    }
+    else if (regime == "G")
+    {
+        compute_code_distance = 15;
+        memory_code_distance = 18;
+        // modify `l1_spec` to use d = 5 color code cultivation
+        l1_spec.output_error_rate = 1e-8;
+        l1_spec.escape_distance = 15;
+        l1_spec.round_length = 25;
+        l1_spec.probability_of_success = 0.02;
+    }
+    else
+    {
+        compute_code_distance = 21;
+        memory_code_distance = 24;
+    }
+    conf.rpc_freq_khz = sim::compute_freq_khz((compute_code_distance-4) * compute_syndrome_extraction_round_time_ns);
+
+    const size_t memory_block_physical_qubits = 
+        sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
+    const size_t memory_block_capacity =
+        sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
+
+    sim::configuration::FACTORY_ALLOCATION alloc;
+    if (regime == "T")
+        alloc = sim::configuration::throughput_aware_factory_allocation(factory_physical_qubit_budget, l1_spec, l2_spec);
+    else
+        alloc = sim::configuration::l1_factory_allocation(factory_physical_qubit_budget, l1_spec);
 
     /* initialize memory subsystem */
 
@@ -174,15 +200,15 @@ main(int argc, char* argv[])
                                                 std::plus<size_t>{},
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
     main_memory_qubits -= compute_local_memory_capacity;
-    const size_t num_blocks = main_memory_qubits == 0 ? 0 : (main_memory_qubits-1) / MEMORY_BLOCK_CAPACITY + 1;
-    const double m_freq_khz = sim::compute_freq_khz(MEMORY_CODE_DISTANCE * memory_syndrome_extraction_round_time_ns);
+    const size_t num_blocks = main_memory_qubits == 0 ? 0 : (main_memory_qubits-1) / memory_block_capacity + 1;
+    const double m_freq_khz = sim::compute_freq_khz(memory_code_distance * memory_syndrome_extraction_round_time_ns);
     std::vector<sim::STORAGE*> memory_blocks(num_blocks);
     for (size_t i = 0; i < num_blocks; i++)
     {
         memory_blocks[i] = new sim::STORAGE{m_freq_khz, 
-                                            MEMORY_BLOCK_PHYSICAL_QUBITS,
-                                            MEMORY_BLOCK_CAPACITY,
-                                            MEMORY_CODE_DISTANCE,
+                                            memory_block_physical_qubits,
+                                            memory_block_capacity,
+                                            memory_code_distance,
                                             1, // num adapters
                                             2, // load latency
                                             1 // store latency
@@ -197,14 +223,14 @@ main(int argc, char* argv[])
     if (bsol_sync_to_l2_factory)
         c_freq_khz = sim::compute_freq_khz(l2_spec.dm * compute_syndrome_extraction_round_time_ns);
     else
-        c_freq_khz = sim::compute_freq_khz(COMPUTE_CODE_DISTANCE * compute_syndrome_extraction_round_time_ns);
+        c_freq_khz = sim::compute_freq_khz(compute_code_distance * compute_syndrome_extraction_round_time_ns);
 
     sim::COMPUTE_SUBSYSTEM* compute_subsystem = new sim::COMPUTE_SUBSYSTEM{c_freq_khz,
                                                                              traces,
                                                                              compute_local_memory_capacity,
                                                                              concurrent_clients,
                                                                              inst_sim,
-                                                                             alloc.second_level,
+                                                                             alloc.second_level.empty() ? alloc.first_level : alloc.second_level,
                                                                              memory_subsystem,
                                                                              conf};
 
@@ -260,7 +286,7 @@ main(int argc, char* argv[])
 
     /* print stats */
 
-    size_t compute_physical_qubits = sim::configuration::surface_code_physical_qubit_count(COMPUTE_CODE_DISTANCE)
+    size_t compute_physical_qubits = sim::configuration::surface_code_physical_qubit_count(compute_code_distance)
                                             * compute_local_memory_capacity;
     size_t memory_physical_qubits = std::transform_reduce(memory_subsystem->storages().begin(),
                                                             memory_subsystem->storages().end(),

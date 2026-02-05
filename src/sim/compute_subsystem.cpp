@@ -6,6 +6,8 @@
 #include "sim/compute_subsystem.h"
 #include "sim/memory_subsystem.h"
 
+#include <fstream>
+
 namespace sim
 {
 
@@ -15,9 +17,19 @@ namespace sim
 namespace
 {
 
+using inst_ptr = COMPUTE_SUBSYSTEM::inst_ptr;
+
 static std::uniform_real_distribution FPR{0.0,1.0};
 
+static std::ofstream ROTATION_LOGGER{"rotation.log"};
+
 bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
+
+/*
+ * Writes rotation info to `ROTATION_LOGGER`
+ * */
+void _log_rotation(inst_ptr, std::string_view);
+void _log_runahead(inst_ptr);
 
 } // anon
 
@@ -424,6 +436,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     RPC_LOOKUP_RESULT lookup_result = rpc_lookup_rotation(inst, q);
     if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
     {
+        _log_rotation(inst, "success");
         retire_instruction(c, inst, 2);
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::NEEDS_CORRECTION)
@@ -433,6 +446,8 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
         inst->urotseq = inst->corr_urotseq_array.front();
         inst->corr_urotseq_array.pop_front();
 
+        _log_rotation(inst, "failure");
+
         // since we will have to do a corrective rotation, search for future rotations
         // to schedule:
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
@@ -440,8 +455,10 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
         // if there is too little progress (<= 4 uops), then invalidate and return false
-        if (rotation_subsystem_->get_rotation_progress(inst) <= 4)
+        if (rotation_subsystem_->get_rotation_progress(inst) == 0)
         {
+            _log_rotation(inst, "invalidate");
+
             rotation_subsystem_->invalidate_rotation(inst);
             rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
             return false;
@@ -452,6 +469,8 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else
     {
+        _log_rotation(inst, "not found");
+
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
     }
     return (lookup_result == RPC_LOOKUP_RESULT::RETIRE) || (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS);
@@ -495,8 +514,8 @@ void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
-    constexpr size_t RPC_DEGREE{2};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{128};
+    constexpr size_t RPC_DEGREE{4};
     
     inst->rpc_has_been_visited = true;
 
@@ -514,16 +533,20 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                         { 
                                             return x != inst 
                                                     && is_rotation_instruction(x->type)
-                                                    && !x->rpc_has_been_visited
                                                     && !rs->is_rotation_pending(x);
                                         }, 
                                         inst, 
                                         RPC_DAG_LOOKAHEAD_START_LAYER,
                                         RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
+        {
             rotation_subsystem_->submit_rotation_request(dependent_inst);
+            _log_runahead(dependent_inst);
+        } 
         else
+        {
             break;
+        }
     }
 }
 
@@ -533,11 +556,42 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
 namespace
 {
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 bool
 _client_is_done(const CLIENT* c, uint64_t s)
 {
     return c->s_unrolled_inst_done >= s;
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Logging utilities:
+ * */
+
+#define ENABLE_ROTATION_LOGGER
+
+void
+_log_rotation(inst_ptr inst, std::string_view what)
+{
+#if defined(ENABLE_ROTATION_LOGGER)
+    ROTATION_LOGGER << "(runahead " << what << ") " << *inst << "\n";
+#endif
+}
+
+void
+_log_runahead(inst_ptr inst)
+{
+#if defined(ENABLE_ROTATION_LOGGER)
+    ROTATION_LOGGER << "   --> " << *inst << "\n";
+#endif
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 }
 

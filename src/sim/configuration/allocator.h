@@ -56,6 +56,13 @@ struct FACTORY_SPECIFICATION
 };
 
 /*
+ * If there is only a single level of factories, then it is as simple as dividing
+ * `physical_qubit_budget` by the overhead per factory.
+ * */
+
+FACTORY_ALLOCATION l1_factory_allocation(size_t physical_qubit_budget, FACTORY_SPECIFICATION);
+
+/*
  * Allocates a factory within a given physical qubit budget.
  *
  * Since we target an error rate of 1e-12 per magic state,

@@ -128,6 +128,9 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
 void
 print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<T_FACTORY_BASE*> factories)
 {
+    if (factories.empty())
+        return;
+
     out << header << "\n";
     
     // accumulate stats:
