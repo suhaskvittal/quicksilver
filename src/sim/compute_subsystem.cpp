@@ -514,7 +514,7 @@ void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{128};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
     constexpr size_t RPC_DEGREE{4};
     
     inst->rpc_has_been_visited = true;
@@ -528,19 +528,20 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
         if (!rotation_subsystem_->can_accept_rotation_request())
             break;
         
-        auto* dependent_inst = c->dag()->find_earliest_dependent_instruction_such_that(
-                                        [inst, rs=rotation_subsystem_] (inst_ptr x) 
-                                        { 
-                                            return x != inst 
-                                                    && is_rotation_instruction(x->type)
-                                                    && !rs->is_rotation_pending(x);
-                                        }, 
-                                        inst, 
-                                        RPC_DAG_LOOKAHEAD_START_LAYER,
-                                        RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
+        auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
+                                            [inst, rs=rotation_subsystem_] (inst_ptr x) 
+                                            { 
+                                                return x != inst 
+                                                        && is_rotation_instruction(x->type)
+                                                        && !rs->is_rotation_pending(x)
+                                                        && (x->number - inst->number) < 500;
+                                            }, 
+                                            inst, 
+                                            RPC_DAG_LOOKAHEAD_START_LAYER,
+                                            RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
         {
-            rotation_subsystem_->submit_rotation_request(dependent_inst);
+            rotation_subsystem_->submit_rotation_request(dependent_inst, layer, inst);
             _log_runahead(dependent_inst);
         } 
         else

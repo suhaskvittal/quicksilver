@@ -90,14 +90,14 @@ public:
      * Finds the earliest instruction dependent on the given instruction in the front layer
      * that satisfies the given predicate (not including the input instruction).
      *
-     * Search is limited from `min_layer` to `max_layer`. If no such instruction is found, then
-     * `nullptr` is returned.
+     * Search is limited from `min_layer` to `max_layer`. Returns the instruction and layer it
+     * was found in. If no instruction was found, then `inst_ptr == nullptr`
      * */
     template <class PRED>
-    inst_ptr find_earliest_dependent_instruction_such_that(const PRED&, 
-                                                            inst_ptr, 
-                                                            size_t min_layer,
-                                                            size_t max_layer) const;
+    std::pair<inst_ptr, size_t> find_earliest_dependent_instruction_such_that(const PRED&, 
+                                                                                inst_ptr, 
+                                                                                size_t min_layer,
+                                                                                size_t max_layer) const;
 
     size_t inst_count() const;
 };

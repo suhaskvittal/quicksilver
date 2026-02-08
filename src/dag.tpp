@@ -64,7 +64,7 @@ DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_la
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> typename DAG::inst_ptr
+template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
 DAG::find_earliest_dependent_instruction_such_that(const PRED& pred, 
                                                     inst_ptr source, 
                                                     size_t min_layer,
@@ -84,14 +84,14 @@ DAG::find_earliest_dependent_instruction_such_that(const PRED& pred,
         {
             next_layer_set.insert(x->dependent.begin(), x->dependent.end());
             if (layer_count >= min_layer && pred(x->inst))
-                return x->inst;
+                return std::make_pair(x->inst, layer_count);
         }
         curr_layer.assign(next_layer_set.begin(), next_layer_set.end());
         next_layer_set.clear();
         layer_count++;
     }
     
-    return nullptr;
+    return std::make_pair(nullptr, 0);
 }
 
 ////////////////////////////////////////////////////////////

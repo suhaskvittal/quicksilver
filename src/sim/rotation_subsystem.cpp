@@ -66,7 +66,7 @@ ROTATION_SUBSYSTEM::can_accept_rotation_request() const
 }
 
 bool
-ROTATION_SUBSYSTEM::submit_rotation_request(inst_ptr inst)
+ROTATION_SUBSYSTEM::submit_rotation_request(inst_ptr inst, size_t layer, inst_ptr triggering_inst)
 {
     assert(!is_rotation_pending(inst));
     assert(is_rotation_instruction(inst->type));
@@ -76,7 +76,13 @@ ROTATION_SUBSYSTEM::submit_rotation_request(inst_ptr inst)
     QUBIT* q = free_qubits_.back();
     free_qubits_.pop_back();
 
-    rotation_request_entry e{.inst=inst, .allocated_qubit=q, .cycle_installed=parent_->current_cycle()};
+    rotation_request_entry e
+    {
+        .inst=inst,
+        .dag_layer=layer,
+        .allocated_qubit=q,
+        .triggering_inst_info=triggering_inst->to_string()
+    };
     requests_.push_back(e);
     pending_count_++;
     return true;
@@ -94,9 +100,18 @@ ROTATION_SUBSYSTEM::find_and_delete_rotation_if_done(inst_ptr inst)
     auto it = _find_match(requests_.begin(), requests_.end(), inst);
     if (it != requests_.end() && it->done)
     {
+        cycle_type idle_cycles = parent_->current_cycle() - it->cycle_done;
         // update stats:
         s_rotation_service_cycles += it->cycle_done - it->cycle_installed;
-        s_rotation_idle_cycles += parent_->current_cycle() - it->cycle_done;
+        s_rotation_idle_cycles += idle_cycles;
+        
+        if (idle_cycles > 1000)
+        {
+            std::cout << "inst: " << *inst 
+                        << ", idle cycles = " << idle_cycles 
+                        << ", trigger = " << it->triggering_inst_info << "\n";
+        }
+
         s_rotations_completed++;
         free_qubits_.push_back(it->allocated_qubit);
         requests_.erase(it);
@@ -138,12 +153,14 @@ ROTATION_SUBSYSTEM::operate()
 
     long progress{0};
 
-    auto it = std::find_if(requests_.begin(), requests_.end(), [] (const auto& e) { return !e.done; });
-    assert(it != rotation_assignment_map_.end());
-    auto* inst = it->inst;
-    auto* q = it->allocated_qubit;
+    auto req_it = std::find_if(requests_.begin(), requests_.end(), [] (const auto& e) { return !e.done; });
+    assert(req_it != rotation_assignment_map_.end());
+    auto* inst = req_it->inst;
+    auto* q = req_it->allocated_qubit;
     if (q->cycle_available > current_cycle())
         return 0;
+
+    req_it->cycle_installed = std::min(parent_->current_cycle(), req_it->cycle_installed);
 
     const size_t num_teleports = (inst->rpc_is_critical || GL_RPC_RS_ALWAYS_USE_TELEPORTATION) 
                                     ? GL_T_GATE_TELEPORTATION_MAX
@@ -161,8 +178,8 @@ ROTATION_SUBSYSTEM::operate()
     {
         // instruction is done -- reset uop progress for safety
         inst->reset_uops();
-        it->done = true;
-        it->cycle_done = parent_->current_cycle();
+        req_it->done = true;
+        req_it->cycle_done = parent_->current_cycle();
         pending_count_--;
     }
 

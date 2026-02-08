@@ -162,12 +162,12 @@ main(int argc, char* argv[])
            memory_code_distance;
     if (regime == "M")  // 1e-6 error rate
     {
-        compute_code_distance = 9;
+        compute_code_distance = 11;
         memory_code_distance = 12;
     }
     else if (regime == "G")
     {
-        compute_code_distance = 15;
+        compute_code_distance = 17;
         memory_code_distance = 18;
         // modify `l1_spec` to use d = 5 color code cultivation
         l1_spec.output_error_rate = 1e-8;

@@ -8,6 +8,8 @@
 
 #include "sim/compute_base.h"
 
+#include <limits>
+
 namespace sim
 {
 
@@ -25,14 +27,17 @@ public:
      * */
     struct rotation_request_entry
     {
-        inst_ptr inst{nullptr};
-        QUBIT* allocated_qubit{nullptr};
-        bool done{false};
+        inst_ptr inst;
+        size_t   dag_layer;
+        QUBIT*   allocated_qubit{nullptr};
+        bool     done{false};
+
+        std::string triggering_inst_info;
 
         /*
          * These are compute cycles, not cycles of the `ROTATION_SUBSYSTEM`
          * */
-        cycle_type cycle_installed;
+        cycle_type cycle_installed{std::numeric_limits<cycle_type>::max()};
         cycle_type cycle_done;
     };
 
@@ -44,7 +49,6 @@ private:
     /*
      * Stores assignment of rotation gates to logical qubits.
      * */
-    std::unordered_map<inst_ptr, rotation_request_entry> rotation_assignment_map_;
     std::vector<rotation_request_entry> requests_;
 
     /*
@@ -89,7 +93,7 @@ public:
      * Adds a rotation request to be completed. Returns true if
      * the request was allocated a qubit, false otherwise.
      * */
-    bool submit_rotation_request(inst_ptr);
+    bool submit_rotation_request(inst_ptr, size_t dag_layer, inst_ptr triggering_inst);
 
     /*
      * Returns true if the rotation instruction is already pending
