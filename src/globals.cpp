@@ -7,6 +7,7 @@
 
 #include <exception>
 #include <iostream>
+#include <sstream>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -18,6 +19,20 @@ int64_t GL_USE_RPC_ISA{0};
 
 namespace sim
 {
+
+bool
+QUBIT::operator==(const QUBIT& other) const
+{
+    return (qubit_id == other.qubit_id) && (client_id == other.client_id);
+}
+
+std::string
+QUBIT::to_string() const
+{
+    std::stringstream ss;
+    ss << *this;
+    return ss.str();
+}
 
 std::ostream&
 operator<<(std::ostream& out, const QUBIT& q)

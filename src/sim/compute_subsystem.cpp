@@ -141,40 +141,43 @@ COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
     for (auto* f : top_level_t_factories_)
         f->print_deadlock_info(ostrm);
 
-    std::cout << "local memory contents:";
+    ostrm << "local memory contents:";
     for (auto* q : local_memory_->contents())
-        std::cout << " " << *q;
-    std::cout << "\n";
+        ostrm << " " << *q;
+    ostrm << "\n";
 
     for (auto* c : active_clients_)
     {
-        std::cout << "Client " << static_cast<int>(c->id) << " front layer:\n";
+        ostrm << "Client " << static_cast<int>(c->id) << " front layer:\n";
         for (const auto* inst : c->dag()->get_front_layer())
         {
-            std::cout << "\t" << *inst;
+            ostrm << "\t" << *inst;
             if (inst->uop_count() > 0)
             {
-                std::cout << "\tcurrent uop = " << *inst->current_uop() << ", " << inst->uops_retired()
+                ostrm << "\tcurrent uop = " << *inst->current_uop() << ", " << inst->uops_retired()
                             << " of " << inst->uop_count();
             }
 
-            std::cout << "\tcycle ready (current cycle = " << current_cycle() << "):";
+            ostrm << "\tcycle ready (current cycle = " << current_cycle() << "):";
             std::for_each(inst->q_begin(), inst->q_end(),
-                        [this, c] (auto q_id)
+                        [this, c, &ostrm] (auto q_id)
                         {
                             QUBIT* q = c->qubits()[q_id];
-                            std::cout << " " << q->cycle_available;
+                            ostrm << " " << q->cycle_available;
                         });
-            std::cout << "\tin memory: ";
+            ostrm << "\tin memory: ";
             std::for_each(inst->q_begin(), inst->q_end(),
-                        [this, c] (auto q_id)
+                        [this, c, &ostrm] (auto q_id)
                         {
                             QUBIT* q = c->qubits()[q_id];
-                            std::cout << static_cast<int>(local_memory_->contains(q));
+                            ostrm << static_cast<int>(local_memory_->contains(q));
                         });
-            std::cout << "\n";
+            ostrm << "\n";
         }
     }
+
+    if (is_rpc_enabled())
+        rotation_subsystem_->print_deadlock_info(ostrm);
 }
 
 ////////////////////////////////////////////////////////////
@@ -317,6 +320,9 @@ COMPUTE_SUBSYSTEM::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_
     if (is_rotation_instruction(inst->type))
         s_total_rotations++;
 
+    if (is_rpc_enabled())
+        rotation_subsystem_->invalidate(inst);
+
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);
 }
@@ -455,11 +461,11 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
         // if there is too little progress (<= 4 uops), then invalidate and return false
-        if (rotation_subsystem_->get_rotation_progress(inst) == 0)
+        if (rotation_subsystem_->get_progress(inst) == 0)
         {
             _log_rotation(inst, "invalidate");
 
-            rotation_subsystem_->invalidate_rotation(inst);
+            rotation_subsystem_->invalidate(inst);
             rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
             return false;
         }
@@ -486,7 +492,7 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
         return RPC_LOOKUP_RESULT::NOT_FOUND;
     assert(is_rotation_instruction(inst->type));
 
-    if (rotation_subsystem_->find_and_delete_rotation_if_done(inst))
+    if (rotation_subsystem_->find_and_delete_request_if_done(inst))
     {
         bool success = (GL_RNG()&1) > 0;
         q->cycle_available = current_cycle() + 2; // it takes 2 cycles to attempt the teleportation.
@@ -497,7 +503,7 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
 
         return success ? RPC_LOOKUP_RESULT::RETIRE : RPC_LOOKUP_RESULT::NEEDS_CORRECTION;
     }
-    else if (rotation_subsystem_->is_rotation_pending(inst))
+    else if (rotation_subsystem_->is_request_pending(inst))
     {
         return RPC_LOOKUP_RESULT::IN_PROGRESS;
     }
@@ -525,7 +531,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
 
     for (size_t i = 0; i < RPC_DEGREE; i++)
     {
-        if (!rotation_subsystem_->can_accept_rotation_request())
+        if (!rotation_subsystem_->can_accept_request())
             break;
         
         auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
@@ -533,7 +539,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                             { 
                                                 return x != inst 
                                                         && is_rotation_instruction(x->type)
-                                                        && !rs->is_rotation_pending(x)
+                                                        && !rs->is_request_pending(x) 
                                                         && (x->number - inst->number) < 500;
                                             }, 
                                             inst, 
@@ -541,7 +547,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                             RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
         {
-            rotation_subsystem_->submit_rotation_request(dependent_inst, layer, inst);
+            rotation_subsystem_->submit_request(dependent_inst, layer, inst);
             _log_runahead(dependent_inst);
         } 
         else

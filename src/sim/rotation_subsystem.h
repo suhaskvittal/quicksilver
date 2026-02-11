@@ -32,13 +32,30 @@ public:
         QUBIT*   allocated_qubit{nullptr};
         bool     done{false};
 
+        bool                    invalidated{false};
+        rotation_request_entry* next_request{nullptr};
+
+        /*
+         * Debug info
+         * */
         std::string triggering_inst_info;
 
         /*
-         * These are compute cycles, not cycles of the `ROTATION_SUBSYSTEM`
+         * These are compute cycles, not cycles of the `ROTATION_SUBSYSTEM` (see `parent_` field)
          * */
         cycle_type cycle_installed{std::numeric_limits<cycle_type>::max()};
         cycle_type cycle_done;
+    };
+
+    using request_map_type = std::unordered_map<inst_ptr, rotation_request_entry*>;
+
+    /*
+     * Batch request submission (see `submit_batch_request()`)
+     * */
+    struct batch_request_info
+    {
+        inst_ptr inst;
+        size_t   dag_layer;
     };
 
     uint64_t s_rotations_completed{0};
@@ -46,15 +63,16 @@ public:
     uint64_t s_rotation_idle_cycles{0};
     uint64_t s_invalidates{0};
 private:
-    /*
-     * Stores assignment of rotation gates to logical qubits.
-     * */
-    std::vector<rotation_request_entry> requests_;
+    request_map_type request_map_;
 
     /*
      * Qubits available for serving rotation requests.
+     *
+     * `active_qubit_` is an in-use qubit that is only qubit that
+     * accepts operations.
      * */
     std::vector<QUBIT*> free_qubits_;
+    QUBIT*              active_qubit_{nullptr};
 
     /*
      * This limits the amount of bandwidth that this object can
@@ -74,8 +92,6 @@ private:
      * `parent_` is mostly used to update stats.
      * */
     const COMPUTE_SUBSYSTEM* parent_;
-
-    size_t pending_count_{0};
 public:
     ROTATION_SUBSYSTEM(double freq_khz, 
                         size_t capacity,
@@ -83,39 +99,53 @@ public:
                         double watermark);
     ~ROTATION_SUBSYSTEM();
 
+    void print_deadlock_info(std::ostream&) const override;
+
     /*
      * Returns true if a rotation request can be allocated a
      * qubit.
      * */
-    bool can_accept_rotation_request() const;
+    bool can_accept_request() const;
 
     /*
-     * Adds a rotation request to be completed. Returns true if
-     * the request was allocated a qubit, false otherwise.
+     * `submit_rotation_request` submits a standalone request and returns true
+     * if the request was added.
+     *
+     * `submit_batch_request` submits a group of requests which form a linked list.
+     * Once the head of the linked list is retrieved, it is removed and the 
+     * next entry starts immediately.
      * */
-    bool submit_rotation_request(inst_ptr, size_t dag_layer, inst_ptr triggering_inst);
+    bool submit_request(inst_ptr, size_t dag_layer, inst_ptr triggering_inst);
+    bool submit_batch_request(std::vector<batch_request_info>, inst_ptr triggering_inst);
 
     /*
      * Returns true if the rotation instruction is already pending
      * */
-    bool is_rotation_pending(inst_ptr) const;
+    bool is_request_pending(inst_ptr) const;
 
     /*
-     * Returns true if the rotation is complete on some given qubit.
+     * Returns true if the request for the given rotation instruction is complete on some given qubit.
      * */
-    bool find_and_delete_rotation_if_done(inst_ptr);
+    bool find_and_delete_request_if_done(inst_ptr);
 
     /*
      * Returns number of uops retired for the given rotation
      * */
-    size_t get_rotation_progress(inst_ptr) const;
+    size_t get_progress(inst_ptr) const;
 
     /*
-     * Invalidates the rotation entry
+     * Invalidates the rotation entry for the given instruction, and deletes it if it is currently
+     * in progress.
      * */
-    void invalidate_rotation(inst_ptr);
+    void invalidate(inst_ptr);
 protected:
     long operate() override;
+private:
+    /*
+     * Returns true if this is the last entry in the linked list
+     * */
+    bool delete_request(rotation_request_entry*);
+    void get_new_active_qubit();
 };
 
 ////////////////////////////////////////////////////////////
