@@ -9,6 +9,8 @@
 #include "sim/compute_base.h"
 
 #include <limits>
+#include <queue>
+#include <unordered_set>
 
 namespace sim
 {
@@ -32,8 +34,7 @@ public:
         QUBIT*   allocated_qubit{nullptr};
         bool     done{false};
 
-        bool                    invalidated{false};
-        rotation_request_entry* next_request{nullptr};
+        bool invalidated{false};
 
         /*
          * Debug info
@@ -50,13 +51,18 @@ public:
     using request_map_type = std::unordered_map<inst_ptr, rotation_request_entry*>;
 
     /*
-     * Batch request submission (see `submit_batch_request()`)
+     * Comparator for priority queue: oldest entry (smallest dag_layer,
+     * then smallest instruction number) has highest priority.
+     * Note: std::priority_queue is a max-heap, so we use > for min-heap behavior.
      * */
-    struct batch_request_info
+    struct request_priority_comparator
     {
-        inst_ptr inst;
-        size_t   dag_layer;
+        bool operator()(const rotation_request_entry* a, const rotation_request_entry* b) const;
     };
+
+    using pending_queue_type = std::priority_queue<rotation_request_entry*,
+                                                    std::vector<rotation_request_entry*>,
+                                                    request_priority_comparator>;
 
     uint64_t s_rotations_completed{0};
     uint64_t s_rotation_service_cycles{0};
@@ -73,6 +79,14 @@ private:
      * */
     std::vector<QUBIT*> free_qubits_;
     QUBIT*              active_qubit_{nullptr};
+
+    /*
+     * Priority queue for rotation requests without an allocated qubit.
+     * Ordered by (dag_layer, instruction number) so oldest entries are served first.
+     * When a request with a qubit completes, the top of this queue
+     * (skipping invalidated entries) receives the freed qubit.
+     * */
+    pending_queue_type pending_queue_;
 
     /*
      * This limits the amount of bandwidth that this object can
@@ -108,15 +122,11 @@ public:
     bool can_accept_request() const;
 
     /*
-     * `submit_rotation_request` submits a standalone request and returns true
-     * if the request was added.
-     *
-     * `submit_batch_request` submits a group of requests which form a linked list.
-     * Once the head of the linked list is retrieved, it is removed and the 
-     * next entry starts immediately.
+     * Submits a rotation request and returns true if the request was added.
+     * If a free qubit is available, the request receives it immediately;
+     * otherwise, the request goes into pending_queue_.
      * */
     bool submit_request(inst_ptr, size_t dag_layer, inst_ptr triggering_inst);
-    bool submit_batch_request(std::vector<batch_request_info>, inst_ptr triggering_inst);
 
     /*
      * Returns true if the rotation instruction is already pending
@@ -141,11 +151,14 @@ public:
 protected:
     long operate() override;
 private:
-    /*
-     * Returns true if this is the last entry in the linked list
-     * */
-    bool delete_request(rotation_request_entry*);
+    void delete_request(rotation_request_entry*);
     void get_new_active_qubit();
+
+    /*
+     * Pops from pending_queue_, deleting any invalidated entries,
+     * and returns the first valid request (or nullptr if none).
+     * */
+    rotation_request_entry* pop_next_valid_pending_request();
 };
 
 ////////////////////////////////////////////////////////////

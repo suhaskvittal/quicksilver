@@ -18,8 +18,6 @@ namespace
 using inst_ptr = ROTATION_SUBSYSTEM::inst_ptr;
 using rotation_request_entry = ROTATION_SUBSYSTEM::rotation_request_entry;
 
-rotation_request_entry* _get_next_valid_request_in_linked_list(rotation_request_entry*);
-
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -50,6 +48,35 @@ ROTATION_SUBSYSTEM::ROTATION_SUBSYSTEM(double freq_khz,
 
 ROTATION_SUBSYSTEM::~ROTATION_SUBSYSTEM()
 {
+    std::unordered_set<rotation_request_entry*> to_delete;
+
+    for (auto& [inst, req] : request_map_)
+        to_delete.insert(req);
+
+    while (!pending_queue_.empty())
+    {
+        to_delete.insert(pending_queue_.top());
+        pending_queue_.pop();
+    }
+
+    for (auto* req : to_delete)
+        delete req;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+ROTATION_SUBSYSTEM::request_priority_comparator::operator()(
+        const rotation_request_entry* a,
+        const rotation_request_entry* b) const
+{
+    if (a->dag_layer < b->dag_layer)
+        return false;
+    else if (a->dag_layer > b->dag_layer)
+        return true;
+    else
+        return a->inst->number > b->inst->number;
 }
 
 ////////////////////////////////////////////////////////////
@@ -74,8 +101,12 @@ ROTATION_SUBSYSTEM::print_deadlock_info(std::ostream& out) const
             << ", .cycle_done = " << p.second->cycle_done
             << " }";
     }
-    out << "\n\tactive qubit = " << *active_qubit_
-        << "\n";
+    out << "\n\tpending_queue size = " << pending_queue_.size();
+    if (active_qubit_ != nullptr)
+        out << "\n\tactive qubit = " << *active_qubit_;
+    else
+        out << "\n\tactive qubit = nullptr";
+    out << "\n";
 }
 
 ////////////////////////////////////////////////////////////
@@ -90,47 +121,30 @@ ROTATION_SUBSYSTEM::can_accept_request() const
 bool
 ROTATION_SUBSYSTEM::submit_request(inst_ptr inst, size_t layer, inst_ptr triggering_inst)
 {
-    batch_request_info tmp{.inst=inst, .dag_layer=layer};
-    return submit_batch_request({tmp}, triggering_inst);
-}
-
-bool
-ROTATION_SUBSYSTEM::submit_batch_request(std::vector<batch_request_info> reqs, inst_ptr triggering_inst)
-{
-    if (reqs.empty())
-        return true;
-    if (free_qubits_.empty())
+    if (is_request_pending(inst))
         return false;
 
-    rotation_request_entry* prev{nullptr};
-    for (const auto& r : reqs)
+    rotation_request_entry* req = new rotation_request_entry
+                                    {
+                                        .inst=inst,
+                                        .dag_layer=layer,
+                                        .triggering_inst_info=triggering_inst->to_string()
+                                    };
+
+    if (!free_qubits_.empty())
     {
-        if (is_request_pending(r.inst))
-            continue;
-
-        rotation_request_entry* req = new rotation_request_entry
-                                        {
-                                            .inst=r.inst,
-                                            .dag_layer=r.dag_layer,
-                                            .triggering_inst_info=triggering_inst->to_string()
-                                        };
-        if (prev == nullptr)
-        {
-            QUBIT* q = free_qubits_.back();
-            free_qubits_.pop_back();
-            req->allocated_qubit = q;
-            if (active_qubit_ == nullptr)
-                active_qubit_ = q;
-        }
-        else
-        {
-            prev->next_request = req;
-        }
-
-        request_map_[r.inst] = req;
-        prev = req;
+        QUBIT* q = free_qubits_.back();
+        free_qubits_.pop_back();
+        req->allocated_qubit = q;
+        if (active_qubit_ == nullptr)
+            active_qubit_ = q;
+    }
+    else
+    {
+        pending_queue_.push(req);
     }
 
+    request_map_[inst] = req;
     return true;
 }
 
@@ -194,7 +208,8 @@ ROTATION_SUBSYSTEM::invalidate(inst_ptr inst)
     request_map_.erase(it);
     s_invalidates++;
 
-    // if this is the head of the linked list, then delete:
+    // If has qubit, delete and hand off. If in pending_queue_,
+    // it will be skipped/deleted when popped via pop_next_valid_pending_request().
     if (req->allocated_qubit != nullptr)
         delete_request(req);
 }
@@ -250,20 +265,42 @@ ROTATION_SUBSYSTEM::operate()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+void
 ROTATION_SUBSYSTEM::delete_request(rotation_request_entry* req)
 {
-    auto* next_req = _get_next_valid_request_in_linked_list(req);
-    if (next_req != nullptr)
-        next_req->allocated_qubit = req->allocated_qubit;
-    else
-        free_qubits_.push_back(req->allocated_qubit);
+    QUBIT* freed_qubit = req->allocated_qubit;
 
-    // if `allocated_qubit` is active, then move a different qubit into the active region:
-    if (req->allocated_qubit == active_qubit_)
+    rotation_request_entry* next_req = pop_next_valid_pending_request();
+    if (next_req != nullptr)
+        next_req->allocated_qubit = freed_qubit;
+    else
+        free_qubits_.push_back(freed_qubit);
+
+    if (freed_qubit == active_qubit_)
         get_new_active_qubit();
+
     delete req;
-    return (next_req == nullptr);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+ROTATION_SUBSYSTEM::rotation_request_entry*
+ROTATION_SUBSYSTEM::pop_next_valid_pending_request()
+{
+    while (!pending_queue_.empty())
+    {
+        rotation_request_entry* req = pending_queue_.top();
+        pending_queue_.pop();
+
+        if (req->invalidated)
+        {
+            delete req;
+            continue;
+        }
+        return req;
+    }
+    return nullptr;
 }
 
 ////////////////////////////////////////////////////////////
@@ -319,27 +356,6 @@ ROTATION_SUBSYSTEM::get_new_active_qubit()
         */
     }
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-namespace
-{
-
-rotation_request_entry*
-_get_next_valid_request_in_linked_list(rotation_request_entry* req)
-{
-    auto* next_req = req->next_request;
-    while (next_req != nullptr && next_req->invalidated)
-    {
-        auto* next_next_req = next_req->next_request;
-        delete next_req;
-        next_req = next_next_req;
-    }
-    return next_req;
-}
-
-} // namespace anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

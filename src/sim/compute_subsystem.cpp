@@ -488,6 +488,8 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
 COMPUTE_SUBSYSTEM::RPC_LOOKUP_RESULT
 COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
 {
+    constexpr cycle_type RPC_FETCH_CYCLES{2};
+
     if (!is_rpc_enabled())
         return RPC_LOOKUP_RESULT::NOT_FOUND;
     assert(is_rotation_instruction(inst->type));
@@ -495,7 +497,9 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
     if (rotation_subsystem_->find_and_delete_request_if_done(inst))
     {
         bool success = (GL_RNG()&1) > 0;
-        q->cycle_available = current_cycle() + 2; // it takes 2 cycles to attempt the teleportation.
+        q->cycle_available = current_cycle() 
+                                    + RPC_FETCH_CYCLES
+                                    + 2; // it takes 2 cycles to attempt the teleportation.
 
         s_total_rpc++;
         if (success)
