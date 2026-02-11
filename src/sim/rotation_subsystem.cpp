@@ -18,6 +18,8 @@ namespace
 using inst_ptr = ROTATION_SUBSYSTEM::inst_ptr;
 using rotation_request_entry = ROTATION_SUBSYSTEM::rotation_request_entry;
 
+bool _request_compare(const rotation_request_entry*, const rotation_request_entry*);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -67,20 +69,36 @@ ROTATION_SUBSYSTEM::~ROTATION_SUBSYSTEM()
 ////////////////////////////////////////////////////////////
 
 bool
-ROTATION_SUBSYSTEM::request_priority_comparator::operator()(
-        const rotation_request_entry* a,
-        const rotation_request_entry* b) const
+ROTATION_SUBSYSTEM::request_priority_comparator::operator()(const rotation_request_entry* a,
+                                                            const rotation_request_entry* b) const
 {
-    if (a->dag_layer < b->dag_layer)
-        return false;
-    else if (a->dag_layer > b->dag_layer)
-        return true;
-    else
-        return a->inst->number > b->inst->number;
+    return _request_compare(b,a);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+void
+ROTATION_SUBSYSTEM::print_progress(std::ostream& out) const
+{
+    out << "rotation_subsystem-------------------------"
+        << "\n\ttotal pending requests: " << pending_queue_.size()
+        << "\n\tpending requests with allocated qubit:";
+    for (const auto& [inst, req] : request_map_)
+    {
+        if (req->allocated_qubit != nullptr)
+        {
+            out << "\n\t\t" << *inst 
+                << ", qubit: " << *req->allocated_qubit
+                << ", progress = " << inst->uops_retired()
+                << ", done = " << req->done;
+        }
+    }
+    if (active_qubit_ == nullptr)
+        out << "\n\tno active qubit\n";
+    else
+        out << "\n\tactive_qubit = " << *active_qubit_ << "\n";
+}
 
 void
 ROTATION_SUBSYSTEM::print_deadlock_info(std::ostream& out) const
@@ -115,7 +133,8 @@ ROTATION_SUBSYSTEM::print_deadlock_info(std::ostream& out) const
 bool
 ROTATION_SUBSYSTEM::can_accept_request() const
 {
-    return !free_qubits_.empty();
+//  return !free_qubits_.empty();
+    return true;
 }
 
 bool
@@ -197,6 +216,23 @@ ROTATION_SUBSYSTEM::get_progress(inst_ptr inst) const
 ////////////////////////////////////////////////////////////
 
 void
+ROTATION_SUBSYSTEM::mark_critical(inst_ptr inst)
+{
+    if (!is_request_pending(inst))
+        return;
+    auto* req = request_map_.at(inst);
+    bool was_noncritical_before = req->critical;
+    req->critical = true;
+
+    // try to take away the active qubit if possible
+    if (was_noncritical_before && req->allocated_qubit != nullptr && active_qubit_ != req->allocated_qubit)
+        get_new_active_qubit();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
 ROTATION_SUBSYSTEM::invalidate(inst_ptr inst)
 {
     auto it = request_map_.find(inst);
@@ -237,16 +273,16 @@ ROTATION_SUBSYSTEM::operate()
 
     req->cycle_installed = std::min(parent_->current_cycle(), req->cycle_installed);
 
-    const size_t num_teleports = (inst->rpc_is_critical || GL_RPC_RS_ALWAYS_USE_TELEPORTATION) 
+    const size_t num_teleports = (req->critical || GL_RPC_ALWAYS_USE_TELEPORTATION) 
                                     ? GL_T_GATE_TELEPORTATION_MAX
                                     : 0;
 
     auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, num_teleports,
-                    [this] (const inst_ptr x, const inst_ptr uop)
+                    [this, req] (const inst_ptr x, const inst_ptr uop)
                     {
                         const size_t m = count_available_magic_states();
                         const size_t min_t_count = 1;
-                        return x->rpc_is_critical || (m > min_t_count);
+                        return req->critical || (m > min_t_count);
                     });
     progress += result.progress;
     if (result.progress > 0 && inst->uops_retired() == inst->uop_count())
@@ -276,7 +312,7 @@ ROTATION_SUBSYSTEM::delete_request(rotation_request_entry* req)
     else
         free_qubits_.push_back(freed_qubit);
 
-    if (freed_qubit == active_qubit_)
+    if (freed_qubit == active_qubit_ || active_qubit_ == nullptr)
         get_new_active_qubit();
 
     delete req;
@@ -317,11 +353,7 @@ ROTATION_SUBSYSTEM::get_new_active_qubit()
             continue;
         if (oldest_it != request_map_.end())
         {
-            const size_t d1 = it->second->dag_layer,
-                         d2 = oldest_it->second->dag_layer;
-            const auto i1 = it->first->number,
-                       i2 = oldest_it->first->number;
-            if (d1 < d2 || (d1 == d2 && i1 < i2))
+            if (_request_compare(it->second, oldest_it->second))
                 oldest_it = it;
         }
         else
@@ -338,24 +370,28 @@ ROTATION_SUBSYSTEM::get_new_active_qubit()
     {
         active_qubit_ = oldest_it->second->allocated_qubit;
         active_qubit_->cycle_available = current_cycle() + 2;  // 2 cycle load latency
-
-        /*
-        if (request_map_.size() > 1)
-        {
-            std::cout << "new active qubit: " << *active_qubit_
-                    << " for inst = " << *oldest_it->first
-                    << "\ncandidates:";
-            for (const auto& [inst, req] : request_map_)
-            {
-                if (req->done || req->invalidated)
-                    continue;
-                std::cout << "\n\t" << *inst;
-            }
-            std::cout << "\n";
-        }
-        */
     }
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+bool
+_request_compare(const rotation_request_entry* a, const rotation_request_entry* b)
+{
+    if (a->critical && !b->critical)
+        return true;
+    else if (!a->critical && b->critical)
+        return false;
+    else
+        return a->inst->number < b->inst->number;
+}
+
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

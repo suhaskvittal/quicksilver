@@ -138,12 +138,8 @@ public:
      *
      * `rpc_has_been_visited` is used to track whether this
      * is the first time a given instruction has been seen.
-     *
-     * `rpc_is_critical` is set for a pending rotation that
-     * is currently in the DAG's front layer.
      * */
     bool rpc_has_been_visited{false};
-    bool rpc_is_critical{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

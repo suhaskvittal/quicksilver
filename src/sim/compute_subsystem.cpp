@@ -133,6 +133,9 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
                 << "\n\tkips = " << kips
                 << "\n";
     }
+
+    if (is_rpc_enabled())
+        rotation_subsystem_->print_progress(ostrm);
 }
 
 void
@@ -442,6 +445,9 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     RPC_LOOKUP_RESULT lookup_result = rpc_lookup_rotation(inst, q);
     if (lookup_result == RPC_LOOKUP_RESULT::RETIRE)
     {
+        if (GL_RPC_ALWAYS_RUNAHEAD)
+            rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
+
         _log_rotation(inst, "success");
         retire_instruction(c, inst, 2);
     }
@@ -461,7 +467,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
         // if there is too little progress (<= 4 uops), then invalidate and return false
-        if (rotation_subsystem_->get_progress(inst) == 0)
+        if (rotation_subsystem_->get_progress(inst) < 0.95*inst->uop_count())
         {
             _log_rotation(inst, "invalidate");
 
@@ -470,7 +476,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
             return false;
         }
 
-        inst->rpc_is_critical = true;
+        rotation_subsystem_->mark_critical(inst);
         had_rpc_stall_this_cycle_ = true;
     }
     else
@@ -525,7 +531,6 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
 {
     constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
     constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
-    constexpr size_t RPC_DEGREE{4};
     
     inst->rpc_has_been_visited = true;
 
@@ -533,7 +538,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
         return;
     assert(is_rotation_instruction(inst->type));
 
-    for (size_t i = 0; i < RPC_DEGREE; i++)
+    for (size_t i = 0; i < GL_RPC_DEGREE; i++)
     {
         if (!rotation_subsystem_->can_accept_request())
             break;
@@ -544,7 +549,7 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                                 return x != inst 
                                                         && is_rotation_instruction(x->type)
                                                         && !rs->is_request_pending(x) 
-                                                        && (x->number - inst->number) < 500;
+                                                        && (x->number - inst->number) < GL_RPC_INST_DELTA_LIMIT;
                                             }, 
                                             inst, 
                                             RPC_DAG_LOOKAHEAD_START_LAYER,

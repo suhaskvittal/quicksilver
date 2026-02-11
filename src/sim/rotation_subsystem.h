@@ -35,6 +35,7 @@ public:
         bool     done{false};
 
         bool invalidated{false};
+        bool critical{false};
 
         /*
          * Debug info
@@ -114,6 +115,7 @@ public:
     ~ROTATION_SUBSYSTEM();
 
     void print_deadlock_info(std::ostream&) const override;
+    void print_progress(std::ostream&) const override;
 
     /*
      * Returns true if a rotation request can be allocated a
@@ -142,6 +144,12 @@ public:
      * Returns number of uops retired for the given rotation
      * */
     size_t get_progress(inst_ptr) const;
+
+    /*
+     * Indicates that the given instruction is at the head of the DAG and needs to
+     * be completed ASAP.
+     * */
+    void mark_critical(inst_ptr);
 
     /*
      * Invalidates the rotation entry for the given instruction, and deletes it if it is currently

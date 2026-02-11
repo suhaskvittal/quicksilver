@@ -62,7 +62,16 @@ extern bool GL_T_GATE_DO_AUTOCORRECT;
  * */
 extern int64_t GL_T_GATE_TELEPORTATION_MAX;
 
-extern bool GL_RPC_RS_ALWAYS_USE_TELEPORTATION;
+/*
+ * RPC parameters:
+ *  `GL_RPC_ALWAYS_USE_TELEPORTATION`: parallel T gate teleportation when rotation is non-critical
+ *  `GL_RPC_ALWAYS_RUNAHEAD`: trigger runahead also when rotation suceeds
+ *  `GL_RPC_INST_DELTA_LIMIT`: inst delta limit for runahead (bound on runahead and triggering inst-number delta)
+ * */
+extern bool GL_RPC_ALWAYS_USE_TELEPORTATION;
+extern bool GL_RPC_ALWAYS_RUNAHEAD;
+extern int64_t GL_RPC_INST_DELTA_LIMIT;
+extern int64_t GL_RPC_DEGREE;
 
 /*
  * These variables are just for debugging/speed-of-light analysis:

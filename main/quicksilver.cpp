@@ -86,11 +86,13 @@ main(int argc, char* argv[])
         .optional("-ttpl", "--t-teleport-limit", "Max number of T gate teleportations after initial T gate", sim::GL_T_GATE_TELEPORTATION_MAX, 0)
         .optional("", "--enable-t-autocorrect", "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
 
-
         .optional("-rpc", "--rpc", "Enable rotation precomputation", conf.rpc_enabled, false)
-        .optional("", "--rpc-ttp-always", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_RS_ALWAYS_USE_TELEPORTATION, false)
+        .optional("", "--rpc-ttp-always", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_ALWAYS_USE_TELEPORTATION, false)
         .optional("", "--rpc-capacity", "Amount of rotation precomputation storage", conf.rpc_capacity, 2)
         .optional("", "--rpc-watermark", "Watermark for rotation precomputation", conf.rpc_watermark, 0.5)
+        .optional("", "--rpc-always-runahead", "Always runahead (even on rotation success)", sim::GL_RPC_ALWAYS_RUNAHEAD, false)
+        .optional("", "--rpc-inst-delta-limit", "Instruction delta limit for runahead", sim::GL_RPC_INST_DELTA_LIMIT, 100000)
+        .optional("", "--rpc-degree", "Runahead degree of RPC (number of runahead instructions on trigger)", sim::GL_RPC_DEGREE, 4)
 
         .optional("", "--memory-syndrome-extraction-round-time-ns", 
                       "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 

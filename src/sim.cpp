@@ -27,7 +27,13 @@ bool GL_T_GATE_DO_AUTOCORRECT{false};
 
 int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
-bool GL_RPC_RS_ALWAYS_USE_TELEPORTATION{false};
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool GL_RPC_ALWAYS_USE_TELEPORTATION{false};
+bool GL_RPC_ALWAYS_RUNAHEAD{false};
+int64_t GL_RPC_INST_DELTA_LIMIT{500};
+int64_t GL_RPC_DEGREE{4};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
