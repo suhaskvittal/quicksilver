@@ -31,6 +31,11 @@ public:
          * */
         mutable uint8_t         tmp_pred_count_{0};
         mutable size_t          last_generation_{0};
+
+        /*
+         * For use with `contract_instructions_such_that`
+         * */
+        bool deleteable{false};
     };
 
     const size_t qubit_count;
@@ -99,7 +104,33 @@ public:
                                                                                 size_t min_layer,
                                                                                 size_t max_layer) const;
 
+    /*
+     * Modifies the DAG wherever two instructions (a parent and a child in DAG) meet a given condition.
+     * This is useful for optimization passes (i.e., dead gate elimination).
+     *
+     * The predicate should take in the parent and the child and return either true or false.
+     * 
+     * This function returns the number of instructions deleted.
+     * */
+    template <class PRED>
+    size_t contract_instructions_such_that(const PRED&, size_t min_layer, size_t max_layer);
+
     size_t inst_count() const;
+private:
+    /*
+     * Deletes all nodes with `deletable` set. Returns number of nodes deleted.
+     * */
+    size_t delete_any_deletable_nodes();
+
+    /*
+     * Templated functions that allow for a callback to a node on arrival. All nodes are traversed in layer
+     * order.
+     * */
+    template <class CALLBACK>
+    void generic_operate_on_nodes_in_layer_order(const CALLLBACK&, size_t min_layer, size_t max_layer);
+
+    template <class CALLBACK>
+    void generic_operate_on_nodes_in_layer_order_c(const CALLLBACK&, size_t min_layer, size_t max_layer) const;
 };
 
 ////////////////////////////////////////////////////////////
