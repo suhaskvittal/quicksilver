@@ -48,18 +48,16 @@ int main(int argc, char* argv[])
     std::string input_file;
     std::string output_file;
     std::string stats_output_file;
-    int64_t num_threads{8};
 
     ARGPARSE()
         .required("input-file", "input file qasm file (can be compressed)", input_file)
         .required("output-file", "output file binary (.bin or .gz only)", output_file)
         .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
-        .optional("-t", "--threads", "the number of threads to use", num_threads, 8)
         .optional("-p", "--print-progress", "the number of instructions to print progress", prog::GL_PRINT_PROGRESS, 1'000'000)
         .optional("-rpc", "--rotation-recomputation-isa", "use RPC isa (argument of this option is the level)", GL_USE_RPC_ISA, 0)
         .parse(argc, argv);
 
-    prog::rotation_manager_init(num_threads);
+    prog::rotation_manager_init();
     auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
     std::cout << "DONE\n";
 

@@ -142,12 +142,6 @@ private:
     gate_decl_table       user_defined_gates_;
     std::vector<inst_ptr> instructions_;
 
-    /*
-     * This is a cache of the rotation sequences for the rotations that have been synthesized.
-     * This is used to avoid re-synthesizing the same rotation sequence multiple times
-     * */
-    std::unordered_map<INSTRUCTION::fpa_type, std::vector<INSTRUCTION::TYPE>> rotation_cache_;
-
     size_t num_qubits_declared_{0};
     size_t num_bits_declared_{0};
 
@@ -228,14 +222,7 @@ private:
     void cancel_adjacent_rotations();
     void cancel_inverse_gate_pairs();
 
-    void   complete_rotation_gates();
     size_t dead_gate_elim_pass(size_t prev_gates_removed=0);
-
-    /*
-     * This function retrieves a `urotseq` for a given rotation, either from the `rotation_cache_`
-     * or the rotation manager on a `rotation_cache_` miss.
-     * */
-    INSTRUCTION::urotseq_type retrieve_urotseq(const fpa_type&);
 
     /*
      * Returns the statistics for the current `instructions_` contents.

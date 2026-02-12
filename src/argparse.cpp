@@ -42,12 +42,6 @@ ARGPARSE::parse(int argc, char** argv)
         {
             // now, make sure that this argument is not an option:
             const auto& [name, description, ptr, type] = required_arguments[required_idx];
-            if (x.front() == '-')
-            {
-                _die_with_error("expected required argument `" 
-                                        + std::string{name} + "` but got option `" + x + "`", usage);
-            }
-        
             read_argument_and_write_to_ptr(x, ptr, type);
             required_idx++;
         }

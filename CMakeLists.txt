@@ -31,7 +31,7 @@ find_package(ZLIB REQUIRED)
 find_package(LibLZMA REQUIRED)
 
 # need `GMP_DIR` and `MPFR_DIR` to be set for GMP and MPFR
-if (COMPILE_BINARY_GENERATION)
+if (COMPILE_LUT_BUILDER)
     if (APPLE)
         set(GMP_INCLUDE_DIR /opt/homebrew/opt/gmp/include)
         set(MPFR_INCLUDE_DIR /opt/homebrew/opt/mpfr/include)
@@ -142,49 +142,47 @@ target_link_libraries(qs_simulator PUBLIC qs_common)
 
 # Binary generation executable (`qs_gen_binary`)
 
-if (COMPILE_BINARY_GENERATION)
-    add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
+add_executable(qs_gen_binary main/qs_gen_binary.cpp ${BINARY_GEN_FILES})
 
-    # need to add flex headers manually on macos
-    if (UNIX AND APPLE)
-        target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
-    endif()
-
-    target_include_directories(qs_gen_binary PRIVATE "src" 
-                                                    ${CMAKE_CURRENT_BINARY_DIR} 
-                                                    "deps/nwqec/include" 
-                                                    ${GMP_INCLUDE_DIR} 
-                                                    ${MPFR_INCLUDE_DIR})
-
-    target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
-    target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-    target_link_libraries(qs_gen_binary PRIVATE qs_common
-                                                ${GMP_LIBRARIES} 
-                                                ${MPFR_LIBRARIES})
+# need to add flex headers manually on macos
+if (UNIX AND APPLE)
+    target_include_directories(qs_gen_binary PRIVATE "/opt/homebrew/opt/flex/include")
 endif()
 
+target_include_directories(qs_gen_binary PRIVATE "src" 
+                                                ${CMAKE_CURRENT_BINARY_DIR} 
+                                                "deps/nwqec/include" 
+                                                ${GMP_INCLUDE_DIR} 
+                                                ${MPFR_INCLUDE_DIR})
+
+target_compile_options(qs_gen_binary PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_gen_binary PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc"
+                                                 -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
+target_link_libraries(qs_gen_binary PRIVATE qs_common
+                                            ${GMP_LIBRARIES} 
+                                            ${MPFR_LIBRARIES})
+
 ###################################################
 ###################################################
 
-# Rotation evaluation benchmark (qs_rotation_eval)
+# Rotation LUT constructor (qs_build_lut)
 
-if (COMPILE_BINARY_GENERATION)
-    add_executable(qs_rotation_eval main/qs_rotation_eval.cpp ${BINARY_GEN_FILES})
+if (COMPILE_LUT_BUILDER)
 
-    if (UNIX AND APPLE)
-        target_include_directories(qs_rotation_eval PRIVATE "/opt/homebrew/opt/flex/include")
-    endif()
+add_executable(qs_build_lut main/qs_build_lut.cpp
+                             src/compiler/program/rotation_synthesis.cpp)
 
-    target_include_directories(qs_rotation_eval PRIVATE "src"
-                                                        ${CMAKE_CURRENT_BINARY_DIR}
-                                                        "deps/nwqec/include"
-                                                        ${GMP_INCLUDE_DIR}
-                                                        ${MPFR_INCLUDE_DIR})
-    target_compile_options(qs_rotation_eval PRIVATE ${COMPILE_OPTIONS})
-    target_compile_definitions(qs_rotation_eval PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
-    target_link_libraries(qs_rotation_eval PRIVATE qs_common
-                                                   ${GMP_LIBRARIES}
-                                                   ${MPFR_LIBRARIES})
+target_include_directories(qs_build_lut PRIVATE "src"
+                                                 "deps/nwqec/include"
+                                                 ${GMP_INCLUDE_DIR}
+                                                 ${MPFR_INCLUDE_DIR})
+
+target_compile_options(qs_build_lut PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_build_lut PRIVATE qs_common
+                                           ${GMP_LIBRARIES}
+                                           ${GMPXX_LIBRARIES}
+                                           ${MPFR_LIBRARIES})
+
 endif()
 
 ###################################################

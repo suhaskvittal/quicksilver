@@ -16,12 +16,13 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <thread>
 
 // `DROP_MEASUREMENT_GATES` is necessary for many QASMBench workloads, since they
 // have invalid measurement syntax
 #define DROP_MEASUREMENT_GATES
 #define ALLOW_GATE_DECL_OVERRIDES
+
+//#define PROGRAM_INFO_VERBOSE
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -44,6 +45,9 @@ using namespace prog;
 
 namespace
 {
+
+using fpa_type = INSTRUCTION::fpa_type;
+using urotseq_type = INSTRUCTION::urotseq_type;
 
 constexpr static INSTRUCTION::TYPE SELF_INVERSES[]
 {
@@ -97,12 +101,6 @@ void _scan_and_die_on_conflict(const MAP_TYPE&, const MAP_TYPE&, std::string_vie
  * Computes a hashtable containing gates and their inverses. For example, T <--> TDG.
  * */
 std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE> _make_inverse_map();
-
-/*
- * Returns the required gridsynth precision to accurate approximately
- * the given angle.
- * */
-size_t _get_required_precision(const INSTRUCTION::fpa_type&);
 
 const auto GATE_INVERSE_MAP{_make_inverse_map()};
 
@@ -195,7 +193,7 @@ void
 PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
 {
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] qasm_inst: " << qasm_inst_to_string(qasm_inst) << "\n";
+    std::cout << "[ PROGRAM_INFO ] qasm_inst: " << _qasm_inst_to_string(qasm_inst) << "\n";
 #endif
 
     // Handle gate aliases
@@ -319,8 +317,6 @@ PROGRAM_INFO::dead_gate_elimination()
 void
 PROGRAM_INFO::flush_and_clear_instructions()
 {
-    complete_rotation_gates();
-
     std::cout << "[ PROGRAM_INFO ] flushing instructions to file\n";
     // first, do optimizations:
     [[ maybe_unused ]] size_t num_gates_removed = dead_gate_elimination();
@@ -383,7 +379,7 @@ PROGRAM_INFO::get_qubit_id_from_operand(const prog::QASM_OPERAND& operand) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-INSTRUCTION::fpa_type
+fpa_type
 PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& angle_expr)
 {
     // Given our basis gates, there can only be one parameter for rotation gates.
@@ -392,14 +388,6 @@ PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& an
     // ignore gates with an angle of 0:
     if (rotation.popcount() == 0)
         return fpa_type{};  // return zero angle
-                            
-    // schedule the rotation's synthesis:
-    rotation_manager_schedule_synthesis(rotation, _get_required_precision(rotation));
-    for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
-    {
-        auto corrective_rotation = fpa::scalar_mul(rotation, 2*(i+1));
-        rotation_manager_schedule_synthesis(corrective_rotation, _get_required_precision(corrective_rotation));
-    }
 
     return rotation;
 }
@@ -417,13 +405,16 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
     std::transform(args.begin(), args.end(), qubits.begin(),
                 [this] (const auto& x) { return this->get_qubit_id_from_operand(x); });
 
-    std::vector<INSTRUCTION::TYPE> urotseq;
+    auto urotseq = is_rotation_instruction(type) ? rotation_manager_lookup(rotation) : urotseq_type{};
     inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
-    instructions_.push_back(std::move(inst));
+    for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
+        inst->corr_urotseq_array.push_back(rotation_manager_lookup(fpa::scalar_mul(rotation, 2*(i+1))));
 
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "\tevaluated as: " << inst << "\n";
+    std::cout << "\tevaluated as: " << *inst << "\n";
 #endif
+
+    instructions_.push_back(std::move(inst));
 }
 
 ////////////////////////////////////////////////////////////
@@ -439,7 +430,11 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
 
     // apply the operation multiple times:
     std::vector<qubit_type> qubits(qasm_inst.args.size());
-    std::vector<INSTRUCTION::TYPE> urotseq;
+    auto urotseq = is_rotation_instruction(type) ? rotation_manager_lookup(rotation) : urotseq_type{};
+    std::deque<urotseq_type> corr_urotseq_array;
+    for (size_t k = 0; k < GL_USE_RPC_ISA; k++)
+        corr_urotseq_array.push_back(rotation_manager_lookup(fpa::scalar_mul(rotation, 2*(k+1))));
+
     for (size_t i = 0; i < width; i++)
     {
         // set all vector operands to use index `i`
@@ -455,11 +450,13 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
 
         // create and push the instruction:
         inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
-        instructions_.push_back(std::move(inst));
+        inst->corr_urotseq_array = corr_urotseq_array;
 
 #if defined(PROGRAM_INFO_VERBOSE)
-        std::cout << "\t\t( " << i << " ) " << inst << "\n";
+        std::cout << "\t\t( " << i << " ) " << *inst << "\n";
 #endif
+
+        instructions_.push_back(std::move(inst));
     }
 }
 
@@ -644,10 +641,10 @@ PROGRAM_INFO::compute_statistics_for_current_instructions() const
     for (const auto& inst : instructions_)
     {
         bool is_sw_gate = is_software_instruction(inst->type);
-        bool is_t_like = (inst->type == INSTRUCTION::TYPE::T || inst->type == INSTRUCTION::TYPE::TDG);
-        bool is_cxz = (inst->type == INSTRUCTION::TYPE::CX || inst->type == INSTRUCTION::TYPE::CZ);
-        bool is_rot = (inst->type == INSTRUCTION::TYPE::RX || inst->type == INSTRUCTION::TYPE::RZ);
-        bool is_ccxz = (inst->type == INSTRUCTION::TYPE::CCX || inst->type == INSTRUCTION::TYPE::CCZ);
+        bool is_t_like = is_t_like_instruction(inst->type);
+        bool is_cxz = is_cx_like_instruction(inst->type);
+        bool is_rot = is_rotation_instruction(inst->type);
+        bool is_ccxz = is_toffoli_like_instruction(inst->type);
 
         out.total_gate_count++;
         out.software_gate_count += is_sw_gate;
@@ -661,54 +658,6 @@ PROGRAM_INFO::compute_statistics_for_current_instructions() const
     }
 
     return out;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-PROGRAM_INFO::complete_rotation_gates()
-{
-    size_t ii{0};
-    for (auto& inst : instructions_)
-    {
-        if (ii % 100'000 == 0)
-            (std::cout << ".").flush();
-        ii++;
-        if (is_rotation_instruction(inst->type))
-        {
-            inst->urotseq = retrieve_urotseq(inst->angle);
-            if (inst->urotseq.empty())
-                std::cerr << "[alert] rotation synthesis yielded empty sequence for " << *inst << "\n";
-
-            // handle corrective rotations
-            for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
-            {
-                auto corrective_angle = fpa::scalar_mul(inst->angle, 2*(i+1));
-                inst->corr_urotseq_array.push_back(retrieve_urotseq(corrective_angle));
-            }
-        }
-    }
-    std::cout << "\n";
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-INSTRUCTION::urotseq_type
-PROGRAM_INFO::retrieve_urotseq(const fpa_type& angle)
-{
-    auto it = rotation_cache_.find(angle);
-    if (it == rotation_cache_.end()) // miss
-    {
-        auto urotseq = rotation_manager_find(angle, _get_required_precision(angle));
-        rotation_cache_.insert({angle, urotseq});
-        return urotseq;
-    }
-    else
-    {
-        return it->second;
-    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -846,20 +795,6 @@ _make_inverse_map()
     add_rel(INSTRUCTION::TYPE::T, INSTRUCTION::TYPE::TDG);
 
     return inv_map;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t
-_get_required_precision(const INSTRUCTION::fpa_type& angle)
-{
-    size_t msb = angle.join_word_and_bit_idx(angle.msb());
-    if (msb == PROGRAM_INFO::fpa_type::NUM_BITS-1)
-        msb = angle.join_word_and_bit_idx(fpa::negate(angle).msb());
-    msb = PROGRAM_INFO::fpa_type::NUM_BITS-msb-1;
-
-    return (msb/3) + 3;
 }
 
 ////////////////////////////////////////////////////////////
