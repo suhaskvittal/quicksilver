@@ -133,14 +133,22 @@ struct pending_type
  *  `RM_SCHED_LOCK`: mutex on all scheduling data structures shown
  *  `RM_PENDING_UPDATED` and `RM_VALUE_READY` are two condition variables for `RM_SCHED_LOCK`
  *  `RM_SIG_DONE` is used to kill all threads when cleanup starts.
- *  `THREAD_ID_TO_LOCK` is used for debugging.
+ *  `RM_THREAD_DONE_COUNT` is used to block the main thread until all children die.
+ *  `THREAD_ID_TO_INDEX` is used for debugging.
  * */
 static std::deque<pending_type::ptr>                        RM_PENDING;
 static std::unordered_map<angle_type, promise_type::ptr>    RM_READY_MAP;
+
 static std::mutex                                           RM_SCHED_LOCK;
 static std::condition_variable                              RM_PENDING_UPDATED;
 static std::condition_variable                              RM_VALUE_READY;
+
 static std::atomic<bool>                                    RM_SIG_DONE{false};
+
+static int                                                  RM_THREAD_DONE_COUNT{0};
+static std::mutex                                           RM_THREAD_DONE_LOCK;
+static std::condition_variable                              RM_THREAD_DONE_COUNT_UPDATED;
+
 static std::unordered_map<std::thread::id, size_t>          THREAD_ID_TO_INDEX;
 
 /*
@@ -222,6 +230,8 @@ std::string _urotseq_to_string(ITERABLE iterable);
 void
 rotation_manager_init(size_t num_threads)
 {
+    RM_SIG_DONE.store(false);
+
     // spawn `num_threads` and detach them:
     for (size_t i = 0; i < num_threads; i++)
     {
@@ -237,19 +247,38 @@ rotation_manager_init(size_t num_threads)
         THREAD_ID_TO_INDEX[th.get_id()] = i;
         th.detach();
     }
+
+    std::lock_guard<std::mutex> child_lock(RM_THREAD_DONE_LOCK);
+    RM_THREAD_DONE_COUNT = num_threads;
 }
 
 void
-rotation_manager_end()
+rotation_manager_end(bool block)
 {
+    /*
+     * 1. first signal that the rotation manager is done.
+     * */
     std::unique_lock<std::mutex> sched_lock(RM_SCHED_LOCK);
     RM_SIG_DONE.store(true);
-    std::cout << "main thread set RM_SIG_DONE to true\n";
-    // wake up all threads waiting on `RM_PENDING_UPDATED`:
     RM_PENDING_UPDATED.notify_all();
     sched_lock.unlock();
 
+    /*
+     * 2. if `block` is true, then wait for all threads to die before exiting this function
+     * */
+    if (block)
+    {
+        std::unique_lock<std::mutex> child_lock(RM_THREAD_DONE_LOCK);
+        while (RM_THREAD_DONE_COUNT > 0)
+            RM_THREAD_DONE_COUNT_UPDATED.wait(child_lock);
+    }
+
+    if (RM_READY_MAP.size() > 0)
+        std::cerr << "rotation_manager_end: RM_READY_MAP still has " << RM_READY_MAP.size() << " entries\n";
     RM_READY_MAP.clear();
+
+    if (RM_PENDING.size() > 0)
+        std::cerr << "rotation_manager_end: RM_PENDING still has " << RM_PENDING.size() << " entries\n";
     RM_PENDING.clear();
 }
 
@@ -455,8 +484,12 @@ _thread_iteration()
 
     if (RM_SIG_DONE.load())
     {
-        std::cout << "thread " << THREAD_ID_TO_INDEX[std::this_thread::get_id()] << " done\n";
         sched_lock.unlock();
+
+        std::lock_guard<std::mutex> child_lock(RM_THREAD_DONE_LOCK);
+        RM_THREAD_DONE_COUNT--;
+        RM_THREAD_DONE_COUNT_UPDATED.notify_one();
+
         return;
     }
 
@@ -508,6 +541,7 @@ _synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
                                     false,
                                     measure_time);
 
+#if defined(RM_VERBOSE)
     if (gs_call_id % GS_CALL_PRINT_FREQUENCY == 0)
     {
         std::cout << "GS call: " << gs_call_id << " from thread "
@@ -526,6 +560,7 @@ _synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
             << ", epsilon: " << epsilon << " (b = " << precision
             << "), fpa hex = " << rotation.to_hex_string() << "\n";
     }
+#endif
 
     std::vector<INSTRUCTION::TYPE> out;
     for (char c : gates_str)
@@ -547,6 +582,7 @@ _synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
     _consolidate_and_reduce_subsequences(out);
     [[maybe_unused]] size_t urotseq_reduced_size = out.size();
 
+#if defined(RM_VERBOSE)
     if (gs_call_id % GS_CALL_PRINT_FREQUENCY == 0)
     {
         std::cout << "\treduced urotseq size from " << urotseq_original_size
@@ -556,6 +592,7 @@ _synthesize_rotation(const INSTRUCTION::fpa_type& rotation, ssize_t precision)
             std::cout << " " << BASIS_GATES[static_cast<int>(t)];
         std::cout << "\n";
     }
+#endif
 
     return out;
 }
@@ -570,7 +607,7 @@ _flip_h_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
 
     auto begin = urotseq.begin();
     // while there are at least two H gates, flip the subsequence between them:
-    while (h_count > 2)
+    while (h_count >= 2)
     {
         auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
         if (h_begin == urotseq.end())
@@ -588,6 +625,15 @@ _flip_h_subsequences(std::vector<INSTRUCTION::TYPE>& urotseq)
 
         begin = h_end+1;
         h_count -= 2;
+    }
+
+    if (h_count == 1)
+    {
+        // the last H gate can be propagated to the end by flipping everything between:
+        auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
+        std::for_each(h_begin+1, urotseq.end(), [] (auto& g) { g = _flip_basis(g); });
+        std::move(h_begin+1, urotseq.end(), h_begin);
+        urotseq.back() = INSTRUCTION::TYPE::H;
     }
 
     auto it = std::remove_if(urotseq.begin(), urotseq.end(), [] (const auto& inst) { return inst == INSTRUCTION::TYPE::NIL; });
@@ -675,7 +721,7 @@ _consolidate_gate(BASIS_TYPE basis, int8_t rotation_sum, std::vector<INSTRUCTION
     begin++;
 
     // if 3 or 7, add an extra pi rotation
-    if (rotation_sum == 3 || rotation_sum == 7)
+    if (rotation_sum == 5 || rotation_sum == 3)
     {
         *begin = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
         begin++;

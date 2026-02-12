@@ -166,6 +166,30 @@ endif()
 ###################################################
 ###################################################
 
+# Rotation evaluation benchmark (qs_rotation_eval)
+
+if (COMPILE_BINARY_GENERATION)
+    add_executable(qs_rotation_eval main/qs_rotation_eval.cpp ${BINARY_GEN_FILES})
+
+    if (UNIX AND APPLE)
+        target_include_directories(qs_rotation_eval PRIVATE "/opt/homebrew/opt/flex/include")
+    endif()
+
+    target_include_directories(qs_rotation_eval PRIVATE "src"
+                                                        ${CMAKE_CURRENT_BINARY_DIR}
+                                                        "deps/nwqec/include"
+                                                        ${GMP_INCLUDE_DIR}
+                                                        ${MPFR_INCLUDE_DIR})
+    target_compile_options(qs_rotation_eval PRIVATE ${COMPILE_OPTIONS})
+    target_compile_definitions(qs_rotation_eval PRIVATE -DQELIB1_INC_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qelib1.inc")
+    target_link_libraries(qs_rotation_eval PRIVATE qs_common
+                                                   ${GMP_LIBRARIES}
+                                                   ${MPFR_LIBRARIES})
+endif()
+
+###################################################
+###################################################
+
 # Memory scheduler (qs_memory_scheduler)
 
 add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp

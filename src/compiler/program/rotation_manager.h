@@ -26,7 +26,7 @@ void rotation_manager_init(size_t num_threads=8);
  * Shutdown the rotation manager and cleanup resources.
  * Should be called at program exit.
  */
-void rotation_manager_end();
+void rotation_manager_end(bool block_until_all_threads_die=false);
 
 /*
  * Schedule a rotation for synthesis in the background.
