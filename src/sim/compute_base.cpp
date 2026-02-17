@@ -211,7 +211,13 @@ COMPUTE_BASE::do_coupled_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
     if (result.success)
     {
         auto local_result = local_memory_->do_coupled_load_store(st, ld);
-        assert(local_result.success);
+        if (!local_result.success)
+        {
+            std::cerr << "COMPUTE_BASE::do_coupled_memory_access: local memory access failed.\n";
+            local_memory_->print_adapter_debug_info(std::cerr);
+            std::cerr << _die{};
+        }
+
         auto total_latency = result.critical_latency + code_distance;
         return execute_result_type{.progress=1, .latency=total_latency};
     }

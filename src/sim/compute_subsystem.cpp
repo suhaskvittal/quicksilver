@@ -228,6 +228,52 @@ COMPUTE_SUBSYSTEM::is_rpc_enabled() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+std::optional<cycle_type>
+COMPUTE_SUBSYSTEM::skip_to_cycle() const
+{
+    // 1. check criteria are met for skipping:
+
+    const bool t_factories_full = std::all_of(top_level_t_factories_.begin(), top_level_t_factories_.end(),
+                                            [] (const auto* f) { return f->buffer_occupancy() == f->buffer_capacity; });
+    const bool rs_done = !is_rpc_enabled() || !rotation_subsystem_->is_active();
+
+    const bool do_skip = t_factories_full && rs_done;
+    if (do_skip)
+    {
+        cycle_type min_cycle = std::numeric_limits<cycle_type>::max();
+        bool any_inst_evaluated{false};
+        for (const auto* c : active_clients_)
+        {
+            for (auto* inst : c->dag()->get_front_layer())
+            {
+                if (is_memory_access(inst->type))
+                    continue;
+                bool all_in_active_set{true};
+                cycle_type ready_cycle{0};
+                std::for_each(inst->q_begin(), inst->q_end(),
+                        [this, c, &all_in_active_set, &ready_cycle] (auto qid)
+                        {
+                            QUBIT* q = c->qubits()[qid];
+                            all_in_active_set &= local_memory_->contains(q);
+                            ready_cycle = std::max(ready_cycle, q->cycle_available);
+                        });
+                if (all_in_active_set)
+                {
+                    min_cycle = std::min(ready_cycle, min_cycle);
+                    any_inst_evaluated = true;
+                }
+            }
+        }
+
+        if (current_cycle() < min_cycle && any_inst_evaluated)
+            return std::make_optional(min_cycle);
+    }
+    return std::nullopt;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 long
 COMPUTE_SUBSYSTEM::operate()
 {

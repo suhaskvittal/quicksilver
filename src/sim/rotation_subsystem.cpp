@@ -133,6 +133,12 @@ ROTATION_SUBSYSTEM::print_deadlock_info(std::ostream& out) const
 ////////////////////////////////////////////////////////////
 
 bool
+ROTATION_SUBSYSTEM::is_active() const
+{
+    return active_qubit_ != nullptr;
+}
+
+bool
 ROTATION_SUBSYSTEM::can_accept_request() const
 {
 //  return !free_qubits_.empty();

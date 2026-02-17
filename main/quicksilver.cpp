@@ -268,6 +268,15 @@ main(int argc, char* argv[])
         
         for (auto* x : all_operables)
             x->tick();
+
+        // check if we should do a skip:
+        auto skip = compute_subsystem->skip_to_cycle();
+        if (skip.has_value())
+        {
+//          std::cout << "skipping to cycle " << *skip << ", current cycle = " << compute_subsystem->current_cycle() << "\n";
+            uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, compute_subsystem->freq_khz);
+            sim::fast_forward_all_operables_to_time_ns(all_operables, skip_time_ns);
+        }
     }
     while (!compute_subsystem->done());
 
@@ -342,7 +351,7 @@ split_trace_string(std::string s)
 void
 jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
 {
-    constexpr auto MEMORY_ACCESS_SCHEDULER{compile::memory_scheduler::eif};
+    constexpr auto MEMORY_ACCESS_SCHEDULER{compile::memory_scheduler::hint};
 
     std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
     std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);

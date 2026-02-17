@@ -98,6 +98,11 @@ public:
      * */
     bool has_free_adapter() const;
 
+    /*
+     * Returns cycle when adapter becomes free.
+     * */
+    cycle_type next_free_adapter_cycle() const;
+
     void print_adapter_debug_info(std::ostream&) const;
 
     const backing_buffer_type& contents() const;

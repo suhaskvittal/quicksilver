@@ -64,6 +64,28 @@ compute_freq_khz(uint64_t p_ns)
     return 1e6 / static_cast<double>(p_ns);
 }
 
+cycle_type
+convert_cycles_between_frequencies(cycle_type cycles, double original_freq_khz, double new_freq_khz)
+{
+    return static_cast<cycle_type>(std::ceil(cycles * new_freq_khz / original_freq_khz));
+}
+
+uint64_t
+convert_cycles_to_time_ns(cycle_type c, double f)
+{
+    double time_s = c / (f * 1e3);
+    return static_cast<uint64_t>(std::round(time_s * 1e9));
+}
+
+cycle_type
+convert_time_ns_to_cycles(uint64_t t_ns, double f)
+{
+    return static_cast<cycle_type>(std::ceil((t_ns*1e-9) * (f*1e3)));
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 coordinate_clock_scale(std::vector<OPERABLE*> operables)
 {
@@ -74,10 +96,14 @@ coordinate_clock_scale(std::vector<OPERABLE*> operables)
         op->clock_scale_ = max_freq / op->freq_khz - 1.0;
 }
 
-cycle_type
-convert_cycles(cycle_type cycles, double original_freq_khz, double new_freq_khz)
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+fast_forward_all_operables_to_time_ns(std::vector<OPERABLE*> operables, uint64_t target_time_ns)
 {
-    return static_cast<cycle_type>(ceil(cycles * new_freq_khz / original_freq_khz));
+    for (auto* op : operables)
+        op->current_cycle_ = convert_time_ns_to_cycles(target_time_ns, op->freq_khz);
 }
 
 ////////////////////////////////////////////////////////////

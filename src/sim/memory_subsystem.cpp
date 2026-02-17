@@ -137,9 +137,9 @@ MEMORY_SUBSYSTEM::handle_access_outcome(access_result_type result,
 {
     if (result.success)
     {
-        result.latency = convert_cycles(result.latency, result.storage_freq_khz, c_freq_khz);
-        result.critical_latency = convert_cycles(result.critical_latency, result.storage_freq_khz, c_freq_khz);
-        routing_->lock_route_to(s, c_current_cycle+result.latency);
+        result.latency = convert_cycles_between_frequencies(result.latency, result.storage_freq_khz, c_freq_khz);
+        result.critical_latency = convert_cycles_between_frequencies(result.critical_latency, result.storage_freq_khz, c_freq_khz);
+//      routing_->lock_route_to(s, c_current_cycle+result.latency);
     }
     return result;
 }

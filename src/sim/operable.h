@@ -73,6 +73,7 @@ protected:
     virtual long operate() =0;
 private:
     friend void coordinate_clock_scale(std::vector<OPERABLE*>);
+    friend void fast_forward_all_operables_to_time_ns(std::vector<OPERABLE*>, uint64_t);
 };
 
 ////////////////////////////////////////////////////////////
@@ -84,14 +85,26 @@ private:
 double compute_freq_khz(uint64_t period_in_nanoseconds);
 
 /*
- * Sets the clock scale of all components passed in.
+ * Converts clock cycles between two different frequencies:
+ * */
+cycle_type convert_cycles_between_frequencies(cycle_type, double original_freq_khz, double new_freq_khz);
+
+uint64_t convert_cycles_to_time_ns(cycle_type, double freq_khz);
+cycle_type convert_time_ns_to_cycles(uint64_t, double freq_khz);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Sets the clock scale of all components passed in relative to the
+ * fastest `OPERABLE` in the container.
  * */
 void coordinate_clock_scale(std::vector<OPERABLE*>);
 
 /*
- * Converts clock cycles between two different frequencies:
+ * Fast forwards the clock of all operables in the container to the given time.
  * */
-cycle_type convert_cycles(cycle_type, double original_freq_khz, double new_freq_khz);
+void fast_forward_all_operables_to_time_ns(std::vector<OPERABLE*>, uint64_t);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

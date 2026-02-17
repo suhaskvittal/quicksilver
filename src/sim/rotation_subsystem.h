@@ -119,6 +119,11 @@ public:
     void print_progress(std::ostream&) const override;
 
     /*
+     * Returns true if `active_qubit_ != nullptr`
+     * */
+    bool is_active() const;
+
+    /*
      * Returns true if a rotation request can be allocated a
      * qubit.
      * */

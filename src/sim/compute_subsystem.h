@@ -129,6 +129,22 @@ public:
      * rpc = "Rotation Pre-Computation". This returns true if `rotation_subsystem_ != nullptr`
      * */
     bool is_rpc_enabled() const;
+
+    /*
+     * In long simulations with long stall periods, it is sometimes useful to "skip"
+     * several cycles where nothing is happening.
+     *
+     * Conditions (in the current simulator) are simple:
+     *  (1) all instructions at the head of the DAG are memory instructions (for all clients)
+     *  (2) all T factories have full buffers
+     *  (3) rotation subsystem has no active operations
+     *
+     * If all three criteria are met, then this function returns the cycle where
+     * the earliest storage becomes available.
+     *
+     * Currently, assumes all very long latency stalls are memory stalls.
+     * */
+    std::optional<cycle_type> skip_to_cycle() const;
 protected:
     long operate() override;
 private:

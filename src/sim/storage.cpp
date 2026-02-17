@@ -79,8 +79,8 @@ STORAGE::do_load(QUBIT* q)
 
     auto result = do_memory_access(load_latency, false);
     result.critical_latency = load_latency;
-
-    contents_.erase(q_it);
+    if (result.success)
+        contents_.erase(q_it);
     return result;
 }
 
@@ -91,9 +91,11 @@ STORAGE::do_store(QUBIT* q)
 
     auto result = do_memory_access(store_latency, true);
     result.critical_latency = 0;
-
-    contents_.insert(q);
-    assert(contents_.size() <= logical_qubit_count);
+    if (result.success)
+    {
+        contents_.insert(q);
+        assert(contents_.size() <= logical_qubit_count);
+    }
     return result;
 }
 
@@ -108,9 +110,11 @@ STORAGE::do_coupled_load_store(QUBIT* ld, QUBIT* st)
 
     auto result = do_memory_access(load_latency + store_latency + ADDED_DATA_MOVEMENT_LATENCY, false);
     result.critical_latency = load_latency;
-
-    contents_.erase(ld_it);
-    contents_.insert(st);
+    if (result.success)
+    {
+        contents_.erase(ld_it);
+        contents_.insert(st);
+    }
     return result;
 }
 
@@ -122,6 +126,12 @@ STORAGE::has_free_adapter() const
 {
     return std::any_of(cycle_available_.begin(), cycle_available_.end(),
                     [cc=current_cycle()] (cycle_type c) { return c <= cc; });
+}
+
+cycle_type
+STORAGE::next_free_adapter_cycle() const
+{
+    return *std::min_element(cycle_available_.begin(), cycle_available_.end());
 }
 
 ////////////////////////////////////////////////////////////
@@ -168,10 +178,14 @@ STORAGE::do_memory_access(cycle_type access_latency, bool is_store)
     if (adapter_it == cycle_available_.end())
         return access_result_type{};
 
-    cycle_type adapter_manip_latency = adapter_access(adapter_it, is_store);
-    assert(adapter_manip_latency <= 2);
-    cycle_type total_latency = access_latency + adapter_manip_latency;
-    *adapter_it = total_latency;
+    cycle_type total_latency{0};
+    if (load_latency > 0)
+    {
+        cycle_type adapter_manip_latency = adapter_access(adapter_it, is_store);
+        assert(adapter_manip_latency <= 2);
+        total_latency = access_latency + adapter_manip_latency;
+        *adapter_it = total_latency;
+    }
     return access_result_type{ .success=true, .latency=total_latency, .storage_freq_khz=freq_khz };
 }
 
