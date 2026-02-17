@@ -109,6 +109,7 @@ private:
     const COMPUTE_SUBSYSTEM* parent_;
 public:
     ROTATION_SUBSYSTEM(double freq_khz, 
+                        size_t code_distance,
                         size_t capacity,
                         COMPUTE_SUBSYSTEM* parent,
                         double watermark);

@@ -43,6 +43,7 @@ public:
     uint64_t s_t_gate_teleports{0};
     uint64_t s_t_gate_teleport_episodes{0};
 
+    const size_t code_distance;
     const size_t local_memory_capacity;
 protected:
     std::unique_ptr<STORAGE>     local_memory_;
@@ -51,6 +52,7 @@ protected:
 public:
     COMPUTE_BASE(std::string_view             name, 
                  double                       freq_khz,
+                 size_t                       code_distance,
                  size_t                       local_memory_capacity,
                  std::vector<T_FACTORY_BASE*> top_level_t_factories,
                  MEMORY_SUBSYSTEM*            memory_hierarchy);
@@ -64,7 +66,8 @@ protected:
     virtual execute_result_type do_h_or_s_gate(inst_ptr, QUBIT*);
     virtual execute_result_type do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);
     virtual execute_result_type do_t_like_gate(inst_ptr, QUBIT*);
-    virtual execute_result_type do_memory_access(inst_ptr, QUBIT* ld, QUBIT* st);
+    virtual execute_result_type do_memory_access(inst_ptr, QUBIT*, bool is_store);
+    virtual execute_result_type do_coupled_memory_access(inst_ptr, QUBIT*, QUBIT*);
 
     /*
      * Executes the uops for a rotation gate. Upon a success, additional gates
@@ -110,9 +113,6 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
     bool any_teleports{false};
     while (tp_remaining > 0 && pred(inst, inst->current_uop()))
     {
-        // need to keep resetting available so instructions keep getting executed:
-        q->cycle_available = current_cycle();
-
         auto result = execute_instruction(inst->current_uop(), {q});
         if (result.progress)
         {
@@ -121,7 +121,7 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
                 tp_remaining--;
                 s_t_gate_teleports++;
                 if (!GL_T_GATE_DO_AUTOCORRECT)
-                    out.latency += (GL_RNG() & 3) ? 2 : 0; // any possible correction incurs a 2 cycle latency
+                    out.latency += (GL_RNG() & 3) ? 2*code_distance : 0; // any possible correction incurs a 2 cycle latency
                 any_teleports = true;
             }
             out.progress += result.progress;
@@ -138,14 +138,11 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation_while_predicate_holds(inst_ptr
     {
         s_t_gate_teleport_episodes++;
         if (GL_T_GATE_DO_AUTOCORRECT)
-            out.latency += 2;
+            out.latency += 2*code_distance;
     }
 
     if (GL_ZERO_LATENCY_T_GATES)
         out.latency = 0;
-
-    q->cycle_available = current_cycle()+out.latency;
-
     return out;
 }
 

@@ -72,22 +72,46 @@ STORAGE::insert(QUBIT* q)
 ////////////////////////////////////////////////////////////
 
 STORAGE::access_result_type
-STORAGE::do_memory_access(QUBIT* ld, QUBIT* st)
+STORAGE::do_load(QUBIT* q)
 {
-    assert(contents_.count(ld) > 0);
-    assert(contents_.count(st) == 0);
+    auto q_it = contents_.find(q);
+    assert(q_it != contents_.end());
 
-    // find ready adapter to serve memory access
-    auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
-                                [cc=current_cycle()] (cycle_type c) { return c <= cc; });
-    if (adapter_it == cycle_available_.end())
-        return access_result_type{};
+    auto result = do_memory_access(load_latency, false);
+    result.critical_latency = load_latency;
 
-    // complete memory access since adapter is available
-    *adapter_it = current_cycle() + load_latency + store_latency;
-    contents_.erase(ld);
+    contents_.erase(q_it);
+    return result;
+}
+
+STORAGE::access_result_type
+STORAGE::do_store(QUBIT* q)
+{
+    assert(contents_.count(q) == 0);
+
+    auto result = do_memory_access(store_latency, true);
+    result.critical_latency = 0;
+
+    contents_.insert(q);
+    assert(contents_.size() <= logical_qubit_count);
+    return result;
+}
+
+STORAGE::access_result_type
+STORAGE::do_coupled_load_store(QUBIT* ld, QUBIT* st)
+{
+    // additional data movement overhead to move out loaded qubit and move in stored qubit (surface code routing)
+    const cycle_type ADDED_DATA_MOVEMENT_LATENCY = 2*code_distance;
+
+    auto ld_it = contents_.find(ld);
+    assert(ld_it != contents_.end() && contents_.count(st) == 0);
+
+    auto result = do_memory_access(load_latency + store_latency + ADDED_DATA_MOVEMENT_LATENCY, false);
+    result.critical_latency = load_latency;
+
+    contents_.erase(ld_it);
     contents_.insert(st);
-    return access_result_type{.success=true, .latency=load_latency+store_latency, .storage_freq_khz=freq_khz};
+    return result;
 }
 
 ////////////////////////////////////////////////////////////
@@ -124,10 +148,45 @@ STORAGE::contents() const
     return contents_;
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 long
 STORAGE::operate()
 {
     return 1;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+STORAGE::access_result_type
+STORAGE::do_memory_access(cycle_type access_latency, bool is_store)
+{
+    auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
+                            [this] (cycle_type c) { return c <= current_cycle(); });
+    if (adapter_it == cycle_available_.end())
+        return access_result_type{};
+
+    cycle_type adapter_manip_latency = adapter_access(adapter_it, is_store);
+    assert(adapter_manip_latency <= 2);
+    cycle_type total_latency = access_latency + adapter_manip_latency;
+    *adapter_it = total_latency;
+    return access_result_type{ .success=true, .latency=total_latency, .storage_freq_khz=freq_khz };
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+cycle_type
+STORAGE::adapter_access(std::vector<cycle_type>::iterator adapter_it, bool is_store)
+{
+    if (is_store || load_latency == 0)
+        return 0;  // any shift automorphisms can be done early
+    else if (current_cycle() - 2 >= *adapter_it)
+        return 0;
+    else
+        return 2 - (current_cycle() - *adapter_it);  // shift auts cannot be hidden (1 or 2 cycle latency)
 }
 
 ////////////////////////////////////////////////////////////

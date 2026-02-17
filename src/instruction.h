@@ -30,7 +30,9 @@ constexpr std::string_view BASIS_GATES[] =
     "mz", "mx",
 
     // memory instruction:
-    "mswap",
+    "load",
+    "store",
+    "coupled_load_store",
 
     "nil"
 };
@@ -60,9 +62,21 @@ public:
 
         /*
          * Memory instructions:
-         *  MSWAP q0, q1   loads q0 into the compute subsystem and stores q1 into the memory subsystem.
+         *  Load/store semantics are generally not useful by themselves
+         *  since quantum programs require *precise* data movement.
+         *  Keep in mind that in a DAG representation, there are no
+         *  dependent instructions between a store and a load.
+         *  So, we don't recommend using "load" and "store" for your
+         *  programs.
+         *
+         *  Use "coupled_load_store" instead. This is effectively
+         *  adds a fence before the load and store.
+         *
+         *      i.e., `coupled_load_store <ld-qubit>, <st-qubit>`
          * */
-        MSWAP,
+        LOAD,
+        STORE,
+        COUPLED_LOAD_STORE,
 
         NIL
     };

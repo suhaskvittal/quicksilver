@@ -38,13 +38,19 @@ void _log_runahead(inst_ptr);
 
 COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
                                      std::vector<std::string>     client_trace_files,
+                                     size_t                       code_distance,
                                      size_t                       local_memory_capacity,
                                      size_t                       _concurrent_clients,
                                      uint64_t                     _simulation_instructions,
                                      std::vector<T_FACTORY_BASE*> top_level_t_factories,
                                      MEMORY_SUBSYSTEM*            memory_hierarchy,
                                      compute_extended_config      conf)
-    :COMPUTE_BASE("compute_subsystem", freq_khz, local_memory_capacity, top_level_t_factories, memory_hierarchy),
+    :COMPUTE_BASE("compute_subsystem", 
+                    freq_khz, 
+                    code_distance,
+                    local_memory_capacity, 
+                    top_level_t_factories,
+                    memory_hierarchy),
     concurrent_clients(_concurrent_clients),
     total_clients(client_trace_files.size()),
     simulation_instructions(_simulation_instructions),
@@ -84,7 +90,8 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     /* Extended config setup */
     if (conf.rpc_enabled)
     {
-        rotation_subsystem_ = new ROTATION_SUBSYSTEM(conf.rpc_freq_khz, 
+        rotation_subsystem_ = new ROTATION_SUBSYSTEM(freq_khz, 
+                                                    code_distance,
                                                     conf.rpc_capacity,
                                                     this,
                                                     conf.rpc_watermark);
@@ -393,16 +400,14 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
             std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
     
         inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
-
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-
         std::array<QUBIT*, 3> operands;
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
         bool any_not_in_memory = std::any_of(operands.begin(), operands.begin() + executed_inst->qubit_count,
                                         [this] (QUBIT* q) { return !local_memory_->contains(q); });
-        if (any_not_in_memory && !is_memory_access(inst->type))
+        if (any_not_in_memory && inst->type != INSTRUCTION::TYPE::LOAD && inst->type != INSTRUCTION::TYPE::COUPLED_LOAD_STORE)
             continue; 
         
         // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
@@ -449,7 +454,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
             rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
 
         _log_rotation(inst, "success");
-        retire_instruction(c, inst, 2);
+        retire_instruction(c, inst, 2*code_distance);
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::NEEDS_CORRECTION)
     {
@@ -466,18 +471,11 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
-        // if there is too little progress (<= 4 uops), then invalidate and return false
-        if (rotation_subsystem_->get_progress(inst) < 0.95*inst->uop_count())
-        {
-            _log_rotation(inst, "invalidate");
+        _log_rotation(inst, "invalidate");
 
-            rotation_subsystem_->invalidate(inst);
-            rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
-            return false;
-        }
-
-        rotation_subsystem_->mark_critical(inst);
-        had_rpc_stall_this_cycle_ = true;
+        rotation_subsystem_->invalidate(inst);
+        rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
+        return false;
     }
     else
     {
@@ -494,7 +492,8 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
 COMPUTE_SUBSYSTEM::RPC_LOOKUP_RESULT
 COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
 {
-    constexpr cycle_type RPC_FETCH_CYCLES{2};
+    const cycle_type RPC_FETCH_CYCLES{2*code_distance};
+    const cycle_type RPC_APPLY_CYCLES{2*code_distance};
 
     if (!is_rpc_enabled())
         return RPC_LOOKUP_RESULT::NOT_FOUND;
@@ -503,10 +502,7 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
     if (rotation_subsystem_->find_and_delete_request_if_done(inst))
     {
         bool success = (GL_RNG()&1) > 0;
-        q->cycle_available = current_cycle() 
-                                    + RPC_FETCH_CYCLES
-                                    + 2; // it takes 2 cycles to attempt the teleportation.
-
+        q->cycle_available = current_cycle() + RPC_FETCH_CYCLES + RPC_APPLY_CYCLES;
         s_total_rpc++;
         if (success)
             s_successful_rpc++;

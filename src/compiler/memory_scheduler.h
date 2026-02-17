@@ -89,7 +89,7 @@ struct stats_type
 struct result_type
 {
     /*
-     * This is the list of MSWAP instructions generated during
+     * This is the list of load/store instructions generated during
      * this scheduling epoch.
      * */
     std::vector<inst_ptr> memory_accesses;
@@ -109,7 +109,7 @@ struct result_type
 
 /*
  * Transforms the current active set to match the target active set
- * by generating MSWAP instructions.
+ * by generating load/store instructions.
  *
  * Typically, a memory scheduler will identify *what* it wants
  * in the active set. This function converts between the

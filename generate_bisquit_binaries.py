@@ -15,7 +15,7 @@ def build_binaries(tag=None, extra_options=''):
             output_file = f'benchmarks/bin/BQ_{filename}.{tag}'
             stats_file = f'benchmarks/stats/BQ_{filename}.{tag}.txt'
 
-        cmd = f'./build/qs_gen_binary bisquit/qasm/{f} {output_file} -s {stats_file} -t {NUM_THREADS-1} -p 1000000 {extra_options} && xz -z -T {NUM_THREADS} {output_file}'
+        cmd = f'./build/qs_gen_binary bisquit/qasm/{f} {output_file} -s {stats_file} -p 1000000 {extra_options} && xz -z -T {NUM_THREADS} {output_file}'
         print(cmd)
         os.system(cmd)
 

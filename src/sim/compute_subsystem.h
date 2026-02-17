@@ -108,6 +108,7 @@ private:
 public:
     COMPUTE_SUBSYSTEM(double                         freq_khz,
                         std::vector<std::string>     client_trace_files,
+                        size_t                       code_distance,
                         size_t                       local_memory_capacity,
                         size_t                       concurrent_clients,
                         uint64_t                     simulation_instructions,

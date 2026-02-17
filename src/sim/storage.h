@@ -28,8 +28,12 @@ public:
 
         /*
          * Latency is given in terms of cycles for this `STORAGE`
+         *     `critical_latency` is specifically any latency on the critical path.
+         *     For example, for `coupled_load_store`, the store + data movement latency
+         *     isn't on the critical path (only care about load outcome).
          * */
         cycle_type latency;
+        cycle_type critical_latency;
 
         /*
          * We provide the frequency of the storage to help convert
@@ -80,13 +84,14 @@ public:
     /*
      * Attempts a memory access to the given storage.
      * Fails if the storage cannot serve the memory access.
-     * Otherwise, succeeds and swaps the two qubits.
      *
-     * This function is marked virtual in case a new `STORAGE`
-     * descendant is defined that modifies how latency
-     * or other functionality is implemented.
+     * Load -- qubit is removed from the memory
+     * Store -- qubit is added to the memory
+     * Coupled load store -- combination of both
      * */
-    virtual access_result_type do_memory_access(QUBIT* ld, QUBIT* st);
+    access_result_type do_load(QUBIT*);
+    access_result_type do_store(QUBIT*);
+    access_result_type do_coupled_load_store(QUBIT* ld, QUBIT* st);
 
     /*
      * Returns true if any adapter is free this cycle.
@@ -98,6 +103,20 @@ public:
     const backing_buffer_type& contents() const;
 protected:
     long operate() override;
+
+private:
+    /*
+     * Common logic for all memory access functions (see above)
+     * */
+    access_result_type do_memory_access(cycle_type access_latency, bool is_store);
+    
+    /*
+     * This function should contain the logic that implements the adapter manipulation.
+     * Returns the latency of any adapter manipulations, or 0 if nothing was necessary.
+     *
+     * Note that the caller, `do_load` or `do_store`, will update the adapter ready time.
+     * */
+    cycle_type adapter_access(std::vector<cycle_type>::iterator, bool is_store);
 };
 
 ////////////////////////////////////////////////////////////

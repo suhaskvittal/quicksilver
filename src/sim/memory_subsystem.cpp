@@ -14,6 +14,23 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+namespace
+{
+
+using routing_ptr = std::unique_ptr<MEMORY_SUBSYSTEM::routing_base_type>;
+
+template <class ITER>
+ITER _lookup_qubit(ITER begin, ITER end, QUBIT*);
+
+template <class ITER>
+ITER _find_empty_storage(ITER begin, ITER end, const routing_ptr&, cycle_type current_cycle);
+
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
     :storages_(std::move(storages))
 {
@@ -26,37 +43,61 @@ MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
 ////////////////////////////////////////////////////////////
 
 MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_memory_access(QUBIT* ld, 
-                                    QUBIT* st,
-                                    cycle_type c_current_cycle,
-                                    double c_freq_khz)
+MEMORY_SUBSYSTEM::do_load(QUBIT* q, cycle_type c_current_cycle, double c_freq_khz)
 {
-    auto storage_it = lookup(ld);
-    if (storage_it == storages_.end())
+    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), q);
+    if (s_it == storages_.end())
+    {
+        std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *q << " not found";
+        for (auto* s : storages_)
+        {
+            std::cerr << "\n\t" << s->name << " :";
+            for (auto* x : s->contents())
+                std::cerr << " " << *x;
+        }
+        std::cerr << _die{};
+    }
+
+    if (routing_->can_route_to(*s_it, c_current_cycle))
+        return handle_access_outcome((*s_it)->do_load(q), *s_it, c_current_cycle, c_freq_khz);
+    return access_result_type{};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+MEMORY_SUBSYSTEM::access_result_type
+MEMORY_SUBSYSTEM::do_store(QUBIT* q, cycle_type c_current_cycle, double c_freq_khz)
+{
+    auto s_it = _find_empty_storage(storages_.begin(), storages_.end(), routing_, c_current_cycle);
+    if (s_it != storages_.end())
+        return handle_access_outcome((*s_it)->do_store(q), *s_it, c_current_cycle, c_freq_khz);
+    return access_result_type{};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+MEMORY_SUBSYSTEM::access_result_type
+MEMORY_SUBSYSTEM::do_coupled_load_store(QUBIT* ld, QUBIT* st, cycle_type c_current_cycle, double c_freq_khz)
+{
+    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), ld);
+    if (s_it == storages_.end())
     {
         std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *ld << " not found";
         for (auto* s : storages_)
         {
             std::cerr << "\n\t" << s->name << " :";
-            for (auto* q : s->contents())
-                std::cerr << " " << *q;
+            for (auto* x : s->contents())
+                std::cerr << " " << *x;
         }
         std::cerr << _die{};
     }
 
-    if (routing_->can_route_to(*storage_it, c_current_cycle))
-    {
-        auto result = (*storage_it)->do_memory_access(ld, st);
-        if (result.success)
-        {
-            cycle_type latency = convert_cycles(result.latency, result.storage_freq_khz, c_freq_khz);
-            routing_->lock_route_to(*storage_it, c_current_cycle+latency);
-            result.latency = latency;
-        }
-        return result;
-    }
-    
-    return access_result_type{};
+    // coupled  access only succeeds if both load and store can occur
+    if (!routing_->can_route_to(*s_it, c_current_cycle))
+        return access_result_type{};
+    return handle_access_outcome((*s_it)->do_coupled_load_store(ld, st), *s_it, c_current_cycle, c_freq_khz);
 }
 
 ////////////////////////////////////////////////////////////
@@ -88,19 +129,45 @@ MEMORY_SUBSYSTEM::storages() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<STORAGE*>::iterator
-MEMORY_SUBSYSTEM::lookup(QUBIT* q)
+MEMORY_SUBSYSTEM::access_result_type
+MEMORY_SUBSYSTEM::handle_access_outcome(access_result_type result, 
+                                        STORAGE* s, 
+                                        cycle_type c_current_cycle, 
+                                        double c_freq_khz)
 {
-    return std::find_if(storages_.begin(), storages_.end(),
-        [q] (STORAGE* s) { return s->contents().count(q) > 0; });
+    if (result.success)
+    {
+        result.latency = convert_cycles(result.latency, result.storage_freq_khz, c_freq_khz);
+        result.critical_latency = convert_cycles(result.critical_latency, result.storage_freq_khz, c_freq_khz);
+        routing_->lock_route_to(s, c_current_cycle+result.latency);
+    }
+    return result;
 }
 
-std::vector<STORAGE*>::const_iterator
-MEMORY_SUBSYSTEM::lookup(QUBIT* q) const
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
 {
-    return std::find_if(storages_.begin(), storages_.end(),
-        [q] (STORAGE* s) { return s->contents().count(q) > 0; });
+
+template <class ITER> ITER
+_lookup_qubit(ITER begin, ITER end, QUBIT* q)
+{
+    return std::find_if(begin, end, [q] (STORAGE* s) { return s->contains(q); });
 }
+
+template <class ITER> ITER
+_find_empty_storage(ITER begin, ITER end, const routing_ptr& r, cycle_type current_cycle)
+{
+    return std::find_if(begin, end, 
+            [&r, current_cycle] (STORAGE* s)
+            { 
+                return s->contents().size() < s->logical_qubit_count && r->can_route_to(s, current_cycle);
+            });
+}
+
+
+}  // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

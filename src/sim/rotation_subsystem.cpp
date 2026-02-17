@@ -26,11 +26,13 @@ bool _request_compare(const rotation_request_entry*, const rotation_request_entr
 ////////////////////////////////////////////////////////////
 
 ROTATION_SUBSYSTEM::ROTATION_SUBSYSTEM(double freq_khz,
+                                        size_t code_distance,
                                         size_t capacity,
                                         COMPUTE_SUBSYSTEM* parent,
                                         double watermark)
     :COMPUTE_BASE("rotation_subsystem", 
                     freq_khz, 
+                    code_distance,
                     capacity, 
                     parent->top_level_t_factories(), 
                     parent->memory_hierarchy()),

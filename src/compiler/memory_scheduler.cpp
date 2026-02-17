@@ -30,8 +30,9 @@ transform_active_set(const active_set_type& current, const active_set_type& targ
                         [&target] (qubit_type q) { return !target.count(q); });
         if (it == out.active_set.end())
             std::cerr << "memory_scheduler::transform_active_set: could not find victim" << _die{};
-        inst_ptr m = new INSTRUCTION{INSTRUCTION::TYPE::MSWAP, {q, *it}};
+        inst_ptr m = new INSTRUCTION{INSTRUCTION::TYPE::COUPLED_LOAD_STORE, {q, *it}};
         out.memory_accesses.push_back(m);
+
         out.active_set.erase(it);
         out.active_set.insert(q);
     }

@@ -63,8 +63,6 @@ main(int argc, char* argv[])
 
     sim::compute_extended_config conf;
 
-    bool bsol_sync_to_l2_factory;
-
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
@@ -109,7 +107,6 @@ main(int argc, char* argv[])
          * */
         .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
-        .optional("", "--bsol-sync", "BW SoL: sync compute to L2 factory", bsol_sync_to_l2_factory, false)
 
         .parse(argc, argv);
 
@@ -182,7 +179,6 @@ main(int argc, char* argv[])
         compute_code_distance = 21;
         memory_code_distance = 24;
     }
-    conf.rpc_freq_khz = sim::compute_freq_khz((compute_code_distance-4) * compute_syndrome_extraction_round_time_ns);
 
     const size_t memory_block_physical_qubits = 
         sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
@@ -203,7 +199,7 @@ main(int argc, char* argv[])
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
     main_memory_qubits -= compute_local_memory_capacity;
     const size_t num_blocks = main_memory_qubits == 0 ? 0 : (main_memory_qubits-1) / memory_block_capacity + 1;
-    const double m_freq_khz = sim::compute_freq_khz(memory_code_distance * memory_syndrome_extraction_round_time_ns);
+    const double m_freq_khz = sim::compute_freq_khz(memory_syndrome_extraction_round_time_ns);
     std::vector<sim::STORAGE*> memory_blocks(num_blocks);
     for (size_t i = 0; i < num_blocks; i++)
     {
@@ -212,8 +208,8 @@ main(int argc, char* argv[])
                                             memory_block_capacity,
                                             memory_code_distance,
                                             1, // num adapters
-                                            2, // load latency
-                                            1 // store latency
+                                            2*memory_code_distance, // load latency
+                                            1*memory_code_distance // store latency
         };
     }
 
@@ -222,19 +218,16 @@ main(int argc, char* argv[])
     /* initialize compute subsystem */
 
     double c_freq_khz;
-    if (bsol_sync_to_l2_factory)
-        c_freq_khz = sim::compute_freq_khz(l2_spec.dm * compute_syndrome_extraction_round_time_ns);
-    else
-        c_freq_khz = sim::compute_freq_khz(compute_code_distance * compute_syndrome_extraction_round_time_ns);
-
-    sim::COMPUTE_SUBSYSTEM* compute_subsystem = new sim::COMPUTE_SUBSYSTEM{c_freq_khz,
-                                                                             traces,
-                                                                             compute_local_memory_capacity,
-                                                                             concurrent_clients,
-                                                                             inst_sim,
-                                                                             alloc.second_level.empty() ? alloc.first_level : alloc.second_level,
-                                                                             memory_subsystem,
-                                                                             conf};
+    c_freq_khz = sim::compute_freq_khz(compute_syndrome_extraction_round_time_ns);
+    auto* compute_subsystem = new sim::COMPUTE_SUBSYSTEM{c_freq_khz,
+                                                         traces,
+                                                         compute_code_distance,
+                                                         compute_local_memory_capacity,
+                                                         concurrent_clients,
+                                                         inst_sim,
+                                                         alloc.second_level.empty() ? alloc.first_level : alloc.second_level,
+                                                         memory_subsystem,
+                                                         conf};
 
     /* initialize simulation */
 

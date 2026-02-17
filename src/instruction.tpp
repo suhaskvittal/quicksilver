@@ -64,7 +64,9 @@ is_software_instruction(INSTRUCTION::TYPE t)
 constexpr bool
 is_memory_access(INSTRUCTION::TYPE t)
 {
-    return t == INSTRUCTION::TYPE::MSWAP;
+    return t == INSTRUCTION::TYPE::LOAD 
+            || t == INSTRUCTION::TYPE::STORE 
+            || t == INSTRUCTION::TYPE::COUPLED_LOAD_STORE;
 }
 
 constexpr bool
@@ -119,13 +121,15 @@ get_inst_qubit_count(INSTRUCTION::TYPE t)
         case INSTRUCTION::TYPE::RZ:
         case INSTRUCTION::TYPE::MZ:
         case INSTRUCTION::TYPE::MX:
+        case INSTRUCTION::TYPE::LOAD:
+        case INSTRUCTION::TYPE::STORE:
             return 1;
 
         // 2-qubit gates
         case INSTRUCTION::TYPE::CX:
         case INSTRUCTION::TYPE::CZ:
         case INSTRUCTION::TYPE::SWAP:
-        case INSTRUCTION::TYPE::MSWAP:
+        case INSTRUCTION::TYPE::COUPLED_LOAD_STORE:
             return 2;
 
         // 3-qubit gates
