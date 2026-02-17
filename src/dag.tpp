@@ -22,8 +22,8 @@ DAG::get_front_layer_if(const PRED& pred) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> void
-DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer)
+template <class CALLBACK> void
+DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer) const
 {
     return generic_operate_on_nodes_in_layer_order_c(
                         [&callback] (node_type* x) { callback(x->inst); }, 
@@ -69,11 +69,11 @@ DAG::find_earliest_dependent_instruction_such_that(const PRED& pred,
 ////////////////////////////////////////////////////////////
 
 template <class PRED> size_t
-DAG::contract_instructions_such_that(const PRED& pred, size_t min_layer, size_t max_Layer)
+DAG::contract_instructions_such_that(const PRED& pred, size_t min_layer, size_t max_layer)
 {
     size_t num_deleted{0};
     generic_operate_on_nodes_in_layer_order(
-            [this, &num_deleted] (node_type* parent)
+            [this, &pred, &num_deleted] (node_type* parent)
             {
                 if (parent->dependent.size() != 1)
                     return;
@@ -103,7 +103,7 @@ DAG::contract_instructions_such_that(const PRED& pred, size_t min_layer, size_t 
 
                     // mark parent as `deleteable` (cannot delete yet since the template function needs
                     // `parent` to traverse through the DAG)
-                    parent->deletable = true;
+                    parent->deleteable = true;
 
                     delete child;
                     num_deleted++;
