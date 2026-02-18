@@ -117,12 +117,27 @@ private:
 class T_CULTIVATION : public T_FACTORY_BASE
 {
 public:
+    /*
+     * Note that `probability_of_success` corresponds to the 
+     * probability that the protocol discards the state within
+     * `rounds_with_possible_failure`. The failure round is
+     * chosen a priori via URAND selection.
+     *
+     * Obviously, this is a very approximate implementation (see
+     * the original paper for a plot of survival rate by round),
+     * but good enough to have a basic model.
+     * */
     const double probability_of_success;
+    const size_t rounds;
+private:
+    size_t step_{0};
+    size_t failure_round_;
 public:
     T_CULTIVATION(double freq_khz,
                     double output_error_prob,
                     size_t buffer_capacity,
-                    double probability_of_success);
+                    double probability_of_success,
+                    size_t rounds);
 private:
     bool production_step() override;
 };

@@ -41,7 +41,7 @@ struct FACTORY_SPECIFICATION
      *  -- `probability_of_success` is the probability of the cultivated state not being discarded
      * */
     size_t escape_distance{13};
-    size_t round_length{25};
+    size_t rounds{25};
     double probability_of_success{0.2};
 
     /*

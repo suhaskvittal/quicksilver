@@ -138,7 +138,7 @@ main(int argc, char* argv[])
         .buffer_capacity=1,
         .output_error_rate=1e-6,
         .escape_distance=13,
-        .round_length=18,
+        .rounds=18,
         .probability_of_success=0.2
     };
 
@@ -171,7 +171,7 @@ main(int argc, char* argv[])
         // modify `l1_spec` to use d = 5 color code cultivation
         l1_spec.output_error_rate = 1e-8;
         l1_spec.escape_distance = 15;
-        l1_spec.round_length = 25;
+        l1_spec.rounds = 25;
         l1_spec.probability_of_success = 0.02;
     }
     else

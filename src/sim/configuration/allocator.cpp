@@ -120,16 +120,24 @@ _alloc_factory(FACTORY_SPECIFICATION spec)
     T_FACTORY_BASE* f;
 
     const double freq_khz = spec.is_cultivation 
-                                ? compute_freq_khz(spec.syndrome_extraction_round_time_ns * spec.round_length)
+                                ? compute_freq_khz(spec.syndrome_extraction_round_time_ns)
                                 : compute_freq_khz(spec.syndrome_extraction_round_time_ns * spec.dm);
     if (spec.is_cultivation)
     {
-        f = new T_CULTIVATION(freq_khz, spec.output_error_rate, spec.buffer_capacity, spec.probability_of_success);
+        f = new T_CULTIVATION(freq_khz, 
+                                spec.output_error_rate, 
+                                spec.buffer_capacity, 
+                                spec.probability_of_success,
+                                spec.rounds);
     }
     else
     {
-        f = new T_DISTILLATION(freq_khz, spec.output_error_rate, spec.buffer_capacity, 
-                                spec.input_count, spec.output_count, spec.rotations);
+        f = new T_DISTILLATION(freq_khz, 
+                                spec.output_error_rate, 
+                                spec.buffer_capacity, 
+                                spec.input_count, 
+                                spec.output_count,
+                                spec.rotations);
     }
     return f;
 }
@@ -233,7 +241,19 @@ _estimate_throughput_cultivation(const std::vector<T_FACTORY_BASE*>& fact)
                                         [] (T_FACTORY_BASE* _f)
                                         {
                                             auto* f = static_cast<T_CULTIVATION*>(_f);
-                                            return (1e3 * f->freq_khz) * f->probability_of_success;
+
+                                            // on average, we will detect an error halfway through a 
+                                            // cultivation attempt (so `f->rounds/2`), so
+                                            // the "effective frequency" during failure is
+                                            //      `freq_khz / (rounds/2)` or `2 * (freq_khz/rounds)`
+                                            //
+                                            // the effective frequency on success is just `freq_khz / rounds`
+
+                                            const double mean_tries_until_success = 1.0 / f->probability_of_success;
+                                            const double failure_rounds = mean_tries_until_success * f->rounds * 0.5;
+                                            const double success_rounds = static_cast<double>(f->rounds);
+                                            const double eff_freq_khz = f->freq_khz / (success_rounds+failure_rounds);
+                                            return 1e3 * eff_freq_khz;
                                         });
     return tp;
 }

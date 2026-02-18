@@ -185,7 +185,6 @@ T_DISTILLATION::production_step()
         {
             install_magic_state();
             step_ = 0;
-
             s_production_attempts++;
         }
     }
@@ -198,22 +197,45 @@ T_DISTILLATION::production_step()
 T_CULTIVATION::T_CULTIVATION(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
-                                double _probability_of_success)
+                                double _probability_of_success,
+                                size_t _rounds)
     :T_FACTORY_BASE(_cultivation_name(_probability_of_success),
                      freq_khz,
                      output_error_probability,
                      buffer_capacity),
-    probability_of_success(_probability_of_success)
+    probability_of_success(_probability_of_success),
+    rounds(_rounds)
 {}
 
 bool
 T_CULTIVATION::production_step()
 {
-    if (FPR(GL_RNG) <= probability_of_success)
-        install_magic_state();
-    else
+    if (step_ == 0)
+    {
+        // select failure round:
+        std::uniform_int_distribution<size_t> urand{0, rounds-1};
+        if (FPR(GL_RNG) > probability_of_success)
+            failure_round_ = urand(GL_RNG);
+        else
+            failure_round_ = std::numeric_limits<size_t>::max();
+    }
+
+    if (step_ == failure_round_)
+    {
+        step_ = 0;
+        s_production_attempts++;
         s_failures++;
-    s_production_attempts++;
+    }
+    else
+    {
+        step_++;
+        if (step_ == rounds)
+        {
+            install_magic_state();
+            step_ = 0;
+            s_production_attempts++;
+        }
+    }
     return true;
 }
 

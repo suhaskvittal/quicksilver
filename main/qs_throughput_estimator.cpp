@@ -61,7 +61,7 @@ main(int argc, char* argv[])
     l1_spec.buffer_capacity = 1;
     l1_spec.output_error_rate = 1e-6;
     l1_spec.escape_distance = 13;
-    l1_spec.round_length = 18;
+    l1_spec.rounds = 18;
     l1_spec.probability_of_success = 0.2;
 
     sim::configuration::FACTORY_SPECIFICATION l2_spec;
