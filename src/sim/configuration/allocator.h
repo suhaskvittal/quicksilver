@@ -6,7 +6,7 @@
 #ifndef SIM_CONFIGURATION_ALLOCATOR_h
 #define SIM_CONFIGURATION_ALLOCATOR_h
 
-#include "sim/factory.h"
+#include "sim/production/magic_state.h"
 
 namespace sim
 {
@@ -18,8 +18,8 @@ namespace configuration
 
 struct FACTORY_ALLOCATION
 {
-    std::vector<T_FACTORY_BASE*> first_level;
-    std::vector<T_FACTORY_BASE*> second_level;
+    std::vector<PRODUCER_BASE*> first_level;
+    std::vector<PRODUCER_BASE*> second_level;
     size_t physical_qubit_count{0};
 
     FACTORY_ALLOCATION() =default;

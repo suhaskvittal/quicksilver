@@ -5,6 +5,7 @@
 
 #include "sim/compute_subsystem.h"
 #include "sim/memory_subsystem.h"
+#include "sim/stats.h"
 
 #include <fstream>
 
@@ -21,15 +22,10 @@ using inst_ptr = COMPUTE_SUBSYSTEM::inst_ptr;
 
 static std::uniform_real_distribution FPR{0.0,1.0};
 
-static std::ofstream ROTATION_LOGGER{"rotation.log"};
-
-bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
-
 /*
- * Writes rotation info to `ROTATION_LOGGER`
+ * Returns true if the client is complete.
  * */
-void _log_rotation(inst_ptr, std::string_view);
-void _log_runahead(inst_ptr);
+bool   _client_is_done(const CLIENT*, uint64_t simulation_instructions);
 
 } // anon
 
@@ -42,7 +38,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
                                      size_t                       local_memory_capacity,
                                      size_t                       _concurrent_clients,
                                      uint64_t                     _simulation_instructions,
-                                     std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                                     std::vector<PRODUCER_BASE*>  top_level_t_factories,
                                      MEMORY_SUBSYSTEM*            memory_hierarchy,
                                      compute_extended_config      conf)
     :COMPUTE_BASE("compute_subsystem", 
@@ -132,12 +128,13 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
         else
             ostrm << "   client " << static_cast<int>(c->id);
 
-        double ipc = mean(c->s_unrolled_inst_done, current_cycle());
-        double kips = mean(c->s_unrolled_inst_done / 1000, current_cycle() / (1e3*freq_khz));
+        double ipc = stats::ipc(c->s_unrolled_inst_done, current_cycle());
+        double ipdc = stats::ipdc(c->s_unrolled_inst_done, current_cycle(), code_distance);
+        double kips = stats::kips(c->s_unrolled_inst_done, current_cycle(), freq_khz);
 
         ostrm << "\n\tinstructions completed = " << c->s_unrolled_inst_done
-                << "\n\tipc = " << ipc
-                << "\n\tkips = " << kips
+                << "\n\tIPdC = " << ipdc
+                << "\n\tKIPS = " << kips
                 << "\n";
     }
 
@@ -499,7 +496,6 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
         if (GL_RPC_ALWAYS_RUNAHEAD)
             rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
 
-        _log_rotation(inst, "success");
         retire_instruction(c, inst, 2*code_distance);
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::NEEDS_CORRECTION)
@@ -509,24 +505,18 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
         inst->urotseq = inst->corr_urotseq_array.front();
         inst->corr_urotseq_array.pop_front();
 
-        _log_rotation(inst, "failure");
-
         // since we will have to do a corrective rotation, search for future rotations
         // to schedule:
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
-        _log_rotation(inst, "invalidate");
-
         rotation_subsystem_->invalidate(inst);
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
         return false;
     }
     else
     {
-        _log_rotation(inst, "not found");
-
         rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
     }
     return (lookup_result == RPC_LOOKUP_RESULT::RETIRE) || (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS);
@@ -597,14 +587,9 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
                                             RPC_DAG_LOOKAHEAD_START_LAYER,
                                             RPC_DAG_LOOKAHEAD_START_LAYER + RPC_DAG_LOOKAHEAD_DEPTH);
         if (dependent_inst != nullptr)
-        {
             rotation_subsystem_->submit_request(dependent_inst, layer, inst);
-            _log_runahead(dependent_inst);
-        } 
         else
-        {
             break;
-        }
     }
 }
 
@@ -614,42 +599,11 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
 namespace
 {
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 bool
 _client_is_done(const CLIENT* c, uint64_t s)
 {
     return c->s_unrolled_inst_done >= s;
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-/*
- * Logging utilities:
- * */
-
-#define ENABLE_ROTATION_LOGGER
-
-void
-_log_rotation(inst_ptr inst, std::string_view what)
-{
-#if defined(ENABLE_ROTATION_LOGGER)
-    ROTATION_LOGGER << "(runahead " << what << ") " << *inst << "\n";
-#endif
-}
-
-void
-_log_runahead(inst_ptr inst)
-{
-#if defined(ENABLE_ROTATION_LOGGER)
-    ROTATION_LOGGER << "   --> " << *inst << "\n";
-#endif
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 }
 

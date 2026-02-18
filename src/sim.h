@@ -21,7 +21,7 @@ namespace sim
 
 class COMPUTE_SUBSYSTEM;
 class CLIENT;
-class T_FACTORY_BASE;
+class PRODUCER_BASE;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -103,7 +103,7 @@ double walltime_s();
  * */
 
 void print_compute_subsystem_stats(std::ostream&, COMPUTE_SUBSYSTEM*);
-void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<T_FACTORY_BASE*>);
+void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<PRODUCER_BASE*>);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

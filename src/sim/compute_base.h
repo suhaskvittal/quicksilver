@@ -7,7 +7,7 @@
 #define SIM_COMPUTE_BASE_h
 
 #include "sim/client.h"
-#include "sim/factory.h"
+#include "sim/production/magic_state.h"
 #include "sim/storage.h"
 
 #include <array>
@@ -47,18 +47,18 @@ public:
     const size_t local_memory_capacity;
 protected:
     std::unique_ptr<STORAGE>     local_memory_;
-    std::vector<T_FACTORY_BASE*> top_level_t_factories_;
+    std::vector<PRODUCER_BASE*>  top_level_t_factories_;
     MEMORY_SUBSYSTEM*            memory_hierarchy_;
 public:
     COMPUTE_BASE(std::string_view             name, 
                  double                       freq_khz,
                  size_t                       code_distance,
                  size_t                       local_memory_capacity,
-                 std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                 std::vector<PRODUCER_BASE*>  top_level_t_factories,
                  MEMORY_SUBSYSTEM*            memory_hierarchy);
 
     const std::unique_ptr<STORAGE>&     local_memory() const;
-    const std::vector<T_FACTORY_BASE*>& top_level_t_factories() const;
+    const std::vector<PRODUCER_BASE*>&  top_level_t_factories() const;
     MEMORY_SUBSYSTEM*                   memory_hierarchy() const;
 protected:
     virtual execute_result_type execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);

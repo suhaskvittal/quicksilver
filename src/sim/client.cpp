@@ -78,12 +78,6 @@ CLIENT::dag() const
     return dag_;
 }
 
-double
-CLIENT::ipc() const
-{
-    return mean(s_unrolled_inst_done, s_cycle_complete);
-}
-
 const std::vector<QUBIT*>&
 CLIENT::qubits() const
 {

@@ -3,7 +3,7 @@
  *  date:   6 January 2026
  * */
 
-#include "sim/factory.h"
+#include "sim/production/magic_state.h"
 
 #include <cassert>
 #include <iomanip>
@@ -17,6 +17,12 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 extern std::mt19937_64 GL_RNG;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace producer
+{
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -53,69 +59,13 @@ std::string _cultivation_name(double probability_of_success);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-T_FACTORY_BASE::T_FACTORY_BASE(std::string_view name,
-                                double freq_khz,
-                                double _output_error_probability,
-                                size_t _buffer_capacity)
-    :OPERABLE(name, freq_khz),
-    output_error_probability(_output_error_probability),
-    buffer_capacity(_buffer_capacity)
-{
-}
-
-void
-T_FACTORY_BASE::consume(size_t count)
-{
-    assert(count <= buffer_occupancy_);
-    buffer_occupancy_ -= count;
-    s_consumed += count;
-
-    while (count--)
-    {
-        s_total_buffer_lifetime += current_cycle() - buffer_install_timestamp_.front();
-        buffer_install_timestamp_.pop_front();
-    }
-}
-
-void
-T_FACTORY_BASE::print_deadlock_info(std::ostream& out) const
-{
-    out << name << ": buffer occupancy = " << buffer_occupancy_ << " of " << buffer_capacity << "\n";
-}
-
-long
-T_FACTORY_BASE::operate()
-{
-    if (buffer_occupancy_ >= buffer_capacity || production_step())
-        return 1;
-    else 
-        return 0;
-}
-
-void
-T_FACTORY_BASE::install_magic_state()
-{
-    assert(buffer_occupancy_ < buffer_capacity);
-    buffer_occupancy_++;
-    buffer_install_timestamp_.push_back(current_cycle());
-}
-
-size_t
-T_FACTORY_BASE::buffer_occupancy() const
-{
-    return buffer_occupancy_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 T_DISTILLATION::T_DISTILLATION(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
                                 size_t _initial_input_count,
                                 size_t _output_count,
                                 size_t _num_rotation_steps)
-    :T_FACTORY_BASE(_distillation_name(_initial_input_count, _output_count, _num_rotation_steps),
+    :PRODUCER_BASE(_distillation_name(_initial_input_count, _output_count, _num_rotation_steps),
                         freq_khz,
                         output_error_probability,
                         buffer_capacity),
@@ -183,7 +133,7 @@ T_DISTILLATION::production_step()
         step_++;
         if (step_ == num_rotation_steps+1)
         {
-            install_magic_state();
+            install_resource_state();
             step_ = 0;
             s_production_attempts++;
         }
@@ -199,7 +149,7 @@ T_CULTIVATION::T_CULTIVATION(double freq_khz,
                                 size_t buffer_capacity,
                                 double _probability_of_success,
                                 size_t _rounds)
-    :T_FACTORY_BASE(_cultivation_name(_probability_of_success),
+    :PRODUCER_BASE(_cultivation_name(_probability_of_success),
                      freq_khz,
                      output_error_probability,
                      buffer_capacity),
@@ -231,7 +181,7 @@ T_CULTIVATION::production_step()
         step_++;
         if (step_ == rounds)
         {
-            install_magic_state();
+            install_resource_state();
             step_ = 0;
             s_production_attempts++;
         }
@@ -266,4 +216,5 @@ _cultivation_name(double probability_of_success)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+} // namespace producer
 } // namespace sim

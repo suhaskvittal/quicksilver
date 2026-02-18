@@ -32,7 +32,7 @@ COMPUTE_BASE::COMPUTE_BASE(std::string_view             name,
                            double                       freq_khz,
                            size_t                       _code_distance,
                            size_t                       _local_memory_capacity,
-                           std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                           std::vector<PRODUCER_BASE*>  top_level_t_factories,
                            MEMORY_SUBSYSTEM*            memory_hierarchy)
     :OPERABLE(name, freq_khz),
     code_distance(_code_distance),
@@ -62,7 +62,7 @@ COMPUTE_BASE::local_memory() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-const std::vector<T_FACTORY_BASE*>&
+const std::vector<PRODUCER_BASE*>&
 COMPUTE_BASE::top_level_t_factories() const
 {
     return top_level_t_factories_;

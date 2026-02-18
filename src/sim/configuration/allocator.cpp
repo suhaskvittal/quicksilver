@@ -27,7 +27,7 @@ namespace configuration
 namespace
 {
 
-T_FACTORY_BASE* _alloc_factory(FACTORY_SPECIFICATION);
+PRODUCER_BASE* _alloc_factory(FACTORY_SPECIFICATION);
 
 size_t _throughput_aware_alloc_step(FACTORY_ALLOCATION&,
                                     size_t remaining_budget, 
@@ -38,9 +38,9 @@ size_t _throughput_aware_alloc_step(FACTORY_ALLOCATION&,
  * Helper functions for estimating throughput and consumption rate.
  * Both metrics are given in magic states per second.
  * */
-double _estimate_throughput_cultivation(const std::vector<T_FACTORY_BASE*>&);
-double _estimate_throughput_distillation(const std::vector<T_FACTORY_BASE*>&);
-double _estimate_consumption_rate(const std::vector<T_FACTORY_BASE*>&);
+double _estimate_throughput_cultivation(const std::vector<PRODUCER_BASE*>&);
+double _estimate_throughput_distillation(const std::vector<PRODUCER_BASE*>&);
+double _estimate_consumption_rate(const std::vector<PRODUCER_BASE*>&);
 
 } // anon
 
@@ -114,30 +114,30 @@ namespace
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-T_FACTORY_BASE*
+PRODUCER_BASE*
 _alloc_factory(FACTORY_SPECIFICATION spec)
 {
-    T_FACTORY_BASE* f;
+    PRODUCER_BASE* f;
 
     const double freq_khz = spec.is_cultivation 
                                 ? compute_freq_khz(spec.syndrome_extraction_round_time_ns)
                                 : compute_freq_khz(spec.syndrome_extraction_round_time_ns * spec.dm);
     if (spec.is_cultivation)
     {
-        f = new T_CULTIVATION(freq_khz, 
-                                spec.output_error_rate, 
-                                spec.buffer_capacity, 
-                                spec.probability_of_success,
-                                spec.rounds);
-    }
+        f = new producer::T_CULTIVATION(freq_khz, 
+                                        spec.output_error_rate, 
+                                        spec.buffer_capacity, 
+                                        spec.probability_of_success,
+                                        spec.rounds);
+            }
     else
     {
-        f = new T_DISTILLATION(freq_khz, 
-                                spec.output_error_rate, 
-                                spec.buffer_capacity, 
-                                spec.input_count, 
-                                spec.output_count,
-                                spec.rotations);
+        f = new producer::T_DISTILLATION(freq_khz, 
+                                        spec.output_error_rate, 
+                                        spec.buffer_capacity, 
+                                        spec.input_count, 
+                                        spec.output_count,
+                                        spec.rotations);
     }
     return f;
 }
@@ -234,13 +234,13 @@ _throughput_aware_alloc_step(FACTORY_ALLOCATION& alloc, size_t b, FACTORY_SPECIF
 ////////////////////////////////////////////////////////////
 
 double
-_estimate_throughput_cultivation(const std::vector<T_FACTORY_BASE*>& fact)
+_estimate_throughput_cultivation(const std::vector<PRODUCER_BASE*>& fact)
 {
     double tp = std::transform_reduce(fact.begin(), fact.end(), double{0.0},
                                         std::plus<double>{},
-                                        [] (T_FACTORY_BASE* _f)
+                                        [] (PRODUCER_BASE* _f)
                                         {
-                                            auto* f = static_cast<T_CULTIVATION*>(_f);
+                                            auto* f = static_cast<producer::T_CULTIVATION*>(_f);
 
                                             // on average, we will detect an error halfway through a 
                                             // cultivation attempt (so `f->rounds/2`), so
@@ -259,13 +259,13 @@ _estimate_throughput_cultivation(const std::vector<T_FACTORY_BASE*>& fact)
 }
 
 double
-_estimate_throughput_distillation(const std::vector<T_FACTORY_BASE*>& fact)
+_estimate_throughput_distillation(const std::vector<PRODUCER_BASE*>& fact)
 {
     double tp = std::transform_reduce(fact.begin(), fact.end(), double{0.0},
                                         std::plus<double>{},
-                                        [] (T_FACTORY_BASE* _f)
+                                        [] (PRODUCER_BASE* _f)
                                         {
-                                            auto* f = static_cast<T_DISTILLATION*>(_f);
+                                            auto* f = static_cast<producer::T_DISTILLATION*>(_f);
                                             const size_t num_steps = 1 + f->num_rotation_steps;
                                             const double eff_freq_khz = f->freq_khz / static_cast<double>(num_steps);
                                             return (1e3 * eff_freq_khz) * f->output_count;
@@ -274,13 +274,13 @@ _estimate_throughput_distillation(const std::vector<T_FACTORY_BASE*>& fact)
 }
 
 double
-_estimate_consumption_rate(const std::vector<T_FACTORY_BASE*>& fact)
+_estimate_consumption_rate(const std::vector<PRODUCER_BASE*>& fact)
 {
     double r = std::transform_reduce(fact.begin(), fact.end(), double{0.0},
                                     std::plus<double>{},
-                                    [] (T_FACTORY_BASE* _f)
+                                    [] (PRODUCER_BASE* _f)
                                     {
-                                        auto* f = static_cast<T_DISTILLATION*>(_f);
+                                        auto* f = static_cast<producer::T_DISTILLATION*>(_f);
                                         const size_t num_steps = 1 + f->num_rotation_steps;
                                         const size_t states_consumed = f->initial_input_count + f->num_rotation_steps;
 

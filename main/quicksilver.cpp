@@ -8,7 +8,7 @@
 #include "sim/configuration/allocator.h"
 #include "sim/compute_subsystem.h"
 #include "sim/memory_subsystem.h"
-#include "sim/factory.h"
+#include "sim/production/magic_state.h"
 
 #include "compiler/memory_scheduler.h"
 #include "compiler/memory_scheduler/impl.h"

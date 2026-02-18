@@ -7,7 +7,7 @@
 #include "globals.h"
 #include "sim.h"
 #include "sim/configuration/allocator.h"
-#include "sim/factory.h"
+#include "sim/production/magic_state.h"
 #include "sim/operable.h"
 
 #include <algorithm>

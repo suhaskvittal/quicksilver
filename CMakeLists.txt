@@ -113,10 +113,12 @@ set(SIM_FILES
     src/sim/client.cpp
     src/sim/compute_base.cpp
     src/sim/compute_subsystem.cpp
-    src/sim/factory.cpp
     src/sim/memory_subsystem.cpp
     src/sim/operable.cpp
+    src/sim/production.cpp
+    src/sim/production/magic_state.cpp
     src/sim/rotation_subsystem.cpp
+    src/sim/stats.cpp
     src/sim/storage.cpp
     src/sim.cpp)
 
@@ -203,10 +205,10 @@ target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
 
 # Simple context switch simulator (qs_ctxsim)
 
-add_executable(qs_ctxsim main/qs_ctxsim.cpp)
-target_include_directories(qs_ctxsim PRIVATE "src")
-target_compile_options(qs_ctxsim PRIVATE ${COMPILE_OPTIONS})
-target_link_libraries(qs_ctxsim PRIVATE qs_simulator)
+#add_executable(qs_ctxsim main/qs_ctxsim.cpp)
+#target_include_directories(qs_ctxsim PRIVATE "src")
+#target_compile_options(qs_ctxsim PRIVATE ${COMPILE_OPTIONS})
+#target_link_libraries(qs_ctxsim PRIVATE qs_simulator)
 
 ###################################################
 ###################################################

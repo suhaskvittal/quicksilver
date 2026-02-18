@@ -6,7 +6,8 @@
 #include "sim.h"
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
-#include "sim/factory.h"
+#include "sim/production.h"
+#include "sim/stats.h"
 
 #include <iomanip>
 #include <sstream>
@@ -132,7 +133,7 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
 ////////////////////////////////////////////////////////////
 
 void
-print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<T_FACTORY_BASE*> factories)
+print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<PRODUCER_BASE*> factories)
 {
     if (factories.empty())
         return;
@@ -143,24 +144,20 @@ print_stats_for_factories(std::ostream& out, std::string_view header, std::vecto
     double freq_khz = factories[0]->freq_khz;
     uint64_t total_attempts{0},
              total_failures{0},
-             total_consumed{0},
-             total_ms_lifetime_in_buffer{0};
+             total_consumed{0};
     for (auto* f : factories)
     {
         total_attempts += f->s_production_attempts;
         total_failures += f->s_failures;
         total_consumed += f->s_consumed;
-        total_ms_lifetime_in_buffer += f->s_total_buffer_lifetime;
     }
     double kill_rate = mean(total_failures, total_attempts);
-    double mean_ms_lifetime_in_buffer = mean(total_ms_lifetime_in_buffer, total_consumed);
 
     print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
     print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
     print_stat_line(std::cout, "    PRODUCED", total_attempts - total_failures);
     print_stat_line(std::cout, "    CONSUMED", total_consumed);
     print_stat_line(std::cout, "    KILL_RATE", kill_rate);
-    print_stat_line(std::cout, "    MEAN_LIFETIME_IN_BUFFER", mean_ms_lifetime_in_buffer);
 }
 
 ////////////////////////////////////////////////////////////
@@ -177,13 +174,15 @@ namespace
 void
 _print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIENT* c)
 {
-    double ipc = c->ipc();
-    double kips = mean(c->s_unrolled_inst_done / 1000, c->s_cycle_complete / (compute_subsystem->freq_khz*1e3));
+    double ipc = stats::ipc(c->s_unrolled_inst_done, c->s_cycle_complete);
+    double ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, compute_subsystem->code_distance);
+    double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, compute_subsystem->freq_khz);
 
     double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
 
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
+    print_stat_line(out, "    IPdC", ipdc);
     print_stat_line(out, "    KIPS", kips);
     print_stat_line(out, "    INSTRUCTIONS", c->s_unrolled_inst_done);
     print_stat_line(out, "    CYCLES", c->s_cycle_complete);

@@ -3,88 +3,20 @@
  *  date:   6 January 2026
  * */
 
-#ifndef SIM_FACTORY_h
-#define SIM_FACTORY_h
+#ifndef SIM_PRODUCTION_MAGIC_STATE_h
+#define SIM_PRODUCTION_MAGIC_STATE_h
 
-#include "globals.h"
-#include "sim/operable.h"
-
-#include <deque>
-#include <vector>
+#include "sim/production.h"
 
 namespace sim
 {
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-class T_FACTORY_BASE : public OPERABLE
+namespace producer
 {
-public:
-    const double output_error_probability;
-    const size_t buffer_capacity;
-
-    /*
-     * Factories that produce magic states for this factory to use.
-     * If empty, then it is assumed that this factory consumes
-     * magic states created via state injection.
-     * */
-    std::vector<T_FACTORY_BASE*> previous_level;
-
-    /*
-     * Statistics:
-     * */
-    uint64_t s_production_attempts{0};
-    uint64_t s_failures{0};
-    uint64_t s_consumed{0};
-    uint64_t s_total_buffer_lifetime{0};
-protected:
-    /*
-     * Number of magic states in local buffer (max `buffer_capacity`)
-     * */
-    size_t buffer_occupancy_{0};
-
-    /*
-     * Cycle of magic state install
-     * */
-    std::deque<uint64_t> buffer_install_timestamp_{};
-public:
-    T_FACTORY_BASE(std::string_view name, 
-                    double freq_khz, 
-                    double output_error_prob,
-                    size_t buffer_capacity);
-
-    /*
-     * Safely consumes `count` magic states from the buffer.
-     * */
-    void consume(size_t count);
-
-    void print_deadlock_info(std::ostream&) const override;
-
-    size_t buffer_occupancy() const;
-protected:
-    long operate() override;
-
-    /*
-     * Adds a magic state to the buffer.
-     * */
-    virtual void install_magic_state();
-
-    /*
-     * `operate()` calls `production_step`, which advances
-     * magic state production by one cycle. Implementation
-     * is defined by descendant class.
-     *
-     * This function should return true if anything was
-     * attempted (regardless of failure).
-     * */
-    virtual bool production_step() =0;
-};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class T_DISTILLATION : public T_FACTORY_BASE
+class T_DISTILLATION : public PRODUCER_BASE
 {
 public:
     /*
@@ -114,7 +46,7 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class T_CULTIVATION : public T_FACTORY_BASE
+class T_CULTIVATION : public PRODUCER_BASE
 {
 public:
     /*
@@ -145,6 +77,7 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+}  // namespace producer
 }  // namespace sim
 
-#endif  // SIM_FACTORY_h
+#endif

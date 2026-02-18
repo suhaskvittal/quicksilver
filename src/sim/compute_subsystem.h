@@ -112,7 +112,7 @@ public:
                         size_t                       local_memory_capacity,
                         size_t                       concurrent_clients,
                         uint64_t                     simulation_instructions,
-                        std::vector<T_FACTORY_BASE*> top_level_t_factories,
+                        std::vector<PRODUCER_BASE*>  top_level_t_factories,
                         MEMORY_SUBSYSTEM*            memory_hierarchy,
                         compute_extended_config);
     ~COMPUTE_SUBSYSTEM();
