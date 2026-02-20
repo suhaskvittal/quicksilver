@@ -13,13 +13,7 @@
 namespace sim
 {
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 extern std::mt19937_64 GL_RNG;
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 namespace producer
 {
@@ -34,15 +28,8 @@ namespace producer
 namespace
 {
 
-/*
- * Needed for determining failures:
- * */
-static std::uniform_real_distribution FPR(0.0, 1.0);
-
-/*
- * Assumed injection error rate:
- * */
 const double INJECTION_ERROR_PROBABILITY{1e-3};
+static std::uniform_real_distribution FPR(0.0, 1.0);
 
 /*
  * Generate name for T_DISTILLATION factory: "D_<initial_input_count+num_rotation_steps>_<output_count>"

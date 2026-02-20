@@ -89,9 +89,9 @@ public:
      * Store -- qubit is added to the memory
      * Coupled load store -- combination of both
      * */
-    access_result_type do_load(QUBIT*);
-    access_result_type do_store(QUBIT*);
-    access_result_type do_coupled_load_store(QUBIT* ld, QUBIT* st);
+    virtual access_result_type do_load(QUBIT*);
+    virtual access_result_type do_store(QUBIT*);
+    virtual access_result_type do_coupled_load_store(QUBIT* ld, QUBIT* st);
 
     /*
      * Returns true if any adapter is free this cycle.
@@ -107,13 +107,14 @@ public:
 
     const backing_buffer_type& contents() const;
 protected:
+    enum class ACCESS_TYPE { LOAD, STORE, COUPLED_LOAD_STORE };
+
     long operate() override;
 
-private:
     /*
      * Common logic for all memory access functions (see above)
      * */
-    access_result_type do_memory_access(cycle_type access_latency, bool is_store);
+    virtual access_result_type do_memory_access(cycle_type access_latency, ACCESS_TYPE);
     
     /*
      * This function should contain the logic that implements the adapter manipulation.
@@ -121,7 +122,7 @@ private:
      *
      * Note that the caller, `do_load` or `do_store`, will update the adapter ready time.
      * */
-    cycle_type adapter_access(std::vector<cycle_type>::iterator, bool is_store);
+    virtual cycle_type adapter_access(std::vector<cycle_type>::iterator, ACCESS_TYPE);
 };
 
 ////////////////////////////////////////////////////////////

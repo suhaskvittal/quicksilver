@@ -7,6 +7,7 @@
 #include "sim/routing_model/multi_channel_bus.h"
 
 #include <algorithm>
+#include <cassert>
 
 namespace sim
 {
@@ -35,7 +36,6 @@ MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
     :storages_(std::move(storages))
 {
     using MBC = routing::MULTI_CHANNEL_BUS<STORAGE>;
-
     routing_ = std::make_unique<MBC>(storages_, 2);
 }
 
@@ -120,6 +120,18 @@ MEMORY_SUBSYSTEM::retrieve_qubit(client_id_type c_id, qubit_type q_id) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+cycle_type
+MEMORY_SUBSYSTEM::get_next_ready_cycle_for_load(QUBIT* q) const
+{
+    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), q);
+    assert(s_it != storages_.end());
+    const uint64_t routing_free_cycle = routing_->get_route_ready_cycle(*s_it);
+    return routing_free_cycle;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 const std::vector<STORAGE*>&
 MEMORY_SUBSYSTEM::storages() const
 {
@@ -139,7 +151,7 @@ MEMORY_SUBSYSTEM::handle_access_outcome(access_result_type result,
     {
         result.latency = convert_cycles_between_frequencies(result.latency, result.storage_freq_khz, c_freq_khz);
         result.critical_latency = convert_cycles_between_frequencies(result.critical_latency, result.storage_freq_khz, c_freq_khz);
-//      routing_->lock_route_to(s, c_current_cycle+result.latency);
+        routing_->lock_route_to(s, c_current_cycle+1);
     }
     return result;
 }

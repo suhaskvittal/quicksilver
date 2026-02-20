@@ -20,9 +20,8 @@ class MEMORY_SUBSYSTEM
 public:
     using access_result_type = STORAGE::access_result_type;
     using routing_base_type = ROUTING_MODEL<STORAGE>;
-private:
+protected:
     std::vector<STORAGE*> storages_;
-
     std::unique_ptr<routing_base_type> routing_;
 public:
     MEMORY_SUBSYSTEM(std::vector<STORAGE*>&&);
@@ -48,6 +47,11 @@ public:
      * and qubit id
      * */
     QUBIT* retrieve_qubit(client_id_type, qubit_type) const;
+
+    /*
+     * Estimates the next cycle when a load to the given qubit is possible.
+     * */
+    cycle_type get_next_ready_cycle_for_load(QUBIT*) const;
 
     const std::vector<STORAGE*>& storages() const;
 private:

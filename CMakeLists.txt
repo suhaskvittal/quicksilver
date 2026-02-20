@@ -116,6 +116,7 @@ set(SIM_FILES
     src/sim/memory_subsystem.cpp
     src/sim/operable.cpp
     src/sim/production.cpp
+    src/sim/production/epr.cpp
     src/sim/production/magic_state.cpp
     src/sim/rotation_subsystem.cpp
     src/sim/stats.cpp

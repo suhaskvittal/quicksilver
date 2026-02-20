@@ -54,6 +54,8 @@ public:
     const size_t   total_clients;
     const uint64_t simulation_instructions;
 
+    uint64_t cycles_without_progress{0};
+
     /*
      * Statistics:
      * */
@@ -199,6 +201,12 @@ private:
      * a qubit for it in `rotation_subsystem_`.
      * */
     void rpc_find_and_attempt_allocate_for_future_rotation(CLIENT*, inst_ptr);
+
+    /*
+     * Computes the first cycle when the instruction can be executed. If the
+     * instruction cannot be executed, this function returns std::nullopt.
+     * */
+    std::optional<cycle_type> get_next_ready_cycle_for_instruction(CLIENT*, inst_ptr) const;
 };
 
 ////////////////////////////////////////////////////////////

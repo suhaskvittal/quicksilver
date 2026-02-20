@@ -133,6 +133,7 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
         double kips = stats::kips(c->s_unrolled_inst_done, current_cycle(), freq_khz);
 
         ostrm << "\n\tinstructions completed = " << c->s_unrolled_inst_done
+                << "\n\tIPC = " << ipc
                 << "\n\tIPdC = " << ipdc
                 << "\n\tKIPS = " << kips
                 << "\n";
@@ -237,33 +238,17 @@ COMPUTE_SUBSYSTEM::skip_to_cycle() const
     const bool do_skip = t_factories_full && rs_done;
     if (do_skip)
     {
-        cycle_type min_cycle = std::numeric_limits<cycle_type>::max();
-        bool any_inst_evaluated{false};
-        for (const auto* c : active_clients_)
+        std::optional<cycle_type> min_cycle;
+        for (auto* c : active_clients_)
         {
             for (auto* inst : c->dag()->get_front_layer())
             {
-                if (is_memory_access(inst->type))
-                    continue;
-                bool all_in_active_set{true};
-                cycle_type ready_cycle{0};
-                std::for_each(inst->q_begin(), inst->q_end(),
-                        [this, c, &all_in_active_set, &ready_cycle] (auto qid)
-                        {
-                            QUBIT* q = c->qubits()[qid];
-                            all_in_active_set &= local_memory_->contains(q);
-                            ready_cycle = std::max(ready_cycle, q->cycle_available);
-                        });
-                if (all_in_active_set)
-                {
-                    min_cycle = std::min(ready_cycle, min_cycle);
-                    any_inst_evaluated = true;
-                }
+                auto r = get_next_ready_cycle_for_instruction(c, inst);
+                if (r.has_value() && (!min_cycle.has_value() || r < *min_cycle))
+                    min_cycle = r;
             }
         }
-
-        if (current_cycle() < min_cycle && any_inst_evaluated)
-            return std::make_optional(min_cycle);
+        return min_cycle;
     }
     return std::nullopt;
 }
@@ -328,6 +313,11 @@ COMPUTE_SUBSYSTEM::operate()
     magic_states_avail_last_cycle_ = magic_states_after_exec;
     if (had_rpc_stall_this_cycle_)
         s_cycles_with_rpc_stalls++;
+    
+    if (progress == 0)
+        cycles_without_progress++;
+    else
+        cycles_without_progress = 0;
 
     return progress;
 }
@@ -439,8 +429,13 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
     long success_count{0};
     for (auto* inst : front_layer)
     {
-        if (GL_ELIDE_CLIFFORDS && !(is_rotation_instruction(inst->type) || is_t_like_instruction(inst->type) || is_memory_access(inst->type)))
+        if (GL_ELIDE_CLIFFORDS
+                && !is_rotation_instruction(inst->type) 
+                && !is_t_like_instruction(inst->type) 
+                && !is_memory_access(inst->type))
+        {
             std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
+        }
     
         inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
@@ -590,6 +585,38 @@ COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, 
             rotation_subsystem_->submit_request(dependent_inst, layer, inst);
         else
             break;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::optional<cycle_type>
+COMPUTE_SUBSYSTEM::get_next_ready_cycle_for_instruction(CLIENT* c, inst_ptr inst) const
+{
+    if (is_memory_access(inst->type))
+    {
+        QUBIT* ld = c->qubits()[inst->qubits[0]],
+             * st = c->qubits()[inst->qubits[1]];
+        if (!local_memory_->contains(st))
+            return std::nullopt;
+
+        // we need to check when the memory subsystem can serve this load:
+        cycle_type ready_cycle = memory_hierarchy_->get_next_ready_cycle_for_load(ld);
+        return std::make_optional(ready_cycle);
+    }
+    else
+    {
+        bool all_in_active_set{true};
+        cycle_type ready_cycle{0};
+        std::for_each(inst->q_begin(), inst->q_end(),
+                [this, c, &all_in_active_set, &ready_cycle] (auto qid)
+                {
+                    QUBIT* q = c->qubits()[qid];
+                    all_in_active_set &= this->local_memory_->contains(q);
+                    ready_cycle = std::max(ready_cycle, q->cycle_available);
+                });
+        return all_in_active_set ? std::make_optional(ready_cycle) : std::nullopt;
     }
 }
 

@@ -52,6 +52,12 @@ public:
     {
         cycle_available_[channel_idx(x)] = until_cycle;
     }
+
+    cycle_type
+    get_route_ready_cycle(T* x) const
+    {
+        return cycle_available_[channel_idx(x)];
+    }
 private:
     size_t
     channel_idx(T* x) const

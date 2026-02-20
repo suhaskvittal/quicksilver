@@ -49,6 +49,7 @@ main(int argc, char* argv[])
 
     int64_t print_progress;
     int64_t ratemode;
+    int64_t skip_threshold;
     bool    jit;
     std::string regime;
 
@@ -57,6 +58,8 @@ main(int argc, char* argv[])
     int64_t compute_syndrome_extraction_round_time_ns;
 
     int64_t memory_syndrome_extraction_round_time_ns;
+    bool    use_remote_memory;
+    int64_t epr_physical_qubit_budget;
 
     int64_t factory_l2_buffer_capacity;
     int64_t factory_physical_qubit_budget;
@@ -69,6 +72,7 @@ main(int argc, char* argv[])
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
+        .optional("", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
         .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
         .optional("", "--regime", 
                     "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
@@ -95,6 +99,8 @@ main(int argc, char* argv[])
         .optional("", "--memory-syndrome-extraction-round-time-ns", 
                       "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
                       memory_syndrome_extraction_round_time_ns, 1300)
+        .optional("", "--memory-is-remote", is_memory_remote, false)
+        .optional("-epr", "--epr-physical-qubit-budget", epr_physical_qubit_budget, 5000)
 
         .optional("", "--factory-l2-buffer-capacity", "Number of magic states stored in an L2 factory buffer",
                       factory_l2_buffer_capacity, 4)
@@ -270,12 +276,14 @@ main(int argc, char* argv[])
             x->tick();
 
         // check if we should do a skip:
-        auto skip = compute_subsystem->skip_to_cycle();
-        if (skip.has_value())
+        if (compute_subsystem->cycles_without_progress > skip_threshold)
         {
-//          std::cout << "skipping to cycle " << *skip << ", current cycle = " << compute_subsystem->current_cycle() << "\n";
-            uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, compute_subsystem->freq_khz);
-            sim::fast_forward_all_operables_to_time_ns(all_operables, skip_time_ns);
+            auto skip = compute_subsystem->skip_to_cycle();
+            if (skip.has_value() && compute_subsystem->current_cycle() < *skip)
+            {
+                uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, compute_subsystem->freq_khz);
+                sim::fast_forward_all_operables_to_time_ns(all_operables, skip_time_ns);
+            }
         }
     }
     while (!compute_subsystem->done());
@@ -304,6 +312,7 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", factory_physical_qubits);
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_CYCLE", t_throughput_per_cycle);
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", estimate_throughput_of_allocation(alloc, true));
+    print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* cleanup simulation */
 

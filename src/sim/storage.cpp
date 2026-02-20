@@ -171,7 +171,7 @@ STORAGE::operate()
 ////////////////////////////////////////////////////////////
 
 STORAGE::access_result_type
-STORAGE::do_memory_access(cycle_type access_latency, bool is_store)
+STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
 {
     auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
                             [this] (cycle_type c) { return c <= current_cycle(); });
@@ -181,7 +181,7 @@ STORAGE::do_memory_access(cycle_type access_latency, bool is_store)
     cycle_type total_latency{0};
     if (load_latency > 0)
     {
-        cycle_type adapter_manip_latency = adapter_access(adapter_it, is_store);
+        cycle_type adapter_manip_latency = adapter_access(adapter_it, type);
         assert(adapter_manip_latency <= 2);
         total_latency = access_latency + adapter_manip_latency;
         *adapter_it = total_latency;
@@ -193,9 +193,9 @@ STORAGE::do_memory_access(cycle_type access_latency, bool is_store)
 ////////////////////////////////////////////////////////////
 
 cycle_type
-STORAGE::adapter_access(std::vector<cycle_type>::iterator adapter_it, bool is_store)
+STORAGE::adapter_access(std::vector<cycle_type>::iterator adapter_it, ACCESS_TYPE type)
 {
-    if (is_store || load_latency == 0)
+    if (type == ACCESS_TYPE::STORE || load_latency == 0)
         return 0;  // any shift automorphisms can be done early
     else if (current_cycle() - 2 >= *adapter_it)
         return 0;
