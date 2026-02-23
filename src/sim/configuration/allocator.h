@@ -16,15 +16,23 @@ namespace configuration
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct FACTORY_ALLOCATION
+struct ALLOCATION
 {
-    std::vector<PRODUCER_BASE*> first_level;
-    std::vector<PRODUCER_BASE*> second_level;
-    size_t physical_qubit_count{0};
+    using array_type = std::vector<std::vector<PRODUCER_BASE*>>;
+
+    /*
+     * Producers is organized by level (index 0 = L1 production, etc.)
+     * */
+    array_type producers{};
+    size_t     physical_qubit_count{0};
+    double     estimated_throughput{0.0};
 
     FACTORY_ALLOCATION() =default;
     FACTORY_ALLOCATION(const FACTORY_ALLOCATION&) =default;
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 struct FACTORY_SPECIFICATION
 {
@@ -55,11 +63,61 @@ struct FACTORY_SPECIFICATION
     size_t rotations{11};
 };
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * `throughput_aware_allocation` is a generic function that provisions
+ * production for a given physical qubit budget. This budget is never
+ * exceeded.
+ *
+ * The template parameters are as follows:
+ *      1. `SPEC_TYPE` corresponds to the specification that defines a production level. This is
+ *          user-defined.
+ *      2. `ALLOCATOR` is a function that takes in `SPEC_TYPE` and returns a `PRODUCER_BASE`
+ *      3. `QUBIT_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the physical qubit
+ *          overhead of allocating a production given that specification.
+ *      4. `BANDWIDTH_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the resource
+ *          production rate (in Hz) assuming resources from the previous level are always available.
+ *      5. `CONSUMPTION_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the resource
+ *          consumption rate (in Hz)
+ *
+ * This is a generic function so it works regardless of configuration.
+ * The verbosity, in terms of the number of templates, is rather high.
+ * We recommend providing wrappers for specific resource states that
+ * calls this function to enable ease-of-use.
+ * */
+template <class SPEC_TYPE, 
+            class ALLOCATOR, 
+            class QUBIT_ESTIMATOR,
+            class BANDWIDTH_ESTIMATOR,
+            class CONSUMPTION_ESTIMATOR>
+ALLOCATION throughput_aware_allocation(size_t budget, 
+                                        std::vector<SPEC_TYPE>, 
+                                        const ALLOCATOR&, 
+                                        const QUBIT_ESTIMATOR&,
+                                        const BANDWIDTH_ESTIMATOR&,
+                                        const CONSUMPTION_ESTIMATOR&);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Computes throughput of the total allocation. `BANDWIDTH_ESTIMATOR` and `CONSUMPTION_ESTIMATOR` are
+ * as above for `throughput_aware_allocation`
+ * */
+template <class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR>
+double estimate_throughput_of_allocation(const ALLOCATION::array_type&, 
+                                            const BANDWIDTH_ESTIMATOR&, 
+                                            const CONSUMPTION_ESTIMATOR&);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 /*
  * If there is only a single level of factories, then it is as simple as dividing
  * `physical_qubit_budget` by the overhead per factory.
  * */
-
 FACTORY_ALLOCATION l1_factory_allocation(size_t physical_qubit_budget, FACTORY_SPECIFICATION);
 
 /*
@@ -70,7 +128,6 @@ FACTORY_ALLOCATION l1_factory_allocation(size_t physical_qubit_budget, FACTORY_S
  *  (1) d = 3 color cultivation as the first level factory (pfail = 0.8%, perror = 1e-6)
  *  (2) 15:1 with (dx,dz,dm) = (25,11,11) as the second level factory (perror = 1e-12)
  * */
-
 FACTORY_ALLOCATION throughput_aware_factory_allocation(size_t physical_qubit_budget,
                                                         FACTORY_SPECIFICATION l1_spec,
                                                         FACTORY_SPECIFICATION l2_spec);

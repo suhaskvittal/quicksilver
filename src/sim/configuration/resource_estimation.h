@@ -20,12 +20,18 @@ namespace configuration
 constexpr size_t surface_code_physical_qubit_count(size_t d);
 constexpr size_t surface_code_physical_qubit_count(size_t dx, size_t dz);
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 /*
  * These return the physical qubit and logical qubit counts for the sub-family of BB codes
  * whose parameters follow [[12*d, 12, d]] (i.e., [[72, 12, 6]], or [[144, 12, 12]])
  * */
 constexpr size_t bivariate_bicycle_code_physical_qubit_count(size_t d);
 constexpr size_t bivariate_bicycle_code_logical_qubit_count(size_t d);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 /*
  * Resource estimates for magic state factories:
@@ -37,6 +43,19 @@ constexpr size_t magic_state_distillation_physical_qubit_count(size_t input_coun
                                                                 size_t output_count,
                                                                 size_t dx, 
                                                                 size_t dz);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Logical error rate estimates for different codes.
+ * Cannot be `constexpr` since these use floats.
+ * */
+double surface_code_logical_error_rate(size_t, double p);
+double bivariate_bicycle_code_block_error_rate(size_t, double p);
+
+size_t surface_code_distance_for_target_logical_error_rate(double);
+size_t bivariate_bicycle_code_distance_for_target_block_error_rate(double);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
