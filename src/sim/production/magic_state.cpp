@@ -49,6 +49,7 @@ std::string _cultivation_name(double probability_of_success);
 T_DISTILLATION::T_DISTILLATION(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
+                                size_t _measurement_distance,
                                 size_t _initial_input_count,
                                 size_t _output_count,
                                 size_t _num_rotation_steps)
@@ -56,6 +57,7 @@ T_DISTILLATION::T_DISTILLATION(double freq_khz,
                         freq_khz,
                         output_error_probability,
                         buffer_capacity),
+    measurement_distance(_measurement_distance),
     initial_input_count(_initial_input_count),
     output_count(_output_count),
     num_rotation_steps(_num_rotation_steps)
@@ -72,6 +74,18 @@ T_DISTILLATION::print_deadlock_info(std::ostream& out) const
 bool
 T_DISTILLATION::production_step()
 {
+    if (ppm_rounds_remaining_ > 0)
+    {
+        ppm_rounds_remaining_--;
+        if (ppm_rounds_remaining_ == 0 && step_ == num_rotation_steps+1)
+        {
+            install_resource_state();
+            step_ = 0;
+            s_production_attempts++;
+        }
+        return true;
+    }
+
     const bool is_lowest_level = previous_level.empty();
 
     size_t magic_states_needed = (step_ == 0) ? initial_input_count : 1; 
@@ -118,12 +132,7 @@ T_DISTILLATION::production_step()
     else
     {
         step_++;
-        if (step_ == num_rotation_steps+1)
-        {
-            install_resource_state();
-            step_ = 0;
-            s_production_attempts++;
-        }
+        ppm_rounds_remaining_ = measurement_distance;
     }
     return true;
 }

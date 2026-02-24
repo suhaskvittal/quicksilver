@@ -19,12 +19,24 @@ namespace producer
 class ENT_DISTILLATION : public PRODUCER_BASE
 {
 public:
+    /*
+     * Inner code measurement distance. Determines the number of
+     * rounds per check measurement.
+     * */
+    const size_t measurement_distance;
+
     const size_t input_count;
     const size_t output_count;
     const size_t num_checks;
 private:
     size_t step_{0};
     size_t inputs_available_{0};
+
+    /*
+     * Number of syndrome extraction rounds left when performing
+     * the Pauli-product measurement.
+     * */
+    size_t ppm_rounds_remaining_{0};
 
     /*
      * We will only know at the end of the protocol whether
@@ -34,18 +46,11 @@ private:
      * So track probability of error and call RNG at the end.
      * */
     double error_probability_{0.0};
-
-    /*
-     * We assume that if an input EPR pair is retrieved from
-     * a lower-level protocol, there is a 1 cycle "readout"
-     * overhead (need to project logical state onto surface
-     * code qubit).
-     * */
-    bool awaiting_input_{false};
 public:
     ENT_DISTILLATION(double freq_khz,
                         double output_error_prob,
                         size_t buffer_capacity,
+                        size_t measurement_distance,
                         size_t input_count,
                         size_t output_count,
                         size_t num_checks);

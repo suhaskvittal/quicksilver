@@ -20,6 +20,12 @@ class T_DISTILLATION : public PRODUCER_BASE
 {
 public:
     /*
+     * `measurement_distance` affects how many rounds are spent performing
+     * one rotation (via PPM)
+     * */
+    const size_t measurement_distance;
+
+    /*
      * How production works:
      *  1.  the factory must consume `initial_input_count` magic states
      *  2.  the factory then consumes one magic state per `num_rotation_steps`
@@ -30,10 +36,18 @@ public:
     const size_t num_rotation_steps;
 private:
     size_t step_{0};
+
+    /*
+     * Number of rounds spent doing a PPM (Pauli-Product Measurement).
+     * Once this reaches 0, `step_` is incremented and a new
+     * magic state is requested.
+     * */
+    size_t ppm_rounds_remaining_{0};
 public:
     T_DISTILLATION(double freq_khz,
                     double output_error_prob,
                     size_t buffer_capacity,
+                    size_t measurement_distance,
                     size_t initial_input_count,
                     size_t output_count,
                     size_t num_rotation_steps);

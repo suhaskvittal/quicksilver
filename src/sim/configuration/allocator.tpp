@@ -30,10 +30,6 @@ throughput_aware_allocation(size_t b,
     for (size_t i = 0; i < specs.size(); i++)
     {
         pq_counts[i] = f_est_qubit_count(s);
-        // handle buffer overheads for `pq_counts[i]`
-        const size_t d_buf = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
-        pq_counts[i] += d_buf*(s.buffer_capacity-1);
-
         production_rates[i] = f_est_bandwidth(s);
         consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s);
     }
@@ -67,13 +63,13 @@ throughput_aware_allocation(size_t b,
     /* 4. Greedily form allocations */
 
     out.producers.resize(specs.size());
-    std::vector<size_t> num_allocs(specs.size(), 0);
+    std::vector<size_t> counts(specs.size(), 0);
     double curr_tp{0.0};
     size_t remaining{b};
     do
     {
-        std::vector<size_t> prev_allocs(num_allocs);
-        double prev_tp = curr_tp;
+        std::vector<size_t> prev_counts(counts);
+        double prev_tp{curr_tp};
         for (ssize_t i = specs.size()-1; i >= 0; i--)
         {
             size_t c = pq_counts_sat[i];
@@ -86,13 +82,20 @@ throughput_aware_allocation(size_t b,
             {
                 // we can do a bandwidth-saturating allocation multiple times
                 size_t num_batch_allocs = remaining/c; 
-                num_allocs[i] += num_batch_allocs;
+                counts[i] += num_batch_allocs;
 
+                // now note that `counts_for_sat_alloc` only contains the count for
+                // that given level to saturate the next level. So the total count
+                // for a given level is obtained by taking a product.
+                //
+                // i.e.,
+                //  counts_for_sat_alloc = [ 8, 4, * ]   (note that the last entry is never set)
+                //  products =             [ 32, 4, 1 ]   if `num_batch_allocs = 1`
                 size_t alloc_prod{num_batch_allocs};
                 for (ssize_t j = i-1; j >= 0; j--)
                 {
                     alloc_prod *= counts_for_sat_alloc[j];
-                    num_allocs[i] += alloc_prod;
+                    counts[i] += alloc_prod;
                 }
 
                 // we can exit early since we have allocated for all levels.
@@ -100,16 +103,16 @@ throughput_aware_allocation(size_t b,
             }
         }
 
-        curr_tp = estimate_throughput_of_allocation(specs, num_allocs, f_est_bandwidth, f_est_consumption);
+        curr_tp = estimate_throughput_of_allocation(specs, counts, f_est_bandwidth, f_est_consumption);
         if (prev_tp > curr_tp - 1e-6)
         {
-            num_allocs = std::move(prev_allocs);
+            counts = std::move(prev_counts);
             break;
         }
         else
         {
-            for (size_t i = 0; i < num_allocs.size(); i++)
-                remaining -= pq_counts[i] * (num_allocs[i]-prev_allocs[i]);
+            for (size_t i = 0; i < counts.size(); i++)
+                remaining -= pq_counts[i] * (counts[i]-prev_counts[i]);
         }
     }
     while (remaining >= pq_min_required);
@@ -130,11 +133,26 @@ throughput_aware_allocation(size_t b,
 ////////////////////////////////////////////////////////////
 
 template <class SPEC_TYPE, class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR> double
-estimate_throughput_of_allocation(std::vector<SPEC_TYPE> specs, 
+estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
+                                    const std::vector<size_t>& counts,
                                     const BANDWIDTH_ESTIMATOR& f_bandwidth_est,
                                     const CONSUMPTION_ESTIMATOR& f_consumption_est)
 {
-    return 0.0;
+    double prod_rate = counts[0] * f_bandwidth_est(specs[0]);
+    for (size_t i = 1; i < specs.size(); i++)
+    {
+        double cons_rate = counts[1] * f_consumption_est(specs[i]);
+        // estimate the ratio between the consumption and production rates
+        //
+        //  if `prod_rate > cons_rate`, then the new production rate for this level is
+        //  just the production rate (unmodified) for this given level
+        //
+        //  else, then the production rate is scaled by `prod_rate / cons_rate` since
+        //  lower level bandwidth is not maximized
+        double r = std::min(1.0, prod_rate / cons_rate);
+        prod_rate = r * counts[i] * f_bandwidth_est(specs[1]);
+    }
+    return prod_rate;
 }
 
 ////////////////////////////////////////////////////////////

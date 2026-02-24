@@ -6,7 +6,7 @@
 #include "argparse.h"
 #include "globals.h"
 #include "sim.h"
-#include "sim/configuration/allocator.h"
+#include "sim/configuration/allocation/magic_state.h"
 #include "sim/production/magic_state.h"
 #include "sim/operable.h"
 
