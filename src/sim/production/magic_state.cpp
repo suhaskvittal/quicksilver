@@ -51,17 +51,18 @@ std::string _cultivation_name(double probability_of_success);
 T_DISTILLATION::T_DISTILLATION(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
-                                size_t _measurement_distance,
                                 size_t _initial_input_count,
-                                size_t _output_count,
+                                size_t output_count,
+                                size_t _measurement_distance,
                                 size_t _num_rotation_steps)
-    :PRODUCER_BASE(_distillation_name(_initial_input_count, _output_count, _num_rotation_steps),
+    :PRODUCER_BASE(_distillation_name(_initial_input_count, output_count, _num_rotation_steps),
                         freq_khz,
                         output_error_probability,
-                        buffer_capacity),
+                        buffer_capacity,
+                        _initial_input_count+_num_rotation_steps,
+                        output_count),
     measurement_distance(_measurement_distance),
     initial_input_count(_initial_input_count),
-    output_count(_output_count),
     num_rotation_steps(_num_rotation_steps)
 {}
 
@@ -76,21 +77,19 @@ T_DISTILLATION::print_deadlock_info(std::ostream& out) const
 bool
 T_DISTILLATION::production_step()
 {
-    if (ppm_rounds_remaining_ > 0)
-    {
-        ppm_rounds_remaining_--;
-        if (ppm_rounds_remaining_ == 0 && step_ == num_rotation_steps+1)
-        {
-            install_resource_state();
-            step_ = 0;
-            s_production_attempts++;
-        }
+    if (current_cycle() < cycle_available_)
         return true;
+
+    if (step_ == num_rotation_steps + 1)
+    {
+        install_resource_states();
+        step_ = 0;
+        s_production_attempts++;
     }
 
     const bool is_lowest_level = previous_level.empty();
 
-    size_t magic_states_needed = (step_ == 0) ? initial_input_count : 1; 
+    size_t magic_states_needed = (step_ == 0) ? initial_input_count : 1;
     const double p_sampled = FPR(GL_RNG);
 
     // get the magic states that we need and compute the error probability of these magic states.
@@ -103,14 +102,14 @@ T_DISTILLATION::production_step()
     }
     else
     {
-        size_t magic_states_avail = std::transform_reduce(previous_level.begin(), previous_level.end(),   
+        size_t magic_states_avail = std::transform_reduce(previous_level.begin(), previous_level.end(),
                                                             size_t{0},
                                                             std::plus<size_t>{},
                                                             [] (const auto* f) { return f->buffer_occupancy(); });
         if (magic_states_avail < magic_states_needed)
             return false;
-        
-        // get the magic states we need -- simultaneoulsy compute the probability of error
+
+        // get the magic states we need -- simultaneously compute the probability of error
         for (auto* f : previous_level)
         {
             if (f->buffer_occupancy() == 0)
@@ -134,7 +133,7 @@ T_DISTILLATION::production_step()
     else
     {
         step_++;
-        ppm_rounds_remaining_ = measurement_distance;
+        cycle_available_ = current_cycle() + measurement_distance;
     }
     return true;
 }
@@ -150,7 +149,9 @@ T_CULTIVATION::T_CULTIVATION(double freq_khz,
     :PRODUCER_BASE(_cultivation_name(_probability_of_success),
                      freq_khz,
                      output_error_probability,
-                     buffer_capacity),
+                     buffer_capacity,
+                     1,
+                     1),
     probability_of_success(_probability_of_success),
     rounds(_rounds)
 {}
@@ -179,7 +180,7 @@ T_CULTIVATION::production_step()
         step_++;
         if (step_ == rounds)
         {
-            install_resource_state();
+            install_resource_states();
             step_ = 0;
             s_production_attempts++;
         }

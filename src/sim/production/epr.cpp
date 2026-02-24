@@ -39,16 +39,47 @@ std::string _ed_name(size_t input_count, size_t output_count);
 ENT_DISTILLATION::ENT_DISTILLATION(double freq_khz,
                                     double output_error_prob,
                                     size_t buffer_capacity,
+                                    size_t input_count,
+                                    size_t output_count,
                                     size_t _measurement_distance,
-                                    size_t _input_count,
-                                    size_t _output_count,
                                     size_t _num_checks)
-    :PRODUCER_BASE(_ed_name(_input_count, _output_count), freq_khz, output_error_prob, buffer_capacity),
+    :PRODUCER_BASE(_ed_name(input_count, output_count), 
+                            freq_khz, 
+                            output_error_prob, 
+                            buffer_capacity,
+                            input_count,
+                            output_count),
     measurement_distance(_measurement_distance),
-    input_count(_input_count),
-    output_count(_output_count),
-    num_checks(_num_checks)
+    num_checks(_num_checks),
+    inputs_available_(previous_level.empty() ? input_count : 0)
 {}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+cycle_type
+ENT_DISTILLATION::get_next_progression_cycle() const
+{
+    const cycle_type next_avail_cycle = std::max(cycle_available_, current_cycle()+1);
+
+    // not waiting for resources from previous level
+    if (step_ != 0 || inputs_available_ >= input_count || previous_level.empty())
+        return next_avail_cycle;
+
+    // compute min ready cycle across previous_level
+    bool any_have_available_state{false};
+    cycle_type previous_level_avail_cycle{next_avail_cycle};
+    for (const PRODUCER_BASE* _p : previous_level)
+    {
+        const auto* p = static_cast<const ENT_DISTILLATION*>(_p);
+        cycle_type c = p->get_next_progression_cycle();
+        c = convert_cycles_between_frequencies(c, p->freq_khz, freq_khz);
+        previous_level_avail_cycle = std::min(c, previous_level_avail_cycle);
+
+        any_have_available_state |= p->buffer_occupancy() > 0;
+    }
+    return any_have_available_state ? next_avail_cycle : previous_level_avail_cycle;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -56,20 +87,20 @@ ENT_DISTILLATION::ENT_DISTILLATION(double freq_khz,
 bool
 ENT_DISTILLATION::production_step()
 {
-    if (ppm_rounds_remaining_ > 0)
-    {
-        ppm_rounds_remaining_--;
-        if (ppm_rounds_remaining_ == 0 && step_ == num_checks)
-        {
-            // check if an error occurred -- only install if it does not
-            if (FPR(GL_RNG) > error_probability_)
-                install_resource_state();
-            step_ = 0;
-            inputs_available_ = 0;
-            error_probability_ = 0.0;
-        }
-
+    if (current_cycle() < cycle_available_)
         return true;
+
+    if (step_ == num_checks)
+    {
+        // check if an error occurred -- only install if it does not
+        if (FPR(GL_RNG) > error_probability_)
+            install_resource_states();
+        else
+            s_failures++;
+        s_production_attempts++;
+        step_ = 0;
+        inputs_available_ = 0;
+        error_probability_ = 0.0;
     }
 
     // if this is the first level, assume all inputs are already available
@@ -96,10 +127,11 @@ ENT_DISTILLATION::production_step()
             inputs_available_ += c;
         }
     }
-    else
+
+    if (inputs_available_ >= input_count)
     {
         step_++;
-        ppm_rounds_remaining_ = measurement_distance;
+        cycle_available_ = current_cycle() + measurement_distance;
     }
 
     return true;

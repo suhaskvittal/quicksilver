@@ -59,42 +59,73 @@ main(int argc, char* argv[])
          * L1: d = 3 color code cultivation
          * L2: 15:1 (dx,dz,dm) = (25,11,11) distillation
          * */
-        sim::configuration::FACTORY_SPECIFICATION l1_spec;
-        l1_spec.is_cultivation = true;
-        l1_spec.syndrome_extraction_round_time_ns = 1200;
-        l1_spec.buffer_capacity = 1;
-        l1_spec.output_error_rate = 1e-6;
-        l1_spec.escape_distance = 13;
-        l1_spec.rounds = 18;
-        l1_spec.probability_of_success = 0.2;
+        sim::configuration::FACTORY_SPECIFICATION l1_spec
+        {
+            .is_cultivation=true,
+            .syndrome_extraction_round_time_ns=1200,
+            .buffer_capacity=1,
+            .output_error_rate=1e-6,
+            .escape_distance=13,
+            .rounds=18,
+            .probability_of_success=0.2
+        };
 
-        sim::configuration::FACTORY_SPECIFICATION l2_spec;
-        l2_spec.is_cultivation = false;
-        l2_spec.syndrome_extraction_round_time_ns = 1200;
-        l2_spec.buffer_capacity = 2;
-        l2_spec.output_error_rate = 1e-12;
-        l2_spec.dx = 25;
-        l2_spec.dz = 11;
-        l2_spec.dm = 11;
-        l2_spec.input_count = 4;
-        l2_spec.output_count = 1;
-        l2_spec.rotations = 11;
+        sim::configuration::FACTORY_SPECIFICATION l2_spec
+        {
+            .is_cultivation=false,
+            .syndrome_extraction_round_time_ns=1200,
+            .buffer_capacity=2,
+            .output_error_rate=1e-12,
+            .dx=25,
+            .dz=11,
+            .dm=11,
+            .input_count=4,
+            .output_count=1,
+            .rotations=11
+        };
 
-        alloc = sim::configuration::allocate_magic_state_factories(
-                    physical_qubit_budget, {l1_spec, l2_spec});
+        alloc = sim::configuration::allocate_magic_state_factories(physical_qubit_budget, {l1_spec, l2_spec});
     }
     else if (production_type == "epr")
     {
-        /*
-         * L1: [[2,1,2]]_X entanglement distillation (placeholder -- user to fill in)
-         * */
-        sim::configuration::ED_SPECIFICATION l1_spec;
-        /* defaults: syndrome_extraction_round_time_ns=1200, buffer_capacity=1,
-         *           output_error_rate=1e-3, input_count=2, output_count=1,
-         *           dx=2, dz=1                                               */
+        sim::configuration::ED_SPECIFICATION l1_spec  // [3,1,3]_x
+        {
+            .output_error_rate=1e-2,
+            .input_count=3,
+            .output_count=1,
+            .dx=3,
+            .dz=1
+        };
 
-        alloc = sim::configuration::allocate_entanglement_distillation_units(
-                    physical_qubit_budget, {l1_spec});
+        sim::configuration::ED_SPECIFICATION l2_spec   // [2,1,2]_y
+        {
+            .output_error_rate=1e-4,
+            .input_count=2,
+            .output_count=1,
+            .dx=2,
+            .dz=2
+        };
+
+        sim::configuration::ED_SPECIFICATION l3_spec   // [2,1,2]_x
+        {
+            .output_error_rate=2e-8,
+            .input_count=2,
+            .output_count=1,
+            .dx=2,
+            .dz=1
+        };
+
+        sim::configuration::ED_SPECIFICATION l4_spec   // [[6,4,2]]
+        {
+            .buffer_capacity=4,
+            .output_error_rate=3e-15,
+            .input_count=6,
+            .output_count=4,
+            .dx=2,
+            .dz=2
+        };
+
+        alloc = sim::configuration::allocate_entanglement_distillation_units(physical_qubit_budget, {l1_spec, l2_spec, l3_spec, l4_spec});
     }
     else
     {
@@ -132,6 +163,7 @@ main(int argc, char* argv[])
      * */
     print_stat_line(std::cout, "PRODUCTION_TYPE",         production_type);
     print_stat_line(std::cout, "PHYSICAL_QUBIT_BUDGET",   physical_qubit_budget);
+    print_stat_line(std::cout, "PHYSICAL_QUBIT_OVERHEAD", alloc.physical_qubit_count);
 
     for (size_t i = 0; i < alloc.producers.size(); i++)
     {

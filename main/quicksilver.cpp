@@ -7,6 +7,7 @@
 #include "sim/configuration/resource_estimation.h"
 #include "sim/configuration/allocator/impl.h"
 #include "sim/compute_subsystem.h"
+#include "sim/memory/remote.h"
 #include "sim/memory_subsystem.h"
 #include "sim/production/magic_state.h"
 
@@ -22,6 +23,9 @@
 
 namespace 
 {
+
+using FACTORY_SPECIFICATION = sim::configuration::FACTORY_SPECIFICATION;
+using ED_SPECIFICATION = sim::configuration::ED_SPECIFICATION;
 
 struct FIDELITY_RESULT
 {
@@ -46,6 +50,23 @@ void jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capaci
  * Retrieves the number of qubits for the given trace:
  * */
 size_t get_number_of_qubits(std::string_view);
+
+/*
+ * Returns the code distance for the given error-rate regime
+ * */
+size_t get_compute_code_distance(std::string_view);
+size_t get_memory_code_distance(std::string_view);
+
+/*
+ * These two functions get the default production specifications for magic state factories
+ * and entanglement distillation (parametrized by values that can be extended by the user).
+ * */
+std::vector<FACTORY_SPECIFICATION> get_default_factory_specifications(std::string_view regime,
+                                                                      int64_t compute_syndrome_extraction_round_time_ns,
+                                                                      int64_t ll_buffer_capacity);
+std::vector<ED_SPECIFICATION>      get_default_ed_specifications(std::string_view regime,
+                                                                    int64_t compute_syndrome_extraction_round_time_ns,
+                                                                    int64_t ll_buffer_capacity);
 
 /*
  * Computes the probability of success post-simulation
@@ -76,8 +97,9 @@ main(int argc, char* argv[])
     int64_t memory_syndrome_extraction_round_time_ns;
     bool    use_remote_memory;
     int64_t epr_physical_qubit_budget;
+    int64_t epr_ll_buffer_capacity;
 
-    int64_t factory_l2_buffer_capacity;
+    int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
     sim::compute_extended_config conf;
@@ -101,8 +123,11 @@ main(int argc, char* argv[])
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_syndrome_extraction_round_time_ns, 1200)
 
-        .optional("-ttpl", "--t-teleport-limit", "Max number of T gate teleportations after initial T gate", sim::GL_T_GATE_TELEPORTATION_MAX, 0)
-        .optional("", "--enable-t-autocorrect", "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
+        .optional("-ttpl", "--t-teleport-limit", 
+                        "Max number of T gate teleportations after initial T gate", 
+                        sim::GL_T_GATE_TELEPORTATION_MAX, 0)
+        .optional("", "--enable-t-autocorrect", 
+                        "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
 
         .optional("-rpc", "--rpc", "Enable rotation precomputation", conf.rpc_enabled, false)
         .optional("", "--rpc-ttp-always", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_ALWAYS_USE_TELEPORTATION, false)
@@ -113,18 +138,22 @@ main(int argc, char* argv[])
         .optional("", "--rpc-degree", "Runahead degree of RPC (number of runahead instructions on trigger)", sim::GL_RPC_DEGREE, 4)
 
         .optional("", "--memory-syndrome-extraction-round-time-ns", 
-                      "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
-                      memory_syndrome_extraction_round_time_ns, 1300)
-        .optional("", "--memory-is-remote", "Storages in memory subsystem consume EPR pairs", use_remote_memory, false)
+                        "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
+                        memory_syndrome_extraction_round_time_ns, 1300)
+        .optional("", "--memory-is-remote", 
+                        "Storages in memory subsystem consume EPR pairs", 
+                        use_remote_memory, false)
         .optional("-epr", "--epr-physical-qubit-budget", 
                         "Physical qubit budget for ED used by remote storage", 
-                        epr_physical_qubit_budget, 
-                        5000)
+                        epr_physical_qubit_budget, 5000)
+        .optional("", "--epr-ll-buffer-capacity",
+                        "Number of EPR pairs stored in a last-level ED buffer",
+                        epr_ll_buffer_capacity, 4)
 
-        .optional("", "--factory-l2-buffer-capacity", "Number of magic states stored in an L2 factory buffer",
-                      factory_l2_buffer_capacity, 4)
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
+        .optional("", "--factory-ll-buffer-capacity", "Number of magic states stored in an last-level factory buffer",
+                      factory_ll_buffer_capacity, 2)
 
         /*
          * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of
@@ -154,69 +183,33 @@ main(int argc, char* argv[])
         std::fill(traces.begin(), traces.end(), trace);
     }
 
-    sim::configuration::FACTORY_SPECIFICATION l1_spec
-    {
-        .is_cultivation=true,
-        .syndrome_extraction_round_time_ns=compute_syndrome_extraction_round_time_ns,
-        .buffer_capacity=1,
-        .output_error_rate=1e-6,
-        .escape_distance=13,
-        .rounds=18,
-        .probability_of_success=0.2
-    };
-
-    sim::configuration::FACTORY_SPECIFICATION l2_spec
-    {
-        .is_cultivation=false,
-        .syndrome_extraction_round_time_ns=compute_syndrome_extraction_round_time_ns,
-        .buffer_capacity=factory_l2_buffer_capacity,
-        .output_error_rate=1e-12,
-        .dx=25,
-        .dz=11,
-        .dm=11,
-        .input_count=4,
-        .output_count=1,
-        .rotations=11
-    };
-
     // from `regime`, set parameters:
-    size_t compute_code_distance,
-           memory_code_distance;
-    if (regime == "M")  // 1e-6 error rate
-    {
-        compute_code_distance = 11;
-        memory_code_distance = 12;
-    }
-    else if (regime == "G")
-    {
-        compute_code_distance = 17;
-        memory_code_distance = 18;
-        // modify `l1_spec` to use d = 5 color code cultivation
-        l1_spec.output_error_rate = 1e-8;
-        l1_spec.escape_distance = 15;
-        l1_spec.rounds = 25;
-        l1_spec.probability_of_success = 0.02;
-    }
-    else
-    {
-        compute_code_distance = 23;
-        memory_code_distance = 24;
-    }
+    const size_t compute_code_distance = get_compute_code_distance(regime),
+                 memory_code_distance = get_memory_code_distance(regime);
 
-    const size_t memory_block_physical_qubits = 
-        sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
-    const size_t memory_block_capacity =
-        sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
+    const size_t memory_block_physical_qubits = sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
+    const size_t memory_block_capacity = sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
 
     /* initialize magic state factories */
 
-    sim::configuration::ALLOCATION ms_alloc;
-    if (regime == "T")
-        ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, {l1_spec, l2_spec});
-    else
-        ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, {l1_spec});
+    auto ms_specs = get_default_factory_specifications(regime, 
+                                                        compute_syndrome_extraction_round_time_ns, 
+                                                        factory_ll_buffer_capacity);
+    auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
 
     /* initialize memory subsystem */
+
+    // if `use_remote_memory` is set, then initialize `ed_alloc`
+    sim::configuration::ALLOCATION ed_alloc;
+    if (use_remote_memory)
+    {
+        int64_t scale_factor = memory_syndrome_extraction_round_time_ns / 1300;
+        auto ed_specs = get_default_ed_specifications(regime,
+                                                        compute_syndrome_extraction_round_time_ns*scale_factor,
+                                                        epr_ll_buffer_capacity);
+        ed_alloc = sim::configuration::allocate_entanglement_distillation_units(epr_physical_qubit_budget, ed_specs);
+        conf.ed_units = ed_alloc.producers;
+    }
 
     // determine number of qubits for each trace:
     size_t main_memory_qubits = std::transform_reduce(traces.begin(), traces.end(), size_t{0},
@@ -228,16 +221,30 @@ main(int argc, char* argv[])
     std::vector<sim::STORAGE*> memory_blocks(num_blocks);
     for (size_t i = 0; i < num_blocks; i++)
     {
-        memory_blocks[i] = new sim::STORAGE{m_freq_khz, 
-                                            memory_block_physical_qubits,
-                                            memory_block_capacity,
-                                            memory_code_distance,
-                                            1, // num adapters
-                                            2*memory_code_distance, // load latency
-                                            1*memory_code_distance // store latency
-        };
+        sim::STORAGE* m;
+        if (use_remote_memory)
+        {
+            m = new sim::REMOTE_STORAGE(m_freq_khz,
+                                        memory_block_physical_qubits,
+                                        memory_block_capacity,
+                                        memory_code_distance,
+                                        1,
+                                        2*memory_code_distance,
+                                        1*memory_code_distance,
+                                        ed_alloc.producers.back());
+        }
+        else
+        {
+           m = new sim::STORAGE(m_freq_khz, 
+                                memory_block_physical_qubits,
+                                memory_block_capacity,
+                                memory_code_distance,
+                                1, // num adapters
+                                2*memory_code_distance, // load latency
+                                1*memory_code_distance); // store latency
+        }
+        memory_blocks[i] = m;
     }
-
     sim::MEMORY_SUBSYSTEM* memory_subsystem = new sim::MEMORY_SUBSYSTEM(std::move(memory_blocks));
 
     /* initialize compute subsystem */
@@ -253,6 +260,7 @@ main(int argc, char* argv[])
                                                          ms_alloc.producers.back(),
                                                          memory_subsystem,
                                                          conf};
+    assert(compute_subsystem->is_ed_in_use() == use_remote_memory);
 
     /* initialize simulation */
 
@@ -261,6 +269,10 @@ main(int argc, char* argv[])
     std::copy(memory_subsystem->storages().begin(), memory_subsystem->storages().end(), std::back_inserter(all_operables));
     for (const auto& level : ms_alloc.producers)
         std::copy(level.begin(), level.end(), std::back_inserter(all_operables));
+
+    if (use_remote_memory)
+        for (const auto& level : ed_alloc.producers)
+            std::copy(level.begin(), level.end(), std::back_inserter(all_operables));
 
     if (compute_subsystem->is_rpc_enabled())
         all_operables.push_back(compute_subsystem->rotation_subsystem());
@@ -325,7 +337,15 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
     print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
     print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", ms_alloc.physical_qubit_count);
+
+    if (use_remote_memory)
+        print_stat_line(std::cout, "ED_PHYSICAL_QUBITS_PER_SIDE", ed_alloc.physical_qubit_count);
+
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
+
+    if (use_remote_memory)
+        print_stat_line(std::cout, "ED_BANDWIDTH_MAX_PER_S", ed_alloc.estimated_throughput);
+
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* Estimate logical error rate */
@@ -434,6 +454,135 @@ get_number_of_qubits(std::string_view trace)
     uint32_t num_qubits;
     generic_strm_read(istrm, &num_qubits, 4);
     return num_qubits;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+get_compute_code_distance(std::string_view regime)
+{
+    if (regime == "T")
+        return 23;
+    else if (regime == "G")
+        return 17;
+    else if (regime == "M")
+        return 11;
+    else
+        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
+}
+
+size_t
+get_memory_code_distance(std::string_view regime)
+{
+    if (regime == "T")
+        return 24;
+    else if (regime == "G")
+        return 18;
+    else if (regime == "M")
+        return 12;
+    else
+        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<FACTORY_SPECIFICATION>
+get_default_factory_specifications(std::string_view regime,
+                                    int64_t c_round_time_ns,
+                                    int64_t ll_buffer_capacity)
+{
+    FACTORY_SPECIFICATION l1_spec /* d = 3 color code cultivation */
+    {
+        .is_cultivation=true,
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .buffer_capacity=1,
+        .output_error_rate=1e-6,
+        .escape_distance=13,
+        .rounds=18,
+        .probability_of_success=0.2
+    };
+
+    FACTORY_SPECIFICATION l2_spec /* 15:1, (dx,dz,dm) = (25,11,11) distillation */
+    {
+        .is_cultivation=false,
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .buffer_capacity=ll_buffer_capacity,
+        .output_error_rate=1e-12,
+        .dx=25,
+        .dz=11,
+        .dm=11,
+        .input_count=4,
+        .output_count=1,
+        .rotations=11
+    };
+
+    if (regime == "G")
+    {
+        // change parameters of d = 3 cultivation to d = 5 cultivation
+        l1_spec.output_error_rate = 1e-8;
+        l1_spec.escape_distance = 15;
+        l1_spec.rounds = 25;
+        l1_spec.probability_of_success = 0.02;
+    }
+
+    if (regime == "T")
+        return {l1_spec, l2_spec};
+    else
+        return {l1_spec};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<ED_SPECIFICATION>
+get_default_ed_specifications(std::string_view regime,
+                                int64_t c_round_time_ns,
+                                int64_t ll_buffer_capacity)
+{
+    ED_SPECIFICATION l1_spec  // [3,1,3]_x
+    {
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .output_error_rate=1e-2,
+        .input_count=3,
+        .output_count=1,
+        .dx=3,
+        .dz=1
+    };
+
+    ED_SPECIFICATION l2_spec   // [2,1,2]_y
+    {
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .output_error_rate=1e-4,
+        .input_count=2,
+        .output_count=1,
+        .dx=2,
+        .dz=2
+    };
+
+    ED_SPECIFICATION l3_spec   // [2,1,2]_x
+    {
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .output_error_rate=2e-8,
+        .input_count=2,
+        .output_count=1,
+        .dx=2,
+        .dz=1
+    };
+
+    ED_SPECIFICATION l4_spec   // [[6,4,2]]
+    {
+        .syndrome_extraction_round_time_ns=c_round_time_ns,
+        .buffer_capacity=ll_buffer_capacity,
+        .output_error_rate=3e-15,
+        .input_count=6,
+        .output_count=4,
+        .dx=2,
+        .dz=2
+    };
+
+    return {l1_spec, l2_spec, l3_spec, l4_spec};
 }
 
 ////////////////////////////////////////////////////////////

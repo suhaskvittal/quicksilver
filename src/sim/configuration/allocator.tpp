@@ -33,7 +33,7 @@ throughput_aware_allocation(size_t b,
     {
         const auto& s = specs[i];
         pq_counts[i] = f_est_qubit_count(s);
-        production_rates[i] = f_est_bandwidth(s);
+        production_rates[i] = f_est_bandwidth(s, (i == 0) ? -1.0 : specs[i-1].output_error_rate);
         consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s);
     }
 
@@ -153,10 +153,10 @@ estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
                                     const BANDWIDTH_ESTIMATOR& f_bandwidth_est,
                                     const CONSUMPTION_ESTIMATOR& f_consumption_est)
 {
-    double prod_rate = counts[0] * f_bandwidth_est(specs[0]);
+    double prod_rate = counts[0] * f_bandwidth_est(specs[0], -1.0);
     for (size_t i = 1; i < specs.size(); i++)
     {
-        double cons_rate = counts[1] * f_consumption_est(specs[i]);
+        double cons_rate = counts[i] * f_consumption_est(specs[i]);
         // estimate the ratio between the consumption and production rates
         //
         //  if `prod_rate > cons_rate`, then the new production rate for this level is
@@ -165,7 +165,7 @@ estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
         //  else, then the production rate is scaled by `prod_rate / cons_rate` since
         //  lower level bandwidth is not maximized
         double r = std::min(1.0, prod_rate / cons_rate);
-        prod_rate = r * counts[i] * f_bandwidth_est(specs[1]);
+        prod_rate = r * counts[i] * f_bandwidth_est(specs[i], specs[i-1].output_error_rate);
     }
     return prod_rate;
 }

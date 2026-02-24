@@ -37,6 +37,9 @@ public:
     uint64_t s_production_attempts{0};
     uint64_t s_failures{0};
     uint64_t s_consumed{0};
+
+    const size_t input_count;
+    const size_t output_count;
 protected:
     /*
      * Number of resources in local buffer (max `buffer_capacity`)
@@ -46,7 +49,9 @@ public:
     PRODUCER_BASE(std::string_view name, 
                     double freq_khz, 
                     double output_error_prob,
-                    size_t buffer_capacity);
+                    size_t buffer_capacity,
+                    size_t input_count,
+                    size_t output_count);
 
     /*
      * Safely consumes `count` resource states from the buffer.
@@ -60,11 +65,11 @@ protected:
     long operate() override;
 
     /*
-     * Adds a resource state to the buffer. Marked virtual
+     * Adds resource states to the buffer. Marked virtual
      * in case other classes want to add any stats atop
      * this function.
      * */
-    virtual void install_resource_state();
+    virtual void install_resource_states();
 
     /*
      * `operate()` calls `production_step`, which advances

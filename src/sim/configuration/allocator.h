@@ -45,8 +45,11 @@ struct ALLOCATION
  *      2. `ALLOCATOR` is a function that takes in `SPEC_TYPE` and returns a `PRODUCER_BASE*`
  *      3. `QUBIT_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the physical qubit
  *          overhead of allocating a production given that specification.
- *      4. `BANDWIDTH_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the resource
- *          production rate (in Hz) assuming resources from the previous level are always available.
+ *      4. `BANDWIDTH_ESTIMATOR` is a function that takes in `SPEC_TYPE` and a `double` (the error
+ *          rate of the previous level) and returns the resource production rate (in Hz) assuming 
+ *          resources from the previous level are always available. If there is no previous level,
+ *          the second input is negative (so the function can then set this to some value relative
+ *          to `GL_PHYSICAL_ERROR_RATE`).
  *      5. `CONSUMPTION_ESTIMATOR` is a function that takes in `SPEC_TYPE` and returns the resource
  *          consumption rate (in Hz)
  *

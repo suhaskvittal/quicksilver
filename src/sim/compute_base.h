@@ -29,6 +29,7 @@ class COMPUTE_BASE : public OPERABLE
 {
 public:
     using inst_ptr = CLIENT::inst_ptr;
+    using production_level_type = std::vector<PRODUCER_BASE*>;
 
     /*
      * Results of `execute_instruction()`
@@ -46,20 +47,20 @@ public:
     const size_t code_distance;
     const size_t local_memory_capacity;
 protected:
-    std::unique_ptr<STORAGE>     local_memory_;
-    std::vector<PRODUCER_BASE*>  top_level_t_factories_;
-    MEMORY_SUBSYSTEM*            memory_hierarchy_;
+    std::unique_ptr<STORAGE> local_memory_;
+    production_level_type    top_level_t_factories_;
+    MEMORY_SUBSYSTEM*        memory_hierarchy_;
 public:
-    COMPUTE_BASE(std::string_view             name, 
-                 double                       freq_khz,
-                 size_t                       code_distance,
-                 size_t                       local_memory_capacity,
-                 std::vector<PRODUCER_BASE*>  top_level_t_factories,
-                 MEMORY_SUBSYSTEM*            memory_hierarchy);
+    COMPUTE_BASE(std::string_view      name, 
+                 double                freq_khz,
+                 size_t                code_distance,
+                 size_t                local_memory_capacity,
+                 production_level_type top_level_t_factories,
+                 MEMORY_SUBSYSTEM*     memory_hierarchy);
 
-    const std::unique_ptr<STORAGE>&     local_memory() const;
-    const std::vector<PRODUCER_BASE*>&  top_level_t_factories() const;
-    MEMORY_SUBSYSTEM*                   memory_hierarchy() const;
+    const std::unique_ptr<STORAGE>& local_memory() const;
+    const production_level_type&    top_level_t_factories() const;
+    MEMORY_SUBSYSTEM*               memory_hierarchy() const;
 protected:
     virtual execute_result_type execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
 

@@ -24,19 +24,16 @@ public:
      * rounds per check measurement.
      * */
     const size_t measurement_distance;
-
-    const size_t input_count;
-    const size_t output_count;
     const size_t num_checks;
 private:
     size_t step_{0};
     size_t inputs_available_{0};
 
     /*
-     * Number of syndrome extraction rounds left when performing
-     * the Pauli-product measurement.
+     * The simulation cycle at which the current PPM measurement completes.
+     * Only meaningful when step_ > 0.
      * */
-    size_t ppm_rounds_remaining_{0};
+    cycle_type cycle_available_{0};
 
     /*
      * We will only know at the end of the protocol whether
@@ -50,10 +47,18 @@ public:
     ENT_DISTILLATION(double freq_khz,
                         double output_error_prob,
                         size_t buffer_capacity,
-                        size_t measurement_distance,
                         size_t input_count,
                         size_t output_count,
+                        size_t measurement_distance,
                         size_t num_checks);
+
+    /*
+     * Returns the next expected cycle with progress. This is
+     * an "expectation" as distillation is non-deterministic.
+     *
+     * This is primarily used to compute a skip cycle.
+     * */
+    cycle_type get_next_progression_cycle() const;
 private:
     bool production_step() override;
 };

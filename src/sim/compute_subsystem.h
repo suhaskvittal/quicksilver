@@ -22,11 +22,16 @@ namespace sim
 
 struct compute_extended_config
 {
+    using production_level_type = COMPUTE_BASE::production_level_type;
+
     /* RPC parameters */
     bool   rpc_enabled{false};
     double rpc_freq_khz;
     int64_t rpc_capacity{2};
     double rpc_watermark{0.5};
+
+    /* Entanglement distillation */
+    std::vector<production_level_type> ed_units;
 };
 
 ////////////////////////////////////////////////////////////
@@ -38,6 +43,8 @@ public:
     using inst_ptr = COMPUTE_BASE::inst_ptr;
     using execute_result_type = COMPUTE_BASE::execute_result_type;
     using ctx_switch_condition_type = std::pair<CLIENT*, CLIENT*>;
+
+    using COMPUTE_BASE::production_level_type;
 
     /*
      * Information about a CLIENT's context:
@@ -107,15 +114,21 @@ private:
      * `had_rpc_stall_this_cycle_` is used to update `s_cycles_with_rpc_stalls`
      * */
     bool had_rpc_stall_this_cycle_;
+
+    /*
+     * All entanglement distillation units (not just top level)
+     * This may be empty.
+     * */
+    std::vector<production_level_type> ed_units_;
 public:
-    COMPUTE_SUBSYSTEM(double                         freq_khz,
-                        std::vector<std::string>     client_trace_files,
-                        size_t                       code_distance,
-                        size_t                       local_memory_capacity,
-                        size_t                       concurrent_clients,
-                        uint64_t                     simulation_instructions,
-                        std::vector<PRODUCER_BASE*>  top_level_t_factories,
-                        MEMORY_SUBSYSTEM*            memory_hierarchy,
+    COMPUTE_SUBSYSTEM(double                     freq_khz,
+                        std::vector<std::string> client_trace_files,
+                        size_t                   code_distance,
+                        size_t                   local_memory_capacity,
+                        size_t                   concurrent_clients,
+                        uint64_t                 simulation_instructions,
+                        production_level_type    top_level_t_factories,
+                        MEMORY_SUBSYSTEM*        memory_hierarchy,
                         compute_extended_config);
     ~COMPUTE_SUBSYSTEM();
 
@@ -131,6 +144,11 @@ public:
      * rpc = "Rotation Pre-Computation". This returns true if `rotation_subsystem_ != nullptr`
      * */
     bool is_rpc_enabled() const;
+
+    /*
+     * ed = entanglement distillation. Returns true if `ed_units_` is non-empty.
+     * */
+    bool is_ed_in_use() const;
 
     /*
      * In long simulations with long stall periods, it is sometimes useful to "skip"

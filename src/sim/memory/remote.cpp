@@ -3,11 +3,11 @@
  *  date:   19 February 2026
  * */
 
-#include "sim/remote/memory.h"
+#include "sim/memory/remote.h"
+#include "sim/production.h"
+#include "sim/production/epr.h"
 
 namespace sim
-{
-namespace memory
 {
 
 ////////////////////////////////////////////////////////////
@@ -35,7 +35,7 @@ REMOTE_STORAGE::REMOTE_STORAGE(double freq_khz,
                                 size_t num_adapters,
                                 cycle_type load_latency,
                                 cycle_type store_latency,
-                                std::vector<producer::ENT_DISTILLATION*> dist)
+                                std::vector<PRODUCER_BASE*> dist)
     :STORAGE(freq_khz, n, k, d, num_adapters, load_latency, store_latency),
     top_level_epr_generators_(dist)
 {}
@@ -71,5 +71,28 @@ REMOTE_STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-} // namespace memory
+namespace
+{
+
+constexpr size_t
+_get_required_epr_pairs_for_access(access_type t)
+{
+    switch (t)
+    {
+    case access_type::LOAD:
+    case access_type::STORE:
+        return 1;
+
+    case access_type::COUPLED_LOAD_STORE:
+        return 2;
+    }
+
+    return std::numeric_limits<size_t>::max();
+}
+
+}  // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 } // namespace sim

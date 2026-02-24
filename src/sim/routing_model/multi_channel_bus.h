@@ -54,7 +54,7 @@ public:
     }
 
     cycle_type
-    get_route_ready_cycle(T* x) const
+    ready_cycle(T* x) const
     {
         return cycle_available_[channel_idx(x)];
     }

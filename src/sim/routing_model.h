@@ -30,7 +30,7 @@ public:
 
     virtual bool can_route_to(T*, cycle_type current_cycle) const =0;
     virtual void lock_route_to(T*, cycle_type until_cycle) =0;
-    virtual cycle_type get_route_ready_cycle(T* to) const =0;
+    virtual cycle_type ready_cycle(T* to) const =0;
 };
 
 ////////////////////////////////////////////////////////////

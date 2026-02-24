@@ -29,7 +29,7 @@ namespace
 
 PRODUCER_BASE* _alloc(FACTORY_SPECIFICATION);
 size_t         _physical_qubit_count(FACTORY_SPECIFICATION);
-double         _bandwidth(FACTORY_SPECIFICATION);
+double         _bandwidth(FACTORY_SPECIFICATION, double);
 double         _consumption_rate(FACTORY_SPECIFICATION);
 
 } // anon
@@ -74,9 +74,9 @@ _alloc(FACTORY_SPECIFICATION s)
         f = new producer::T_DISTILLATION(freq_khz,
                                          s.output_error_rate,
                                          s.buffer_capacity,
-                                         s.dm,
                                          s.input_count,
                                          s.output_count,
+                                         s.dm,
                                          s.rotations);
     }
     return f;
@@ -102,7 +102,7 @@ _physical_qubit_count(FACTORY_SPECIFICATION s)
 ////////////////////////////////////////////////////////////
 
 double
-_bandwidth(FACTORY_SPECIFICATION s)
+_bandwidth(FACTORY_SPECIFICATION s, double)
 {
     double bw;
 

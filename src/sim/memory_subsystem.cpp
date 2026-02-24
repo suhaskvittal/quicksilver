@@ -121,12 +121,20 @@ MEMORY_SUBSYSTEM::retrieve_qubit(client_id_type c_id, qubit_type q_id) const
 ////////////////////////////////////////////////////////////
 
 cycle_type
-MEMORY_SUBSYSTEM::get_next_ready_cycle_for_load(QUBIT* q) const
+MEMORY_SUBSYSTEM::get_next_ready_cycle_for_load(QUBIT* q, double c_freq_khz) const
 {
     auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), q);
     assert(s_it != storages_.end());
-    const uint64_t routing_free_cycle = routing_->get_route_ready_cycle(*s_it);
-    return routing_free_cycle;
+
+    // `routing_free_cycle` is already a compute cycle, no need to convert
+    cycle_type routing_free_cycle = routing_->ready_cycle(*s_it);
+
+    // `storage_free_cycle` needs to be converted
+    cycle_type storage_free_cycle = (*s_it)->next_free_adapter_cycle();
+    storage_free_cycle = convert_cycles_between_frequencies(storage_free_cycle, (*s_it)->freq_khz, c_freq_khz);
+
+    cycle_type out = std::max(routing_free_cycle, storage_free_cycle);
+    return out;
 }
 
 ////////////////////////////////////////////////////////////

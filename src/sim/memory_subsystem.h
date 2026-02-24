@@ -51,7 +51,7 @@ public:
     /*
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
-    cycle_type get_next_ready_cycle_for_load(QUBIT*) const;
+    cycle_type get_next_ready_cycle_for_load(QUBIT*, double compute_freq_khz) const;
 
     const std::vector<STORAGE*>& storages() const;
 private:

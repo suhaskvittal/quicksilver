@@ -103,6 +103,9 @@ public:
      * */
     cycle_type next_free_adapter_cycle() const;
 
+    /*
+     * This function prints out information about the readiness of each adapter.
+     * */
     void print_adapter_debug_info(std::ostream&) const;
 
     const backing_buffer_type& contents() const;

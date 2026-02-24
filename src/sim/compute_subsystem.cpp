@@ -5,6 +5,7 @@
 
 #include "sim/compute_subsystem.h"
 #include "sim/memory_subsystem.h"
+#include "sim/production/epr.h"
 #include "sim/stats.h"
 
 #include <fstream>
@@ -53,7 +54,8 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     all_clients_(total_clients),
     active_clients_(concurrent_clients),
     inactive_clients_(total_clients - concurrent_clients),
-    client_context_table_(total_clients)
+    client_context_table_(total_clients),
+    ed_units_(conf.ed_units)
 {
     // initialize clients:
     assert(total_clients >= concurrent_clients);
@@ -143,6 +145,9 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
         rotation_subsystem_->print_progress(ostrm);
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 COMPUTE_SUBSYSTEM::print_deadlock_info(std::ostream& ostrm) const
 {
@@ -221,6 +226,12 @@ bool
 COMPUTE_SUBSYSTEM::is_rpc_enabled() const
 {
     return rotation_subsystem_ != nullptr;
+}
+
+bool
+COMPUTE_SUBSYSTEM::is_ed_in_use() const
+{
+    return !ed_units_.empty();
 }
 
 ////////////////////////////////////////////////////////////
@@ -602,7 +613,24 @@ COMPUTE_SUBSYSTEM::get_next_ready_cycle_for_instruction(CLIENT* c, inst_ptr inst
             return std::nullopt;
 
         // we need to check when the memory subsystem can serve this load:
-        cycle_type ready_cycle = memory_hierarchy_->get_next_ready_cycle_for_load(ld);
+        cycle_type ready_cycle = memory_hierarchy_->get_next_ready_cycle_for_load(ld, freq_khz);
+
+        // finally, make sure that `ready_cycle` does not jump any entanglement distillation unit,
+        // which is generally as slow as memory:
+        if (is_ed_in_use())
+        {
+            for (const auto& level : ed_units_)
+            {
+                for (const PRODUCER_BASE* _p : level)
+                {
+                    const auto* p = static_cast<const producer::ENT_DISTILLATION*>(_p);
+                    cycle_type c = p->get_next_progression_cycle();
+                    c = convert_cycles_between_frequencies(c, p->freq_khz, freq_khz);
+                    ready_cycle = std::min(c, ready_cycle);
+                }
+            }
+        }
+
         return std::make_optional(ready_cycle);
     }
     else

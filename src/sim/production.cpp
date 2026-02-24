@@ -20,11 +20,20 @@ namespace sim
 PRODUCER_BASE::PRODUCER_BASE(std::string_view name,
                                 double freq_khz,
                                 double _output_error_probability,
-                                size_t _buffer_capacity)
+                                size_t _buffer_capacity,
+                                size_t _input_count,
+                                size_t _output_count)
     :OPERABLE(name, freq_khz),
     output_error_probability(_output_error_probability),
-    buffer_capacity(_buffer_capacity)
+    buffer_capacity(_buffer_capacity),
+    input_count(_input_count),
+    output_count(_output_count)
 {
+    if (output_count > buffer_capacity)
+    {
+        std::cerr << "in instantiation of PRODUCER_BASE " << name << ": buffer capacity cannot"
+                    << " hold all output resource states." << _die{};
+    }
 }
 
 void
@@ -44,17 +53,17 @@ PRODUCER_BASE::print_deadlock_info(std::ostream& out) const
 long
 PRODUCER_BASE::operate()
 {
-    if (buffer_occupancy_ >= buffer_capacity || production_step())
+    if (buffer_occupancy_ + output_count > buffer_capacity || production_step())
         return 1;
     else 
         return 0;
 }
 
 void
-PRODUCER_BASE::install_resource_state()
+PRODUCER_BASE::install_resource_states()
 {
-    assert(buffer_occupancy_ < buffer_capacity);
-    buffer_occupancy_++;
+    assert(buffer_occupancy_ + output_count <= buffer_capacity);
+    buffer_occupancy_ += output_count;
 }
 
 size_t

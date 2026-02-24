@@ -28,12 +28,12 @@ void _update_available_cycle(ITER begin, ITER end, cycle_type);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_BASE::COMPUTE_BASE(std::string_view             name,
-                           double                       freq_khz,
-                           size_t                       _code_distance,
-                           size_t                       _local_memory_capacity,
-                           std::vector<PRODUCER_BASE*>  top_level_t_factories,
-                           MEMORY_SUBSYSTEM*            memory_hierarchy)
+COMPUTE_BASE::COMPUTE_BASE(std::string_view      name,
+                           double                freq_khz,
+                           size_t                _code_distance,
+                           size_t                _local_memory_capacity,
+                           production_level_type top_level_t_factories,
+                           MEMORY_SUBSYSTEM*     memory_hierarchy)
     :OPERABLE(name, freq_khz),
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
@@ -59,17 +59,11 @@ COMPUTE_BASE::local_memory() const
     return local_memory_;
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-const std::vector<PRODUCER_BASE*>&
+const COMPUTE_BASE::production_level_type&
 COMPUTE_BASE::top_level_t_factories() const
 {
     return top_level_t_factories_;
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 MEMORY_SUBSYSTEM*
 COMPUTE_BASE::memory_hierarchy() const
