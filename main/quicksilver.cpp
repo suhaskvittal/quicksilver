@@ -23,6 +23,17 @@
 namespace 
 {
 
+struct FIDELITY_RESULT
+{
+    /*
+     * Fidelity breakdown:
+     * */
+    double overall;
+    double compute_subsystem;
+    double memory_subsystem;
+    double magic_state;
+};
+
 std::vector<std::string> split_trace_string(std::string);
 
 /*
@@ -35,6 +46,11 @@ void jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capaci
  * Retrieves the number of qubits for the given trace:
  * */
 size_t get_number_of_qubits(std::string_view);
+
+/*
+ * Computes the probability of success post-simulation
+ * */
+FIDELITY_RESULT compute_application_fidelity(uint64_t scale_to_instructions, sim::CLIENT*, sim::COMPUTE_SUBSYSTEM*);
 
 } // anon
 
@@ -183,7 +199,7 @@ main(int argc, char* argv[])
     }
     else
     {
-        compute_code_distance = 21;
+        compute_code_distance = 23;
         memory_code_distance = 24;
     }
 
@@ -312,6 +328,18 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
+    /* Estimate logical error rate */
+
+    for (auto* c : compute_subsystem->clients())
+    {
+        auto f = compute_application_fidelity(1'000'000'000, c, compute_subsystem);
+        std::cout << "CLIENT_" << static_cast<int>(c->id) << "_FIDELITY\n";
+        print_stat_line(std::cout, "    OVERALL", f.overall);
+        print_stat_line(std::cout, "    COMPUTE_SUBSYSTEM", f.compute_subsystem);
+        print_stat_line(std::cout, "    MEMORY_SUBSYSTEM", f.memory_subsystem);
+        print_stat_line(std::cout, "    MAGIC_STATE", f.magic_state);
+    }
+
     /* cleanup simulation */
 
     delete compute_subsystem;
@@ -406,6 +434,54 @@ get_number_of_qubits(std::string_view trace)
     uint32_t num_qubits;
     generic_strm_read(istrm, &num_qubits, 4);
     return num_qubits;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+FIDELITY_RESULT
+compute_application_fidelity(uint64_t scale_to_inst, sim::CLIENT* c, sim::COMPUTE_SUBSYSTEM* cs)
+{
+    std::vector<double> log_success_prob;
+
+    // scale factor for all calculations
+    const double scale = mean(scale_to_inst, c->s_unrolled_inst_done);
+
+    /* Compute subsystem contribution */
+    double sc_error_rate_per_d_cycles = sim::configuration::surface_code_logical_error_rate(cs->code_distance, sim::GL_PHYSICAL_ERROR_RATE);
+    double cs_error_per_d_cycles = 1.0 - std::pow(1.0-sc_error_rate_per_d_cycles, cs->local_memory_capacity);
+    double cs_scaled_cycles = scale * c->s_cycle_complete;
+    double cs_log_success_prob = mean(cs_scaled_cycles, cs->code_distance) * std::log(1.0-cs_error_per_d_cycles);
+    log_success_prob.push_back(cs_log_success_prob);
+
+    /* Memory subsystem contribution */
+    double memory_log_success_prob{0.0};
+    for (const auto* s : cs->memory_hierarchy()->storages())
+    {
+        // compute final simulation cycle for client `c`
+        auto final_cycle = sim::convert_cycles_between_frequencies(c->s_cycle_complete, cs->freq_khz, s->freq_khz);
+        double error_rate_per_d_cycles = sim::configuration::bivariate_bicycle_code_block_error_rate(s->code_distance, sim::GL_PHYSICAL_ERROR_RATE);
+        double scaled_cycles = scale * final_cycle;
+        double lgs = mean(scaled_cycles, s->code_distance) * std::log(1.0-error_rate_per_d_cycles);
+        memory_log_success_prob += lgs;
+    }
+    log_success_prob.push_back(memory_log_success_prob);
+
+    /* Magic state contribution */
+    const auto& f = cs->top_level_t_factories();
+    double mean_t_error_probability = std::transform_reduce(f.begin(), f.end(), double{0.0}, std::plus<double>{},
+                                                    [] (const auto* x) { return x->output_error_probability; }) / f.size();
+    double scaled_t_count = scale * c->s_t_gates_done;
+    double t_log_success_prob = scaled_t_count * std::log(1.0 - mean_t_error_probability);
+
+    // finally, compute the probability that nothing fails using `log_success_prob`
+    double log_fidelity = std::reduce(log_success_prob.begin(), log_success_prob.end(), 0.0);
+    return FIDELITY_RESULT{
+                std::exp(log_fidelity),  // total fidelity
+                std::exp(cs_log_success_prob),
+                std::exp(memory_log_success_prob),
+                std::exp(t_log_success_prob)
+            };
 }
 
 ////////////////////////////////////////////////////////////
