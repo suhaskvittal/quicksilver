@@ -14,6 +14,7 @@ namespace sim
 {
 
 extern std::mt19937_64 GL_RNG;
+extern double          GL_PHYSICAL_ERROR_RATE;
 
 namespace producer
 {
@@ -28,8 +29,9 @@ namespace producer
 namespace
 {
 
-const double INJECTION_ERROR_PROBABILITY{1e-3};
 static std::uniform_real_distribution FPR(0.0, 1.0);
+
+double _injection_error_probability();
 
 /*
  * Generate name for T_DISTILLATION factory: "D_<initial_input_count+num_rotation_steps>_<output_count>"
@@ -97,7 +99,7 @@ T_DISTILLATION::production_step()
     {
         // can get all magic states via injection -- check if an error occurs.
         // If so, then restart production
-        p_error = INJECTION_ERROR_PROBABILITY * magic_states_needed;
+        p_error = _injection_error_probability() * magic_states_needed;
     }
     else
     {
@@ -192,6 +194,12 @@ T_CULTIVATION::production_step()
 
 namespace
 {
+
+double
+_injection_error_probability()
+{
+    return GL_PHYSICAL_ERROR_RATE;
+}
 
 std::string
 _distillation_name(size_t initial_input_count, size_t output_count, size_t num_rotation_steps)

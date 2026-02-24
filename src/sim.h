@@ -48,6 +48,11 @@ extern int64_t GL_PRINT_PROGRESS_FREQUENCY;
  * */
 extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
 
+/*
+ * Physical error rate -- mostly important for resource estimation.
+ * */
+extern double GL_PHYSICAL_ERROR_RATE;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

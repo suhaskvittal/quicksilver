@@ -6,6 +6,8 @@
 #ifndef SIM_CONFIGURATION_RESOURCE_ESTIMATION_h
 #define SIM_CONFIGURATION_RESOURCE_ESTIMATION_h
 
+#include <cstddef>
+
 namespace sim
 {
 namespace configuration
@@ -54,8 +56,8 @@ constexpr size_t magic_state_distillation_physical_qubit_count(size_t input_coun
 double surface_code_logical_error_rate(size_t, double p);
 double bivariate_bicycle_code_block_error_rate(size_t, double p);
 
-size_t surface_code_distance_for_target_logical_error_rate(double);
-size_t bivariate_bicycle_code_distance_for_target_block_error_rate(double);
+size_t surface_code_distance_for_target_logical_error_rate(double, double p);
+size_t bivariate_bicycle_code_distance_for_target_block_error_rate(double, double p);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

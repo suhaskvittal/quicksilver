@@ -5,7 +5,7 @@
 
 #include "sim.h"
 #include "sim/configuration/resource_estimation.h"
-#include "sim/configuration/allocator.h"
+#include "sim/configuration/allocator/impl.h"
 #include "sim/compute_subsystem.h"
 #include "sim/memory_subsystem.h"
 #include "sim/production/magic_state.h"
@@ -99,8 +99,11 @@ main(int argc, char* argv[])
         .optional("", "--memory-syndrome-extraction-round-time-ns", 
                       "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
                       memory_syndrome_extraction_round_time_ns, 1300)
-        .optional("", "--memory-is-remote", is_memory_remote, false)
-        .optional("-epr", "--epr-physical-qubit-budget", epr_physical_qubit_budget, 5000)
+        .optional("", "--memory-is-remote", "Storages in memory subsystem consume EPR pairs", use_remote_memory, false)
+        .optional("-epr", "--epr-physical-qubit-budget", 
+                        "Physical qubit budget for ED used by remote storage", 
+                        epr_physical_qubit_budget, 
+                        5000)
 
         .optional("", "--factory-l2-buffer-capacity", "Number of magic states stored in an L2 factory buffer",
                       factory_l2_buffer_capacity, 4)
@@ -134,8 +137,6 @@ main(int argc, char* argv[])
         traces.resize(ratemode);
         std::fill(traces.begin(), traces.end(), trace);
     }
-
-    /* initialize magic state factories */
 
     sim::configuration::FACTORY_SPECIFICATION l1_spec
     {
@@ -191,11 +192,13 @@ main(int argc, char* argv[])
     const size_t memory_block_capacity =
         sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
 
-    sim::configuration::FACTORY_ALLOCATION alloc;
+    /* initialize magic state factories */
+
+    sim::configuration::ALLOCATION ms_alloc;
     if (regime == "T")
-        alloc = sim::configuration::throughput_aware_factory_allocation(factory_physical_qubit_budget, l1_spec, l2_spec);
+        ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, {l1_spec, l2_spec});
     else
-        alloc = sim::configuration::l1_factory_allocation(factory_physical_qubit_budget, l1_spec);
+        ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, {l1_spec});
 
     /* initialize memory subsystem */
 
@@ -231,7 +234,7 @@ main(int argc, char* argv[])
                                                          compute_local_memory_capacity,
                                                          concurrent_clients,
                                                          inst_sim,
-                                                         alloc.second_level.empty() ? alloc.first_level : alloc.second_level,
+                                                         ms_alloc.producers.back(),
                                                          memory_subsystem,
                                                          conf};
 
@@ -240,8 +243,8 @@ main(int argc, char* argv[])
     std::vector<sim::OPERABLE*> all_operables;
     all_operables.push_back(compute_subsystem);
     std::copy(memory_subsystem->storages().begin(), memory_subsystem->storages().end(), std::back_inserter(all_operables));
-    std::copy(alloc.first_level.begin(), alloc.first_level.end(), std::back_inserter(all_operables));
-    std::copy(alloc.second_level.begin(), alloc.second_level.end(), std::back_inserter(all_operables));
+    for (const auto& level : ms_alloc.producers)
+        std::copy(level.begin(), level.end(), std::back_inserter(all_operables));
 
     if (compute_subsystem->is_rpc_enabled())
         all_operables.push_back(compute_subsystem->rotation_subsystem());
@@ -250,10 +253,10 @@ main(int argc, char* argv[])
 
     std::cout << "simulation parameters:"
                 << "\n\tqubits in local memory = " << compute_local_memory_capacity
-                << "\n\tqubits in main memory (blocks) = " << main_memory_qubits << " (" << num_blocks << ")"
-                << "\n\tL1 factories = " << alloc.first_level.size()
-                << "\n\tL2 factories = " << alloc.second_level.size()
-                << "\n";
+                << "\n\tqubits in main memory (blocks) = " << main_memory_qubits << " (" << num_blocks << ")";
+    for (size_t i = 0; i < ms_alloc.producers.size(); i++)
+        std::cout << "\n\tL" << i+1 << " factory count = " << ms_alloc.producers[i].size();
+    std::cout << "\n";
 
     /* run simulation */
 
@@ -297,31 +300,25 @@ main(int argc, char* argv[])
                                                             size_t{0},
                                                             std::plus<size_t>{},
                                                             [] (auto* s) { return s->physical_qubit_count; });
-    size_t factory_physical_qubits = alloc.physical_qubit_count;
-    double t_throughput_per_cycle = estimate_throughput_of_allocation(alloc, true)
-                                        * (1.0/(1e3*compute_subsystem->freq_khz));
-
 
     sim::print_compute_subsystem_stats(std::cout, compute_subsystem);
 
-    sim::print_stats_for_factories(std::cout, "L1_FACTORY", alloc.first_level);
-    sim::print_stats_for_factories(std::cout, "L2_FACTORY", alloc.second_level);
+    sim::print_stats_for_factories(std::cout, "L1_FACTORY", ms_alloc.producers[0]);
+    sim::print_stats_for_factories(std::cout, "L2_FACTORY", ms_alloc.producers[1]);
 
     print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
     print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
-    print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", factory_physical_qubits);
-    print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_CYCLE", t_throughput_per_cycle);
-    print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", estimate_throughput_of_allocation(alloc, true));
+    print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", ms_alloc.physical_qubit_count);
+    print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* cleanup simulation */
 
     delete compute_subsystem;
     delete memory_subsystem;
-    for (auto* f : alloc.first_level)
-        delete f;
-    for (auto* f : alloc.second_level)
-        delete f;
+    for (auto& p : ms_alloc.producers)
+        for (auto* f : p)
+            delete f;
 
     return 0;
 }

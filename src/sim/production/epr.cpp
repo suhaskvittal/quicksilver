@@ -11,6 +11,7 @@ namespace sim
 {
 
 extern std::mt19937_64 GL_RNG;
+extern double          GL_PHYSICAL_ERROR_RATE;
 
 namespace producer
 {
@@ -21,8 +22,9 @@ namespace producer
 namespace
 {
 
-const double INJECTION_ERROR_PROB{0.01};  // 1% initial EPR error rate
 static std::uniform_real_distribution FPR(0.0,1.0);
+
+double _injection_error_probability();
 
 /*
  * Generate name for entanglement distillation protocol: "E_<input_count>_<output_count>"
@@ -74,7 +76,7 @@ ENT_DISTILLATION::production_step()
     if (step_ == 0 && previous_level.empty())
     {
         inputs_available_ = input_count;
-        error_probability_ = input_count * INJECTION_ERROR_PROB;
+        error_probability_ = input_count * _injection_error_probability();
     }
 
     // fetch EPR pairs from the previous level of production
@@ -87,9 +89,10 @@ ENT_DISTILLATION::production_step()
                                 [] (const auto* p) { return p->buffer_occupancy() > 0; });
             if (p_it == previous_level.end())
                 return false;
+            auto* p = *p_it;
             size_t c = std::min(p->buffer_occupancy(), input_count - inputs_available_);
-            (*p_it)->consume(c);
-            error_probability_ += c * (*p_it)->output_error_probability;
+            p->consume(c);
+            error_probability_ += c * p->output_error_probability;
             inputs_available_ += c;
         }
     }
@@ -107,6 +110,12 @@ ENT_DISTILLATION::production_step()
 
 namespace
 {
+
+double
+_injection_error_probability()
+{
+    return 10 * GL_PHYSICAL_ERROR_RATE;
+}
 
 std::string
 _ed_name(size_t i, size_t o)

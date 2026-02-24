@@ -24,8 +24,9 @@ std::mt19937_64 GL_RNG{0};
 int64_t GL_PRINT_PROGRESS_FREQUENCY{1'000'000};
 int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{1'000'000};
 
-bool GL_T_GATE_DO_AUTOCORRECT{false};
+double GL_PHYSICAL_ERROR_RATE{1e-3};
 
+bool GL_T_GATE_DO_AUTOCORRECT{false};
 int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
 ////////////////////////////////////////////////////////////

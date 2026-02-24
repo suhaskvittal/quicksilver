@@ -27,8 +27,8 @@ struct ALLOCATION
     size_t     physical_qubit_count{0};
     double     estimated_throughput{0.0};
 
-    FACTORY_ALLOCATION() =default;
-    FACTORY_ALLOCATION(const FACTORY_ALLOCATION&) =default;
+    ALLOCATION() =default;
+    ALLOCATION(const ALLOCATION&) =default;
 };
 
 ////////////////////////////////////////////////////////////
@@ -74,7 +74,7 @@ ALLOCATION throughput_aware_allocation(size_t budget,
  * Computes throughput of the total allocation. `BANDWIDTH_ESTIMATOR` and `CONSUMPTION_ESTIMATOR` are
  * as above for `throughput_aware_allocation`
  * */
-template <class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR>
+template <class SPEC_TYPE, class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR>
 double estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
                                             const std::vector<size_t>& counts, 
                                             const BANDWIDTH_ESTIMATOR&, 

@@ -69,7 +69,7 @@ struct ED_SPECIFICATION /* entanglement distillation */
 ////////////////////////////////////////////////////////////
 
 ALLOCATION allocate_magic_state_factories(size_t budget, std::vector<FACTORY_SPECIFICATION>);
-ALLOCATION allocate_entanglement_distillation_units(size_t budget, std::vector<ED_SPECIFICIATION>);
+ALLOCATION allocate_entanglement_distillation_units(size_t budget, std::vector<ED_SPECIFICATION>);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

@@ -8,6 +8,9 @@
 
 namespace sim
 {
+
+extern double GL_PHYSICAL_ERROR_RATE;
+
 namespace configuration
 {
 
@@ -43,19 +46,20 @@ PRODUCER_BASE*
 _alloc(ED_SPECIFICATION s)
 {
     const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
-    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
-    return new ENT_DISTILLATION(freq_khz,
-                                s.output_error_rate,
-                                dm,
-                                s.input_count,
-                                s.output_count,
-                                s.input_count - s.output_count);
+    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
+    return new producer::ENT_DISTILLATION(freq_khz,
+                                            s.output_error_rate,
+                                            s.buffer_capacity,
+                                            dm,
+                                            s.input_count,
+                                            s.output_count,
+                                            s.input_count - s.output_count);
 }
 
 size_t
 _physical_qubit_count(ED_SPECIFICATION s)
 {
-    const size_t d_base = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
+    const size_t d_base = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     const size_t idx = d_base / s.dx;
     const size_t idz = d_base / s.dz;
     size_t p = surface_code_physical_qubit_count(idx, idz) * s.input_count;
@@ -69,7 +73,7 @@ double
 _bandwidth(ED_SPECIFICATION s)
 {
     const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
-    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
+    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
     return (1e3 * freq_khz * s.output_count) / rounds;
 }
@@ -78,7 +82,7 @@ double
 _consumption_rate(ED_SPECIFICATION s)
 {
     const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
-    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
+    const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
     return (1e3 * freq_khz * s.input_count) / rounds;
 }

@@ -77,7 +77,7 @@ STORAGE::do_load(QUBIT* q)
     auto q_it = contents_.find(q);
     assert(q_it != contents_.end());
 
-    auto result = do_memory_access(load_latency, false);
+    auto result = do_memory_access(load_latency, ACCESS_TYPE::LOAD);
     result.critical_latency = load_latency;
     if (result.success)
         contents_.erase(q_it);
@@ -89,7 +89,7 @@ STORAGE::do_store(QUBIT* q)
 {
     assert(contents_.count(q) == 0);
 
-    auto result = do_memory_access(store_latency, true);
+    auto result = do_memory_access(store_latency, ACCESS_TYPE::STORE);
     result.critical_latency = 0;
     if (result.success)
     {
@@ -108,7 +108,8 @@ STORAGE::do_coupled_load_store(QUBIT* ld, QUBIT* st)
     auto ld_it = contents_.find(ld);
     assert(ld_it != contents_.end() && contents_.count(st) == 0);
 
-    auto result = do_memory_access(load_latency + store_latency + ADDED_DATA_MOVEMENT_LATENCY, false);
+    auto result = do_memory_access(load_latency + store_latency + ADDED_DATA_MOVEMENT_LATENCY, 
+                                    ACCESS_TYPE::COUPLED_LOAD_STORE);
     result.critical_latency = load_latency;
     if (result.success)
     {

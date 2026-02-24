@@ -3,7 +3,9 @@
  *  date:   20 February 2026
  * */
 
-#include "sim/configuration/resource_estimator.h"
+#include "sim/configuration/resource_estimation.h"
+
+#include <cassert>
 
 namespace sim
 {
@@ -29,6 +31,7 @@ throughput_aware_allocation(size_t b,
     std::vector<double> consumption_rates(specs.size());
     for (size_t i = 0; i < specs.size(); i++)
     {
+        const auto& s = specs[i];
         pq_counts[i] = f_est_qubit_count(s);
         production_rates[i] = f_est_bandwidth(s);
         consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s);
@@ -41,8 +44,8 @@ throughput_aware_allocation(size_t b,
     {
         std::cerr << "throughput_aware_allocation: cannot allocate any production with given budget"
                     << "\n\tbudget = " << b << ", minimum required = " << pq_min_required;
-        for (size_t i = 0; < pq_counts_by_level.size(); i++)
-            std::cerr << "\n\trequired for one L" << i+1 << " production = " << pq_counts_by_level[i];
+        for (size_t i = 0; i < pq_counts.size(); i++)
+            std::cerr << "\n\trequired for one L" << i+1 << " production = " << pq_counts[i];
         std::cerr << _die{};
     }
 
@@ -62,7 +65,6 @@ throughput_aware_allocation(size_t b,
 
     /* 4. Greedily form allocations */
 
-    out.producers.resize(specs.size());
     std::vector<size_t> counts(specs.size(), 0);
     double curr_tp{0.0};
     size_t remaining{b};
@@ -70,18 +72,20 @@ throughput_aware_allocation(size_t b,
     {
         std::vector<size_t> prev_counts(counts);
         double prev_tp{curr_tp};
+        size_t remaining_in_loop{remaining};
         for (ssize_t i = specs.size()-1; i >= 0; i--)
         {
             size_t c = pq_counts_sat[i];
-            if (remaining > c)
+            if (remaining_in_loop < c)
             {
                 // need to have at least one for this level
-                num_allocs[i]++;
+                counts[i]++;
+                remaining_in_loop -= pq_counts[i];
             }
             else
             {
                 // we can do a bandwidth-saturating allocation multiple times
-                size_t num_batch_allocs = remaining/c; 
+                size_t num_batch_allocs = remaining_in_loop/c; 
                 counts[i] += num_batch_allocs;
 
                 // now note that `counts_for_sat_alloc` only contains the count for
@@ -95,7 +99,7 @@ throughput_aware_allocation(size_t b,
                 for (ssize_t j = i-1; j >= 0; j--)
                 {
                     alloc_prod *= counts_for_sat_alloc[j];
-                    counts[i] += alloc_prod;
+                    counts[j] += alloc_prod;
                 }
 
                 // we can exit early since we have allocated for all levels.
@@ -111,16 +115,27 @@ throughput_aware_allocation(size_t b,
         }
         else
         {
+            size_t qubit_count{0};
             for (size_t i = 0; i < counts.size(); i++)
-                remaining -= pq_counts[i] * (counts[i]-prev_counts[i]);
+                qubit_count += pq_counts[i] * (counts[i]-prev_counts[i]);
+            remaining -= qubit_count;
         }
     }
     while (remaining >= pq_min_required);
 
     /* 5. Actually do the allocations on the heap and return */
-    for (size_t i = 0; i < num_allocs.size(); i++)
-        for (size_t j = 0; j < num_allocs[i]; j++)
-            out.producers.push_back(f_alloc(specs[i]));
+    ALLOCATION out{};
+    out.producers.resize(specs.size());
+    for (size_t i = 0; i < counts.size(); i++)
+    {
+        for (size_t j = 0; j < counts[i]; j++)
+        {
+            auto* p = f_alloc(specs[i]);
+            if (i > 0)
+                p->previous_level = out.producers[i-1];
+            out.producers[i].push_back(p);
+        }
+    }
     out.physical_qubit_count = b - remaining;
     out.estimated_throughput = curr_tp;
 

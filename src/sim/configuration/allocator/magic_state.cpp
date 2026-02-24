@@ -6,8 +6,13 @@
 #include "sim/configuration/allocator/impl.h"
 #include "sim/production/magic_state.h"
 
+#include <cassert>
+
 namespace sim
 {
+
+extern double GL_PHYSICAL_ERROR_RATE;
+
 namespace configuration
 {
 
@@ -55,8 +60,8 @@ PRODUCER_BASE*
 _alloc(FACTORY_SPECIFICATION s)
 {
     PRODUCER_BASE* f;
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
-    if (is_cultivation)
+        const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    if (s.is_cultivation)
     {
         f = new producer::T_CULTIVATION(freq_khz,
                                         s.output_error_rate,
@@ -67,11 +72,12 @@ _alloc(FACTORY_SPECIFICATION s)
     else
     {
         f = new producer::T_DISTILLATION(freq_khz,
-                                         spec.output_error_rate,
-                                         spec.buffer_capacity,
-                                         spec.input_count,
-                                         spec.output_count,
-                                         spec.rotations);
+                                         s.output_error_rate,
+                                         s.buffer_capacity,
+                                         s.dm,
+                                         s.input_count,
+                                         s.output_count,
+                                         s.rotations);
     }
     return f;
 }
@@ -87,7 +93,7 @@ _physical_qubit_count(FACTORY_SPECIFICATION s)
                 : magic_state_distillation_physical_qubit_count(s.input_count, s.output_count, s.dx, s.dz);
     // handle buffer overheads:
     size_t output_count = s.is_cultivation ? 1 : s.output_count;
-    size_t d_buffer = surface_code_distance_for_target_logical_error_rate(s.output_error_rate);
+    size_t d_buffer = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     p += (s.buffer_capacity-output_count) * surface_code_physical_qubit_count(d_buffer);
     return p;
 }

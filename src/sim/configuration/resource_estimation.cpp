@@ -4,9 +4,12 @@
  * */
 
 #include "sim/configuration/resource_estimation.h"
+#include "globals.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <iostream>
 
 namespace sim
 {
@@ -24,7 +27,7 @@ namespace
  * so we use this to check if the input `p` is something where
  * we know the block error rate.
  * */
-void _verify_bivariate_bicycle_code_physical_error_rate(double):
+void _verify_bivariate_bicycle_code_physical_error_rate(double);
 
 } // anon
 
@@ -74,7 +77,7 @@ bivariate_bicycle_code_distance_for_target_block_error_rate(double e, double p)
 
     if (e >= 7e-5)
         return 6;
-    else if (e >= je-7)
+    else if (e >= 2e-7)
         return 12;
     else if (e >= 2e-12)
         return 18;
@@ -92,8 +95,8 @@ void
 _verify_bivariate_bicycle_code_physical_error_rate(double p)
 {
     // change `ACCEPTABLE` if you add new values for a given physical error rate.
-    const double[] ACCEPTABLE{1e-3};
-    const double   TOL{1e-9};
+    const double ACCEPTABLE[] = {1e-3};
+    const double TOL{1e-9};
     
     bool none_acceptable = std::none_of(std::begin(ACCEPTABLE), std::end(ACCEPTABLE),
                                     [p, TOL] (double x) { return std::abs(p-x) < TOL; });
