@@ -222,6 +222,12 @@ COMPUTE_SUBSYSTEM::rotation_subsystem() const
     return rotation_subsystem_;
 }
 
+const std::vector<COMPUTE_SUBSYSTEM::production_level_type>&
+COMPUTE_SUBSYSTEM::entanglement_distillation_units() const
+{
+    return ed_units_;
+}
+
 bool
 COMPUTE_SUBSYSTEM::is_rpc_enabled() const
 {

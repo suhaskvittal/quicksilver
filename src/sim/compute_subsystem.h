@@ -135,10 +135,14 @@ public:
     void print_progress(std::ostream&) const override;
     void print_deadlock_info(std::ostream&) const override;
 
+    /*
+     * Returns true if the simulation is done: all clients have completed `simulation_instructions`
+     * */
     bool done() const;
-    const std::vector<CLIENT*>& clients() const;
 
-    ROTATION_SUBSYSTEM* rotation_subsystem() const;
+    const std::vector<CLIENT*>&               clients() const;
+    ROTATION_SUBSYSTEM*                       rotation_subsystem() const;
+    const std::vector<production_level_type>& entanglement_distillation_units() const;
 
     /*
      * rpc = "Rotation Pre-Computation". This returns true if `rotation_subsystem_ != nullptr`

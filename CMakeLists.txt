@@ -111,6 +111,7 @@ set(BINARY_GEN_FILES
 set(SIM_FILES
     src/sim/configuration/allocator/epr.cpp
     src/sim/configuration/allocator/magic_state.cpp
+    src/sim/configuration/predefined_ed_protocols.cpp
     src/sim/configuration/resource_estimation.cpp
     src/sim/client.cpp
     src/sim/compute_base.cpp

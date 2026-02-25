@@ -4,8 +4,9 @@
  * */
 
 #include "sim.h"
-#include "sim/configuration/resource_estimation.h"
 #include "sim/configuration/allocator/impl.h"
+#include "sim/configuration/predefined_ed_protocols.h"
+#include "sim/configuration/resource_estimation.h"
 #include "sim/compute_subsystem.h"
 #include "sim/memory/remote.h"
 #include "sim/memory_subsystem.h"
@@ -284,6 +285,9 @@ main(int argc, char* argv[])
                 << "\n\tqubits in main memory (blocks) = " << main_memory_qubits << " (" << num_blocks << ")";
     for (size_t i = 0; i < ms_alloc.producers.size(); i++)
         std::cout << "\n\tL" << i+1 << " factory count = " << ms_alloc.producers[i].size();
+    if (use_remote_memory)
+        for (size_t i = 0; i < ed_alloc.producers.size(); i++)
+            std::cout << "\n\tL" << i+1 << " ed unit count = " << ed_alloc.producers[i].size();
     std::cout << "\n";
 
     /* run simulation */
@@ -541,48 +545,7 @@ get_default_ed_specifications(std::string_view regime,
                                 int64_t c_round_time_ns,
                                 int64_t ll_buffer_capacity)
 {
-    ED_SPECIFICATION l1_spec  // [3,1,3]_x
-    {
-        .syndrome_extraction_round_time_ns=c_round_time_ns,
-        .output_error_rate=1e-2,
-        .input_count=3,
-        .output_count=1,
-        .dx=3,
-        .dz=1
-    };
-
-    ED_SPECIFICATION l2_spec   // [2,1,2]_y
-    {
-        .syndrome_extraction_round_time_ns=c_round_time_ns,
-        .output_error_rate=1e-4,
-        .input_count=2,
-        .output_count=1,
-        .dx=2,
-        .dz=2
-    };
-
-    ED_SPECIFICATION l3_spec   // [2,1,2]_x
-    {
-        .syndrome_extraction_round_time_ns=c_round_time_ns,
-        .output_error_rate=2e-8,
-        .input_count=2,
-        .output_count=1,
-        .dx=2,
-        .dz=1
-    };
-
-    ED_SPECIFICATION l4_spec   // [[6,4,2]]
-    {
-        .syndrome_extraction_round_time_ns=c_round_time_ns,
-        .buffer_capacity=ll_buffer_capacity,
-        .output_error_rate=3e-15,
-        .input_count=6,
-        .output_count=4,
-        .dx=2,
-        .dz=2
-    };
-
-    return {l1_spec, l2_spec, l3_spec, l4_spec};
+    return sim::configuration::ed::protocol_1(c_round_time_ns, ll_buffer_capacity);
 }
 
 ////////////////////////////////////////////////////////////
@@ -614,6 +577,14 @@ compute_application_fidelity(uint64_t scale_to_inst, sim::CLIENT* c, sim::COMPUT
         double lgs = mean(scaled_cycles, s->code_distance) * std::log(1.0-error_rate_per_d_cycles);
         memory_log_success_prob += lgs;
     }
+
+    if (cs->is_ed_in_use())
+    {
+        // handle affects of entanglement distillation -- probability of teleportation failure:
+        for (const auto* p : cs->entanglement_distillation_units().back())
+            memory_log_success_prob += p->s_consumed * scale * std::log(1.0 - p->output_error_probability);
+    }
+
     log_success_prob.push_back(memory_log_success_prob);
 
     /* Magic state contribution */

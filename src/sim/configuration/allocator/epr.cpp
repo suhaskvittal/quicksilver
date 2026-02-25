@@ -25,6 +25,8 @@ size_t         _physical_qubit_count(ED_SPECIFICATION);
 double         _bandwidth(ED_SPECIFICATION, double);
 double         _consumption_rate(ED_SPECIFICATION);
 
+size_t _compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_inner_min);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -59,10 +61,25 @@ _alloc(ED_SPECIFICATION s)
 size_t
 _physical_qubit_count(ED_SPECIFICATION s)
 {
+    // set `idmin` (inner code distance minimum) dynamically. For high output error rates, d = 3 makes 
+    // no sense
+    const size_t idmin = (s.output_error_rate < 1e-4) ? size_t{3} : size_t{2};
+
     const size_t d_base = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
-    const size_t idx = std::max(size_t{2}, d_base / s.dx);
-    const size_t idz = std::max(size_t{2}, d_base / s.dz);
+    const size_t idx = _compute_inner_code_distance(d_base, s.dx, idmin);
+    const size_t idz = _compute_inner_code_distance(d_base, s.dz, idmin);
+
     size_t p = surface_code_physical_qubit_count(idx, idz) * s.input_count;
+
+    std::cout << "ED::_physical_qubit_count: [[ " << s.input_count 
+                << ", " << s.output_count
+                << ", dx=" << s.dx 
+                << ", dz=" << s.dz 
+                << " ]] uses inner codes with distance"
+                << " dx = " << idx 
+                << ", dz = " << idz
+                << "\tphysical qubit overhead = " << p
+                << "\n";
 
     // handle buffer overheads:
     p += (s.buffer_capacity - s.output_count) * surface_code_physical_qubit_count(d_base);
@@ -90,6 +107,17 @@ _consumption_rate(ED_SPECIFICATION s)
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
     return (1e3 * freq_khz * s.input_count) / rounds;
+}
+
+size_t
+_compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_inner_min)
+{
+    size_t d_inner = static_cast<size_t>( std::ceil(mean(d_required, d_outer)) );
+    if (d_inner <= d_inner_min)
+        return d_inner_min;
+    if ((d_inner & 1) == 0)
+        d_inner++;
+    return d_inner;
 }
 
 } // anon

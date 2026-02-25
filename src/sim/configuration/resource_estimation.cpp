@@ -66,7 +66,10 @@ surface_code_distance_for_target_logical_error_rate(double e, double p)
 
     double d = 2.0 * ( (std::log(e) - std::log(0.1)) / std::log(100*p) ) - 1.0;
     // need to round intelligently while avoiding floating point issues.
-    double d_out = (d - std::floor(d) < ROUNDING_TOL) ? std::floor(d) : std::ceil(d);
+    double _d_out = (d - std::floor(d) < ROUNDING_TOL) ? std::floor(d) : std::ceil(d);
+    size_t d_out = static_cast<size_t>(_d_out);
+    if ((d_out & 1) == 0)
+        d_out++;
     return std::max(static_cast<size_t>(d_out), size_t{2});
 }
 
