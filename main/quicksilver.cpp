@@ -190,7 +190,7 @@ main(int argc, char* argv[])
 
     // from `regime`, set parameters:
     const size_t compute_code_distance = get_compute_code_distance(regime),
-                 memory_code_distance = 18;//get_memory_code_distance(regime);
+                 memory_code_distance = get_memory_code_distance(regime);
 
     const size_t memory_block_physical_qubits = sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
     const size_t memory_block_capacity = sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
@@ -342,6 +342,9 @@ main(int argc, char* argv[])
 
     sim::print_stats_for_factories(std::cout, "L1_FACTORY", ms_alloc.producers[0]);
     sim::print_stats_for_factories(std::cout, "L2_FACTORY", ms_alloc.producers[1]);
+
+    print_stat_line(std::cout, "COMPUTE_CODE_DISTANCE", compute_code_distance);
+    print_stat_line(std::cout, "MEMORY_CODE_DISTANCE", memory_code_distance);
 
     print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
     print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);

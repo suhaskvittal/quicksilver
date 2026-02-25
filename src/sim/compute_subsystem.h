@@ -64,7 +64,7 @@ public:
      *      to add to this type if you want new stats.
      *  `STALL_MONITOR` tracks where these stalls occur.
      * */
-    enum class STALL_TYPE { MEMORY, RESOURCE, RPC, SIZE };
+    enum class STALL_TYPE { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
     using stall_monitor_type = STALL_MONITOR<static_cast<size_t>(STALL_TYPE::SIZE), STALL_TYPE>;
 
     /*

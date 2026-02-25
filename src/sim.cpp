@@ -115,10 +115,10 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
     print_stat_line(out, "TOTAL_ROTATIONS", compute_subsystem->s_total_rotations);
     print_stat_line(out, "RPC_TOTAL", compute_subsystem->s_total_rpc);
     print_stat_line(out, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
-    print_stat_line(out, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
 
     print_stat_line(out, "ISOLATED_MEMORY_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::MEMORY));
-    print_stat_line(out, "ISOLATED_RESOURCE_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::RESOURCE));
+    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::MAGIC_STATE));
+    print_stat_line(out, "ISOLATED_EPR_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::EPR));
     print_stat_line(out, "TOTAL_STALLS", compute_subsystem->stall_monitor().cycles_with_stalls());
 
     if (rotation_subsystem != nullptr)

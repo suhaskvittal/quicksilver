@@ -31,6 +31,12 @@ static std::uniform_real_distribution FPR{0.0,1.0};
 bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
 
 /*
+ * Returns true if either the given instruction, or its current uop,
+ * passes `is_t_like_instruction()`
+ * */
+bool _current_uop_is_t_like(inst_ptr);
+
+/*
  * Assigns the second parameter to first iff the first parameter does not
  * have a value.
  * */
@@ -300,7 +306,6 @@ COMPUTE_SUBSYSTEM::operate()
     long progress{0};
 
     /* Update stats (pre-execution) */
-    had_rpc_stall_this_cycle_ = false;
 
     /* 1. Update clients and execute context switch if needed */
 
@@ -343,9 +348,7 @@ COMPUTE_SUBSYSTEM::operate()
     last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
 
     /* Update stats (post-execution) */
-    if (had_rpc_stall_this_cycle_)
-        s_cycles_with_rpc_stalls++;
-    
+
     if (progress == 0)
         cycles_without_progress++;
     else
@@ -549,16 +552,21 @@ COMPUTE_SUBSYSTEM::update_instruction_stats_on_fetch(inst_ptr inst, std::array<Q
         inst->first_cycle_with_all_load_results_available = latest_load_result_cycle;
     }
     
-    bool current_uop_is_t_like = is_t_like_instruction(inst->type) 
-                                    || (inst->uop_count() > 0 && is_t_like_instruction(inst->current_uop()->type));
     if (!inst->first_cycle_with_available_resource_state.has_value())
     {
-        if (current_uop_is_t_like)
+        if (_current_uop_is_t_like(inst))
         {
             bool any_magic_state_avail = std::any_of(top_level_t_factories_.begin(),
                                                      top_level_t_factories_.end(),
                                                      [] (const auto* f) { return f->buffer_occupancy() > 0; });
             if (any_magic_state_avail)
+                _assign_if_empty(inst->first_cycle_with_available_resource_state, current_cycle());
+        }
+        else if (is_memory_access(inst->type) && is_ed_in_use())
+        {
+            bool any_epr_avail = std::any_of(ed_units_.back().begin(), ed_units_.back().end(),
+                                                [] (const auto* p) { return p->buffer_occupancy() > 0; });
+            if (any_epr_avail)
                 _assign_if_empty(inst->first_cycle_with_available_resource_state, current_cycle());
         }
         else
@@ -590,7 +598,10 @@ COMPUTE_SUBSYSTEM::update_instruction_stats_before_retire(inst_ptr inst)
                y = *inst->first_cycle_with_available_resource_state;
 
     stall_monitor_.add_stall_range(STALL_TYPE::MEMORY, s, x, false);
-    stall_monitor_.add_stall_range(STALL_TYPE::RESOURCE, s, y, false);
+    if (is_memory_access(inst->type) && is_ed_in_use())
+        stall_monitor_.add_stall_range(STALL_TYPE::EPR, s, y, false);
+    else
+        stall_monitor_.add_stall_range(STALL_TYPE::MAGIC_STATE, s, y, false);
 }
 
 ////////////////////////////////////////////////////////////
@@ -764,6 +775,13 @@ bool
 _client_is_done(const CLIENT* c, uint64_t s)
 {
     return c->s_unrolled_inst_done >= s;
+}
+
+bool
+_current_uop_is_t_like(inst_ptr inst)
+{
+    return is_t_like_instruction(inst->type) 
+            || (inst->uop_count() > 0 && is_t_like_instruction(inst->current_uop()->type));
 }
 
 template <class T> void
