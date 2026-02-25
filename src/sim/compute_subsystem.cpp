@@ -21,7 +21,7 @@ namespace
 
 using inst_ptr = COMPUTE_SUBSYSTEM::inst_ptr;
 
-constexpr size_t STALL_MONITOR_WINDOW_SIZE{1'000};
+constexpr size_t STALL_MONITOR_MAX_RANGES{2'048};
 
 static std::uniform_real_distribution FPR{0.0,1.0};
 
@@ -65,7 +65,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     inactive_clients_(total_clients - concurrent_clients),
     client_context_table_(total_clients),
     ed_units_(conf.ed_units),
-    stall_monitor_(STALL_MONITOR_WINDOW_SIZE)
+    stall_monitor_(STALL_MONITOR_MAX_RANGES)
 {
     // initialize clients:
     assert(total_clients >= concurrent_clients);
@@ -301,8 +301,6 @@ COMPUTE_SUBSYSTEM::operate()
 
     /* Update stats (pre-execution) */
     had_rpc_stall_this_cycle_ = false;
-
-    stall_monitor_.tick(current_cycle());
 
     /* 1. Update clients and execute context switch if needed */
 
