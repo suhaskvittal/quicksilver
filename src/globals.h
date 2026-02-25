@@ -56,6 +56,11 @@ struct QUBIT
      * */
     cycle_type cycle_available{0};
 
+    /*
+     * These are used for calculating stats
+     * */
+    bool last_operation_was_memory_access{false};
+
     bool        operator==(const QUBIT&) const;
     std::string to_string() const;
 };

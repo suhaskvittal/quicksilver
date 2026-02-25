@@ -13,6 +13,7 @@
 #include <array>
 #include <deque>
 #include <iosfwd>
+#include <optional>
 #include <vector>
 
 ////////////////////////////////////////////////////////////
@@ -139,11 +140,31 @@ public:
     /*
      * Other exposed variables that may be useful:
      *  `deletable` is useful for `std::remove + std::erase` patterns
+     *
      *  `first_ready_cycle` is useful for computing instruction latency
+     *
+     *  `first_ready_cycle_for_current_uop` is useful for analyzing stalls in general, as this is the
+     *      first cycle the uop could possibly execute (ignoring argument readiness and other factors).
+     *
+     *  `first_cycle_with_all_load_results_are_available` is useful for computing memory-related stalls,
+     *      as 
+     *          `first_ready_cycle_for_current_uop - first_cycle_with_all_load_results_available`
+     *      is the length of the stall.
+     *
+     *  `first_cycle_with_available_resource_state` is useful for computing resource-state stalls,
+     *      as 
+     *          `first_ready_cycle_for_current_uop - first_cycle_with_available_resource_state` 
+     *      is the length of the stall.
+     *
      *  `original_unrolled_inst_count` is useful for rotation instructions as `urotseq` may be modified
      * */
-    bool     deletable{false};
-    uint64_t first_ready_cycle{std::numeric_limits<uint64_t>::max()};
+    bool deletable{false};
+
+    std::optional<cycle_type> first_ready_cycle{};
+    std::optional<cycle_type> first_ready_cycle_for_current_uop{};
+    std::optional<cycle_type> first_cycle_with_all_load_results_available{};
+    std::optional<cycle_type> first_cycle_with_available_resource_state{};
+
     uint64_t original_unrolled_inst_count{};
 
     /*

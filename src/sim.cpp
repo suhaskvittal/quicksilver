@@ -84,6 +84,8 @@ walltime_s()
 void
 print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem)
 {
+    using STALL_TYPE = COMPUTE_SUBSYSTEM::STALL_TYPE;
+
     const auto* rotation_subsystem = compute_subsystem->rotation_subsystem();
 
     uint64_t total_t_consumption{compute_subsystem->s_t_gates};
@@ -114,6 +116,10 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
     print_stat_line(out, "RPC_TOTAL", compute_subsystem->s_total_rpc);
     print_stat_line(out, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
     print_stat_line(out, "CYCLES_WITH_RPC_STALLS", compute_subsystem->s_cycles_with_rpc_stalls);
+
+    print_stat_line(out, "ISOLATED_MEMORY_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::MEMORY));
+    print_stat_line(out, "ISOLATED_RESOURCE_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::RESOURCE));
+    print_stat_line(out, "TOTAL_STALLS", compute_subsystem->stall_monitor().cycles_with_stalls());
 
     if (rotation_subsystem != nullptr)
     {
@@ -180,6 +186,7 @@ _print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLI
     double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, compute_subsystem->freq_khz);
 
     double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
+    double mean_memory_access_latency = mean(c->s_memory_access_latency, c->s_memory_accesses);
 
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
@@ -188,6 +195,8 @@ _print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLI
     print_stat_line(out, "    INSTRUCTIONS", c->s_unrolled_inst_done);
     print_stat_line(out, "    CYCLES", c->s_cycle_complete);
     print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
+    print_stat_line(out, "    MEMORY_ACCESSES", c->s_memory_accesses);
+    print_stat_line(out, "    MEAN_MEMORY_ACCESS_LATENCY", mean_memory_access_latency);
 }
 
 ////////////////////////////////////////////////////////////

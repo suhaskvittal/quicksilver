@@ -104,6 +104,11 @@ INSTRUCTION::retire_current_uop()
     delete current_uop_;
     get_next_uop();
 
+    // reset any stats:
+    first_ready_cycle_for_current_uop.reset();
+    first_cycle_with_all_load_results_available.reset();
+    first_cycle_with_available_resource_state.reset();
+
     return false;
 }
 

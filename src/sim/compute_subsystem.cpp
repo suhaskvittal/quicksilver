@@ -21,12 +21,21 @@ namespace
 
 using inst_ptr = COMPUTE_SUBSYSTEM::inst_ptr;
 
+constexpr size_t STALL_MONITOR_WINDOW_SIZE{1'000};
+
 static std::uniform_real_distribution FPR{0.0,1.0};
 
 /*
  * Returns true if the client is complete.
  * */
-bool   _client_is_done(const CLIENT*, uint64_t simulation_instructions);
+bool _client_is_done(const CLIENT*, uint64_t simulation_instructions);
+
+/*
+ * Assigns the second parameter to first iff the first parameter does not
+ * have a value.
+ * */
+template <class T>
+void _assign_if_empty(std::optional<T>&, T);
 
 } // anon
 
@@ -55,7 +64,8 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     active_clients_(concurrent_clients),
     inactive_clients_(total_clients - concurrent_clients),
     client_context_table_(total_clients),
-    ed_units_(conf.ed_units)
+    ed_units_(conf.ed_units),
+    stall_monitor_(STALL_MONITOR_WINDOW_SIZE)
 {
     // initialize clients:
     assert(total_clients >= concurrent_clients);
@@ -113,11 +123,7 @@ COMPUTE_SUBSYSTEM::print_progress(std::ostream& ostrm) const
 {
     std::cout << "cycle " << current_cycle() << " -------------------------------------------------------------";
 
-    double t_bandwidth = mean(s_magic_state_produced_sum, current_cycle());
-    double t_bandwidth_per_s = mean(s_magic_state_produced_sum, current_cycle() / (1e3*freq_khz));
-
     ostrm << "\nwalltime = " << sim::walltime_s() << "s"
-        << "\nt bandwidth (#/cycle) = " << t_bandwidth << " (#/s) = " << t_bandwidth_per_s
         << "\n";
 
     for (auto* c : all_clients_)
@@ -210,6 +216,15 @@ COMPUTE_SUBSYSTEM::done() const
     return all_done;
 }
 
+void
+COMPUTE_SUBSYSTEM::stop_simulation()
+{
+    stall_monitor_.commit_contents();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 const std::vector<CLIENT*>&
 COMPUTE_SUBSYSTEM::clients() const
 {
@@ -226,6 +241,12 @@ const std::vector<COMPUTE_SUBSYSTEM::production_level_type>&
 COMPUTE_SUBSYSTEM::entanglement_distillation_units() const
 {
     return ed_units_;
+}
+
+const COMPUTE_SUBSYSTEM::stall_monitor_type&
+COMPUTE_SUBSYSTEM::stall_monitor() const
+{
+    return stall_monitor_;
 }
 
 bool
@@ -279,10 +300,9 @@ COMPUTE_SUBSYSTEM::operate()
     long progress{0};
 
     /* Update stats (pre-execution) */
-
-    const size_t magic_states_before_exec{count_available_magic_states()};
-    s_magic_state_produced_sum += magic_states_before_exec - magic_states_avail_last_cycle_;
     had_rpc_stall_this_cycle_ = false;
+
+    stall_monitor_.tick(current_cycle());
 
     /* 1. Update clients and execute context switch if needed */
 
@@ -325,9 +345,6 @@ COMPUTE_SUBSYSTEM::operate()
     last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
 
     /* Update stats (post-execution) */
-
-    const size_t magic_states_after_exec{count_available_magic_states()};
-    magic_states_avail_last_cycle_ = magic_states_after_exec;
     if (had_rpc_stall_this_cycle_)
         s_cycles_with_rpc_stalls++;
     
@@ -436,12 +453,7 @@ COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
 long
 COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 {
-    auto front_layer = c->get_ready_instructions(
-                            [&c, cc=current_cycle()] (const auto* inst)
-                            {
-                                return std::all_of(inst->q_begin(), inst->q_end(),
-                                            [&c, cc] (auto q_id) { return c->qubits()[q_id]->cycle_available <= cc; });
-                            });
+    auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
 
     long success_count{0};
     for (auto* inst : front_layer)
@@ -453,17 +465,30 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         {
             std::cerr << "COMPUTE_SUBSYSTEM::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
         }
-    
-        inst->first_ready_cycle = std::min(current_cycle(), inst->first_ready_cycle);
+
+        // translate the operands of the instruction into the actual program qubits
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
         std::array<QUBIT*, 3> operands;
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
-        bool any_not_in_memory = std::any_of(operands.begin(), operands.begin() + executed_inst->qubit_count,
-                                        [this] (QUBIT* q) { return !local_memory_->contains(q); });
-        if (any_not_in_memory && inst->type != INSTRUCTION::TYPE::LOAD && inst->type != INSTRUCTION::TYPE::COUPLED_LOAD_STORE)
-            continue; 
+        update_instruction_stats_on_fetch(inst, operands);
+
+        // check if the operands are ready:
+        bool any_not_available_this_cycle{false},
+             any_not_locally_available{false};
+        for (size_t i = 0; i < executed_inst->qubit_count; i++)
+        {
+            QUBIT* q = operands[i];
+            any_not_available_this_cycle |= (q->cycle_available > current_cycle());
+            any_not_locally_available |= !local_memory_->contains(q);
+        }
+    
+        // note that `any_not_locally_available` does not matter if the instruction is a load:
+        any_not_locally_available &= (inst->type != INSTRUCTION::TYPE::LOAD) 
+                                        && (inst->type != INSTRUCTION::TYPE::COUPLED_LOAD_STORE);
+        if (any_not_available_this_cycle || any_not_locally_available)
+            continue;
         
         // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
         // and do other actions:
@@ -475,7 +500,16 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         if (is_rotation_instruction(inst->type) && GL_T_GATE_TELEPORTATION_MAX > 0)
         {
             QUBIT* q = operands[0];
-            auto result = do_rotation_gate_with_teleportation(inst, q, GL_T_GATE_TELEPORTATION_MAX);
+            auto result = do_rotation_gate_with_teleportation(inst, q, GL_T_GATE_TELEPORTATION_MAX,
+                                [] (const auto*, const auto*) { return true; },  // loop predicate
+                                [this, &operands] (auto* inst, auto* uop)        // iter callback
+                                {
+                                    update_instruction_stats_on_fetch(inst, operands);
+                                },
+                                [this] (auto* inst, auto* uop)
+                                {
+                                    update_instruction_stats_before_retire(inst);
+                                });
             success_count += result.progress;
             if (inst->uops_retired() == inst->uop_count())
                 retire_instruction(c, inst, result.latency);
@@ -485,8 +519,11 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
             auto result = execute_instruction(executed_inst, std::move(operands));
             success_count += result.progress;
             if (result.progress)
+            {
+                update_instruction_stats_before_retire(inst);
                 if (inst->uop_count() == 0 || inst->retire_current_uop())
                     retire_instruction(c, inst, result.latency);
+            }
         }
     }
 
@@ -494,6 +531,68 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
     if (success_count)
         success_count += fetch_and_execute_instructions_from_client(c);
     return success_count;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE_SUBSYSTEM::update_instruction_stats_on_fetch(inst_ptr inst, std::array<QUBIT*, 3> operands)
+{
+    _assign_if_empty(inst->first_ready_cycle, current_cycle());
+    _assign_if_empty(inst->first_ready_cycle_for_current_uop, current_cycle());
+
+    if (!inst->first_cycle_with_all_load_results_available.has_value())
+    {
+        cycle_type latest_load_result_cycle{current_cycle()};
+        for (size_t i = 0; i < inst->qubit_count; i++)
+            if (operands[i]->last_operation_was_memory_access)
+                latest_load_result_cycle = std::max(operands[i]->cycle_available, latest_load_result_cycle);
+        inst->first_cycle_with_all_load_results_available = latest_load_result_cycle;
+    }
+    
+    bool current_uop_is_t_like = is_t_like_instruction(inst->type) 
+                                    || (inst->uop_count() > 0 && is_t_like_instruction(inst->current_uop()->type));
+    if (!inst->first_cycle_with_available_resource_state.has_value())
+    {
+        if (current_uop_is_t_like)
+        {
+            bool any_magic_state_avail = std::any_of(top_level_t_factories_.begin(),
+                                                     top_level_t_factories_.end(),
+                                                     [] (const auto* f) { return f->buffer_occupancy() > 0; });
+            if (any_magic_state_avail)
+                _assign_if_empty(inst->first_cycle_with_available_resource_state, current_cycle());
+        }
+        else
+        {
+            inst->first_cycle_with_available_resource_state = current_cycle();
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+COMPUTE_SUBSYSTEM::update_instruction_stats_before_retire(inst_ptr inst)
+{
+    /*
+     * Timeline:
+     *      
+     *   S --------- X ------ Y ----------- R
+     *
+     *  S = first ready cycle for current uop,
+     *  X = either end of memory stall or resource stall
+     *  Y = other stall end
+     *  R = retire cycle (current_cycle)
+     * */
+
+    cycle_type s = *inst->first_ready_cycle_for_current_uop,
+               x = *inst->first_cycle_with_all_load_results_available,
+               y = *inst->first_cycle_with_available_resource_state;
+
+    stall_monitor_.add_stall_range(STALL_TYPE::MEMORY, s, x, false);
+    stall_monitor_.add_stall_range(STALL_TYPE::RESOURCE, s, y, false);
 }
 
 ////////////////////////////////////////////////////////////
@@ -629,6 +728,9 @@ COMPUTE_SUBSYSTEM::get_next_ready_cycle_for_instruction(CLIENT* c, inst_ptr inst
             {
                 for (const PRODUCER_BASE* _p : level)
                 {
+                    if (_p->buffer_occupancy() + _p->output_count > _p->buffer_capacity)
+                        continue;
+
                     const auto* p = static_cast<const producer::ENT_DISTILLATION*>(_p);
                     cycle_type c = p->get_next_progression_cycle();
                     c = convert_cycles_between_frequencies(c, p->freq_khz, freq_khz);
@@ -664,6 +766,13 @@ bool
 _client_is_done(const CLIENT* c, uint64_t s)
 {
     return c->s_unrolled_inst_done >= s;
+}
+
+template <class T> void
+_assign_if_empty(std::optional<T>& x, T y)
+{
+    if (!x.has_value())
+        x = y;
 }
 
 }

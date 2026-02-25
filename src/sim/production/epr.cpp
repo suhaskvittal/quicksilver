@@ -61,24 +61,7 @@ cycle_type
 ENT_DISTILLATION::get_next_progression_cycle() const
 {
     const cycle_type next_avail_cycle = std::max(cycle_available_, current_cycle()+1);
-
-    // not waiting for resources from previous level
-    if (step_ != 0 || inputs_available_ >= input_count || previous_level.empty())
-        return next_avail_cycle;
-
-    // compute min ready cycle across previous_level
-    bool any_have_available_state{false};
-    cycle_type previous_level_avail_cycle{next_avail_cycle};
-    for (const PRODUCER_BASE* _p : previous_level)
-    {
-        const auto* p = static_cast<const ENT_DISTILLATION*>(_p);
-        cycle_type c = p->get_next_progression_cycle();
-        c = convert_cycles_between_frequencies(c, p->freq_khz, freq_khz);
-        previous_level_avail_cycle = std::min(c, previous_level_avail_cycle);
-
-        any_have_available_state |= p->buffer_occupancy() > 0;
-    }
-    return any_have_available_state ? next_avail_cycle : previous_level_avail_cycle;
+    return next_avail_cycle;
 }
 
 ////////////////////////////////////////////////////////////

@@ -49,8 +49,15 @@ CLIENT::~CLIENT()
 void
 CLIENT::retire_instruction(inst_ptr inst)
 {
+    cycle_type inst_latency = inst->cycle_done - *inst->first_ready_cycle;
+
     if (is_memory_access(inst->type))
+    {
+        s_memory_accesses++;
+        s_memory_access_latency += inst_latency;
+
         goto kill_instruction;
+    }
 
     s_inst_done++;
     s_unrolled_inst_done += inst->original_unrolled_inst_count;
@@ -60,7 +67,7 @@ CLIENT::retire_instruction(inst_ptr inst)
 
     if (is_rotation_instruction(inst->type))
     {
-        s_rotation_latency += inst->cycle_done - inst->first_ready_cycle;
+        s_rotation_latency += inst_latency;
         s_total_rotation_uops += inst->original_unrolled_inst_count;
 
         s_t_gates_done += std::count_if(inst->urotseq.begin(), inst->urotseq.end(), 

@@ -36,6 +36,9 @@ public:
     uint64_t s_rotation_latency{0};
     uint64_t s_total_rotation_uops{0};
 
+    uint64_t s_memory_accesses{0};
+    uint64_t s_memory_access_latency{0};
+
     const std::string    trace_file;
     const client_id_type id;
 private:

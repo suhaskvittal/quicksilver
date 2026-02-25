@@ -90,6 +90,7 @@ main(int argc, char* argv[])
     int64_t skip_threshold;
     bool    jit;
     std::string regime;
+    int64_t total_inst;
 
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
@@ -116,6 +117,9 @@ main(int argc, char* argv[])
         .optional("", "--regime", 
                     "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
                     regime, "T")
+        .optional("", "--total-program-instructions", 
+                    "Total instructions in the program. Used for resource estimates. Does not affect performance.",
+                    total_inst, 1'000'000'000)
 
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
@@ -322,6 +326,7 @@ main(int argc, char* argv[])
         }
     }
     while (!compute_subsystem->done());
+    compute_subsystem->stop_simulation();
 
     /* print stats */
 
@@ -356,7 +361,7 @@ main(int argc, char* argv[])
 
     for (auto* c : compute_subsystem->clients())
     {
-        auto f = compute_application_fidelity(1'000'000'000, c, compute_subsystem);
+        auto f = compute_application_fidelity(total_inst, c, compute_subsystem);
         std::cout << "CLIENT_" << static_cast<int>(c->id) << "_FIDELITY\n";
         print_stat_line(std::cout, "    OVERALL", f.overall);
         print_stat_line(std::cout, "    COMPUTE_SUBSYSTEM", f.compute_subsystem);

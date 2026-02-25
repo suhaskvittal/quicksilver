@@ -285,13 +285,15 @@ ROTATION_SUBSYSTEM::operate()
                                     ? GL_T_GATE_TELEPORTATION_MAX
                                     : 0;
 
-    auto result = do_rotation_gate_with_teleportation_while_predicate_holds(inst, {q}, num_teleports,
-                    [this, req] (const inst_ptr x, const inst_ptr uop)
+    auto result = do_rotation_gate_with_teleportation(inst, {q}, num_teleports,
+                    [this, req] (const auto* x, const auto* uop)
                     {
                         const size_t m = count_available_magic_states();
                         const size_t min_t_count = 1;
                         return req->critical || (m > min_t_count);
-                    });
+                    },
+                    [] (const auto*, const auto*) {},
+                    [] (const auto*, const auto*) {});
     progress += result.progress;
     if (result.progress > 0 && inst->uops_retired() == inst->uop_count())
     {

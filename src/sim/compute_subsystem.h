@@ -8,6 +8,7 @@
 
 #include "sim/compute_base.h"
 #include "sim/rotation_subsystem.h"
+#include "sim/stall_monitor.h"
 
 #include <array>
 #include <deque>
@@ -57,6 +58,18 @@ public:
 
     enum class RPC_LOOKUP_RESULT { NOT_FOUND, IN_PROGRESS, NEEDS_CORRECTION, RETIRE };
 
+    /*
+     * Stall monitor:
+     *  `STALL_TYPE` contains the stalls tracked by the compute subsystem. Feel free
+     *      to add to this type if you want new stats.
+     *  `STALL_MONITOR` tracks where these stalls occur.
+     * */
+    enum class STALL_TYPE { MEMORY, RESOURCE, RPC, SIZE };
+    using stall_monitor_type = STALL_MONITOR<static_cast<size_t>(STALL_TYPE::SIZE), STALL_TYPE>;
+
+    /*
+     * Constants:
+     * */
     const size_t   concurrent_clients;
     const size_t   total_clients;
     const uint64_t simulation_instructions;
@@ -66,7 +79,6 @@ public:
     /*
      * Statistics:
      * */
-    uint64_t s_magic_state_produced_sum{0}; // note that this is used to compute T bandwidth
     uint64_t s_context_switches{0};
 
     uint64_t s_total_rotations{0};
@@ -100,12 +112,6 @@ private:
     std::vector<std::pair<QUBIT*, QUBIT*>> context_switch_memory_access_buffer_;
 
     /*
-     * For calculating `s_magic_state_avail_sum` -- this is the number of magic states
-     * available last cycle
-     * */
-    size_t magic_states_avail_last_cycle_{0};
-
-    /*
      * Subsystem for pre-computed rotation gates. If `nullptr`, then it is disabled.
      * */
     ROTATION_SUBSYSTEM* rotation_subsystem_{nullptr};
@@ -120,6 +126,11 @@ private:
      * This may be empty.
      * */
     std::vector<production_level_type> ed_units_;
+
+    /*
+     * `stall_monitor` manages statistics related to stalls:
+     * */
+    stall_monitor_type stall_monitor_;
 public:
     COMPUTE_SUBSYSTEM(double                     freq_khz,
                         std::vector<std::string> client_trace_files,
@@ -140,9 +151,16 @@ public:
      * */
     bool done() const;
 
+    /*
+     * This function should be called at the end of the simulation. This is used to handle
+     * cleanup for any stats, such as those handled by the `stall_monitor_`.
+     * */
+    void stop_simulation();
+
     const std::vector<CLIENT*>&               clients() const;
     ROTATION_SUBSYSTEM*                       rotation_subsystem() const;
     const std::vector<production_level_type>& entanglement_distillation_units() const;
+    const stall_monitor_type&                 stall_monitor() const;
 
     /*
      * rpc = "Rotation Pre-Computation". This returns true if `rotation_subsystem_ != nullptr`
@@ -193,6 +211,27 @@ private:
     long fetch_and_execute_instructions_from_client(CLIENT*);
 
     /*
+     * Updates instruction stats when it is iterated through the `front_layer` in 
+     * `fetch_and_execute_instructions_from_client`. This will occur once all of
+     * its dependencies are retired, regardless of the ready status of its operands.
+     *
+     * Note that this function is called every time it appears, which can occur 
+     * if the instruction could not execute the first time it appeared. Ensure
+     * that any logic does not assume that this is the first call for the
+     * input instruction.
+     * */
+    void update_instruction_stats_on_fetch(inst_ptr, std::array<QUBIT*, 3> operands);
+
+    /*
+     * This function is only called once per uop (or once total if the instruction
+     * has no uops).
+     *
+     * Note that `retire_instruction` is used to commit stats, so stat updates should
+     * happen here.
+     * */
+    void update_instruction_stats_before_retire(inst_ptr);
+
+    /*
      * Performs all rpc operations on an instruction (logical flow is handled within function).
      * Returns true if instruction should be skipped in the iteration of 
      * `fetch_and_execute_instructions_from_client()`
@@ -229,6 +268,7 @@ private:
      * instruction cannot be executed, this function returns std::nullopt.
      * */
     std::optional<cycle_type> get_next_ready_cycle_for_instruction(CLIENT*, inst_ptr) const;
+
 };
 
 ////////////////////////////////////////////////////////////

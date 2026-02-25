@@ -13,21 +13,6 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-/*
- * Helper function declarations:
- * */
-
-namespace
-{
-
-template <class ITER>
-void _update_available_cycle(ITER begin, ITER end, cycle_type);
-
-}  // anon
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 COMPUTE_BASE::COMPUTE_BASE(std::string_view      name,
                            double                freq_khz,
                            size_t                _code_distance,
@@ -118,7 +103,15 @@ COMPUTE_BASE::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
 
     // update availability on success
     if (result.progress > 0)
-        _update_available_cycle(args.begin(), args.begin()+inst->qubit_count, current_cycle()+result.latency);
+    {
+        for (size_t i = 0; i < inst->qubit_count; i++)
+        {
+            auto* q = args[i];
+            q->cycle_available = current_cycle() + result.latency;
+            q->last_operation_was_memory_access = is_memory_access(inst->type);
+        }
+    }
+
     return result;
 }
 
@@ -221,16 +214,6 @@ COMPUTE_BASE::do_coupled_memory_access(inst_ptr inst, QUBIT* ld, QUBIT* st)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_BASE::execute_result_type
-COMPUTE_BASE::do_rotation_gate_with_teleportation(inst_ptr inst, QUBIT* q, size_t max_teleports)
-{
-    return do_rotation_gate_with_teleportation_while_predicate_holds(inst, q, max_teleports,
-                [] (const auto*, const auto*) { return true; });
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
 COMPUTE_BASE::count_available_magic_states() const
 {
@@ -239,28 +222,6 @@ COMPUTE_BASE::count_available_magic_states() const
                                 std::plus<size_t>{},
                                 [] (const auto* f) { return f->buffer_occupancy(); });
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-/* HELPER FUNCTION DEFINITIONS START HERE */
-
-namespace
-{
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class ITER> void
-_update_available_cycle(ITER begin, ITER end, cycle_type c)
-{
-    std::for_each(begin, end, [c] (auto* q) { q->cycle_available = c; });
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
