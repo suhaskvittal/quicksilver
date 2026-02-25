@@ -23,7 +23,7 @@ namespace
 PRODUCER_BASE* _alloc(ED_SPECIFICATION);
 size_t         _physical_qubit_count(ED_SPECIFICATION);
 double         _bandwidth(ED_SPECIFICATION, double);
-double         _consumption_rate(ED_SPECIFICATION);
+double         _consumption_rate(ED_SPECIFICATION, double);
 
 size_t _compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_inner_min);
 
@@ -95,17 +95,31 @@ _bandwidth(ED_SPECIFICATION s, double input_error_rate)
     const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
+    
+    if (input_error_rate >= 0.0)
+    {
+        const size_t dm_in = surface_code_distance_for_target_logical_error_rate(input_error_rate, GL_PHYSICAL_ERROR_RATE);
+        rounds += dm_in * s.input_count;
+    }
+
     double probability_of_success = std::pow(1 - input_error_rate, s.input_count);
     double rounds_until_success = rounds / probability_of_success;
     return (1e3 * freq_khz * s.output_count) / rounds_until_success;
 }
 
 double
-_consumption_rate(ED_SPECIFICATION s)
+_consumption_rate(ED_SPECIFICATION s, double input_error_rate)
 {
     const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
+    
+    if (input_error_rate >= 0.0)
+    {
+        const size_t dm_in = surface_code_distance_for_target_logical_error_rate(input_error_rate, GL_PHYSICAL_ERROR_RATE);
+        rounds += dm_in * s.input_count;
+    }
+
     return (1e3 * freq_khz * s.input_count) / rounds;
 }
 

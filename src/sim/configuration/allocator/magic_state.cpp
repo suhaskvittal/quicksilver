@@ -30,7 +30,7 @@ namespace
 PRODUCER_BASE* _alloc(FACTORY_SPECIFICATION);
 size_t         _physical_qubit_count(FACTORY_SPECIFICATION);
 double         _bandwidth(FACTORY_SPECIFICATION, double);
-double         _consumption_rate(FACTORY_SPECIFICATION);
+double         _consumption_rate(FACTORY_SPECIFICATION, double);
 
 } // anon
 
@@ -127,7 +127,7 @@ _bandwidth(FACTORY_SPECIFICATION s, double)
 ////////////////////////////////////////////////////////////
 
 double
-_consumption_rate(FACTORY_SPECIFICATION s)
+_consumption_rate(FACTORY_SPECIFICATION s, double)
 {
     assert(!s.is_cultivation);
 

@@ -6,6 +6,7 @@
 #include "sim/configuration/resource_estimation.h"
 
 #include <cassert>
+#include <iostream>
 
 namespace sim
 {
@@ -25,6 +26,11 @@ throughput_aware_allocation(size_t b,
                             const BANDWIDTH_ESTIMATOR& f_est_bandwidth,
                             const CONSUMPTION_ESTIMATOR& f_est_consumption)
 {
+    constexpr bool verbose{true};
+
+    if (verbose)
+        std::cout << "throughput_aware_allocation ---------------------------------------------\n";
+
     /* 1. Identify physical qubit overheads for each production level */
     std::vector<size_t> pq_counts(specs.size());
     std::vector<double> production_rates(specs.size());
@@ -32,9 +38,18 @@ throughput_aware_allocation(size_t b,
     for (size_t i = 0; i < specs.size(); i++)
     {
         const auto& s = specs[i];
+        double input_error_rate = (i == 0) ? -1.0 : specs[i-1].output_error_rate;
+
         pq_counts[i] = f_est_qubit_count(s);
-        production_rates[i] = f_est_bandwidth(s, (i == 0) ? -1.0 : specs[i-1].output_error_rate);
-        consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s);
+        production_rates[i] = f_est_bandwidth(s, input_error_rate);
+        consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s, input_error_rate);
+
+        if (verbose)
+        {
+            std::cout << "L" << i+1 << ": production rate = " << production_rates[i]
+                    << ", consumption rate = " << consumption_rates[i]
+                    << "\n";
+        }
     }
 
     const size_t pq_min_required = std::reduce(pq_counts.begin(), pq_counts.end(), size_t{0});
@@ -58,7 +73,7 @@ throughput_aware_allocation(size_t b,
     {
         const double prod_rate_prev_level = production_rates[i-1],
                      cons_rate = consumption_rates[i];
-        size_t prev_level_count = static_cast<size_t>(std::round(cons_rate / prod_rate_prev_level));
+        size_t prev_level_count = static_cast<size_t>(std::ceil(cons_rate / prod_rate_prev_level));
         pq_counts_sat[i] = prev_level_count*pq_counts_sat[i-1] + pq_counts[i];
         counts_for_sat_alloc[i-1] = prev_level_count;
     }
@@ -108,6 +123,15 @@ throughput_aware_allocation(size_t b,
         }
 
         curr_tp = estimate_throughput_of_allocation(specs, counts, f_est_bandwidth, f_est_consumption);
+
+        if (verbose)
+        {
+            std::cout << "prev_tp = " << prev_tp << ", curr_tp = " << curr_tp << ", delta =";
+            for (size_t i = 0; i < counts.size(); i++)
+                std::cout << " " << (counts[i]-prev_counts[i]);
+            std::cout << "\n";
+        }
+
         if (prev_tp > curr_tp - 1e-6)
         {
             counts = std::move(prev_counts);
@@ -120,6 +144,9 @@ throughput_aware_allocation(size_t b,
                 qubit_count += pq_counts[i] * (counts[i]-prev_counts[i]);
             remaining -= qubit_count;
         }
+
+        if (verbose)
+            std::cout << "\tremaining: " << remaining << " of " << b << "\n";
     }
     while (remaining >= pq_min_required);
 
@@ -156,7 +183,7 @@ estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
     double prod_rate = counts[0] * f_bandwidth_est(specs[0], -1.0);
     for (size_t i = 1; i < specs.size(); i++)
     {
-        double cons_rate = counts[i] * f_consumption_est(specs[i]);
+        double cons_rate = counts[i] * f_consumption_est(specs[i], specs[i-1].output_error_rate);
         // estimate the ratio between the consumption and production rates
         //
         //  if `prod_rate > cons_rate`, then the new production rate for this level is

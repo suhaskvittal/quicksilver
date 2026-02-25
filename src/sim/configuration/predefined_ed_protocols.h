@@ -32,15 +32,17 @@ namespace ed
  * See: https://dspace.mit.edu/bitstream/handle/1721.1/162579/3695053.3731069.pdf?sequence=1&isAllowed=y
  *
  * 0 = [3,1,3]_x * [2,1,2]_y * [2,1,2]_x * [[6,4,2]]  -- output error is 1e-15
- * 1 = [[17,9,4]] * [[25,18,3]]                       -- output error is 3e-13
- * 2 = [[14,6,4]] * [[16,14,2]]                       -- output error is 1e-9
- * 3 = [2,1,2]_y * [2,1,2]_x * [[11,5,3]]             -- output error is 2e-10
+ * 1 = [[17,9,4]] * [[25,18,3]]                       -- output error is 3e-13      
+ *
+ * 2 = [2,1,2]_x * [2,1,2]_y * [2,1,2]_x * [[4,2,2]]  -- output error is 4.5e-12    * found using code
+ * 3 = [[4,2,2]] * [[14,6,4]]                         -- output error is 7.4e-11    * found using code
  * */
 std::vector<ED_SPECIFICATION> protocol_0(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
 std::vector<ED_SPECIFICATION> protocol_1(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
-
 std::vector<ED_SPECIFICATION> protocol_2(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
 std::vector<ED_SPECIFICATION> protocol_3(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
+std::vector<ED_SPECIFICATION> protocol_4(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
+std::vector<ED_SPECIFICATION> protocol_5(int64_t c_round_time_ns, int64_t ll_buffer_capacity);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

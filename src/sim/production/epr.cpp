@@ -114,21 +114,20 @@ ENT_DISTILLATION::production_step()
     if (step_ == 0 && inputs_available_ < input_count)
     {
         // check if a previous level has an available EPR pair to provide:
-        while (inputs_available_ < input_count)
-        {
-            auto p_it = std::find_if(previous_level.begin(), previous_level.end(),
-                                [] (const auto* p) { return p->buffer_occupancy() > 0; });
-            if (p_it == previous_level.end())
-                return false;
-            auto* p = *p_it;
-            size_t c = std::min(p->buffer_occupancy(), input_count - inputs_available_);
-            p->consume(c);
-            error_probability_ += c * p->output_error_probability;
-            inputs_available_ += c;
-        }
-    }
+        auto p_it = std::find_if(previous_level.begin(), previous_level.end(),
+                            [] (const auto* p) { return p->buffer_occupancy() > 0; });
+        if (p_it == previous_level.end())
+            return false;
+        auto* p = *p_it;
+        p->consume(1);
+        error_probability_ += p->output_error_probability;
+        inputs_available_++;
 
-    if (inputs_available_ >= input_count)
+        // don't need full measurement distance since error rate of state is already
+        // is determined by previous level
+        cycle_available_ = current_cycle() + static_cast<ENT_DISTILLATION*>(p)->measurement_distance;
+    }
+    else if (inputs_available_ >= input_count)
     {
         step_++;
         cycle_available_ = current_cycle() + measurement_distance;

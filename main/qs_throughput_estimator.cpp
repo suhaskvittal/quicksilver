@@ -7,6 +7,7 @@
 #include "globals.h"
 #include "sim.h"
 #include "sim/configuration/allocator/impl.h"
+#include "sim/configuration/predefined_ed_protocols.h"
 #include "sim/operable.h"
 
 #include <algorithm>
@@ -43,12 +44,16 @@ main(int argc, char* argv[])
 {
     int64_t     physical_qubit_budget;
     int64_t     sim_cycles;
+    int64_t     epr_protocol_id;
     std::string production_type;
 
     ARGPARSE()
         .optional("-q", "--budget",  "Physical qubit budget",         physical_qubit_budget, 12'000)
         .optional("-c", "--cycles",  "Number of simulation cycles",   sim_cycles,            1'000'000)
         .optional("-t", "--type",    "Production type (magic, epr)",  production_type,       std::string("magic"))
+
+        .optional("", "--epr-protocol-id", "ED Protocol ID", epr_protocol_id, 3)
+
         .parse(argc, argv);
 
     sim::configuration::ALLOCATION alloc;
@@ -88,44 +93,30 @@ main(int argc, char* argv[])
     }
     else if (production_type == "epr")
     {
-        sim::configuration::ED_SPECIFICATION l1_spec  // [3,1,3]_x
+        std::vector<sim::configuration::ED_SPECIFICATION> specs;
+        switch (epr_protocol_id)
         {
-            .output_error_rate=1e-2,
-            .input_count=3,
-            .output_count=1,
-            .dx=3,
-            .dz=1
-        };
+        case 0:
+            specs = sim::configuration::ed::protocol_0(1200000, 1);
+            break;
+        case 1:
+            specs = sim::configuration::ed::protocol_1(1200000, 1);
+            break;
+        case 2:
+            specs = sim::configuration::ed::protocol_2(1200000, 1);
+            break;
+        case 3:
+            specs = sim::configuration::ed::protocol_3(1200000, 1);
+            break;
+        case 4:
+            specs = sim::configuration::ed::protocol_4(1200000, 1);
+            break;
+        case 5:
+            specs = sim::configuration::ed::protocol_5(1200000, 1);
+            break;
+        }
 
-        sim::configuration::ED_SPECIFICATION l2_spec   // [2,1,2]_y
-        {
-            .output_error_rate=1e-4,
-            .input_count=2,
-            .output_count=1,
-            .dx=2,
-            .dz=2
-        };
-
-        sim::configuration::ED_SPECIFICATION l3_spec   // [2,1,2]_x
-        {
-            .output_error_rate=2e-8,
-            .input_count=2,
-            .output_count=1,
-            .dx=2,
-            .dz=1
-        };
-
-        sim::configuration::ED_SPECIFICATION l4_spec   // [[6,4,2]]
-        {
-            .buffer_capacity=4,
-            .output_error_rate=3e-15,
-            .input_count=6,
-            .output_count=4,
-            .dx=2,
-            .dz=2
-        };
-
-        alloc = sim::configuration::allocate_entanglement_distillation_units(physical_qubit_budget, {l1_spec, l2_spec, l3_spec, l4_spec});
+        alloc = sim::configuration::allocate_entanglement_distillation_units(physical_qubit_budget, specs);
     }
     else
     {

@@ -186,7 +186,7 @@ main(int argc, char* argv[])
 
     // from `regime`, set parameters:
     const size_t compute_code_distance = get_compute_code_distance(regime),
-                 memory_code_distance = get_memory_code_distance(regime);
+                 memory_code_distance = 18;//get_memory_code_distance(regime);
 
     const size_t memory_block_physical_qubits = sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
     const size_t memory_block_capacity = sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
@@ -545,7 +545,7 @@ get_default_ed_specifications(std::string_view regime,
                                 int64_t c_round_time_ns,
                                 int64_t ll_buffer_capacity)
 {
-    return sim::configuration::ed::protocol_1(c_round_time_ns, ll_buffer_capacity);
+    return sim::configuration::ed::protocol_3(c_round_time_ns, ll_buffer_capacity);
 }
 
 ////////////////////////////////////////////////////////////
