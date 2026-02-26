@@ -70,6 +70,15 @@ std::vector<ED_SPECIFICATION>      get_default_ed_specifications(std::string_vie
                                                                     int64_t ll_buffer_capacity);
 
 /*
+ * Computes the number of physical qubits required for ED on the faster substrate.
+ * Unlike the slower substrate, the faster substrate can highly serialize ED, and does
+ * not need many ED units either, so the overhead of ED is just the number of physical
+ * qubits required for the last level of ED (first argument) and the amount of idling
+ * time (can be computed using `substrate_mismatch_factor` and `ED_SPECIFICATION`)
+ * */
+size_t faster_substrate_ed_overhead(ED_SPECIFICATION&, int64_t substrate_mismatch_factor);
+
+/*
  * Computes the probability of success post-simulation
  * */
 FIDELITY_RESULT compute_application_fidelity(uint64_t scale_to_instructions, sim::CLIENT*, sim::COMPUTE_SUBSYSTEM*);
@@ -100,6 +109,7 @@ main(int argc, char* argv[])
     bool    use_remote_memory;
     int64_t epr_physical_qubit_budget;
     int64_t epr_ll_buffer_capacity;
+    int64_t substrate_mismatch_factor;
 
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
@@ -154,6 +164,9 @@ main(int argc, char* argv[])
         .optional("", "--epr-ll-buffer-capacity",
                         "Number of EPR pairs stored in a last-level ED buffer",
                         epr_ll_buffer_capacity, 4)
+        .optional("", "--substrate-mismatch-factor",
+                        "Gate latency difference between slower and faster substrate",
+                        substrate_mismatch_factor, 1000)
 
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
@@ -208,11 +221,11 @@ main(int argc, char* argv[])
     sim::configuration::ALLOCATION ed_alloc;
     if (use_remote_memory)
     {
-        int64_t scale_factor = memory_syndrome_extraction_round_time_ns / 1300;
-        auto ed_specs = get_default_ed_specifications(regime,
-                                                        compute_syndrome_extraction_round_time_ns*scale_factor,
+        auto ed_specs = get_default_ed_specifications(regime, 
+                                                        compute_syndrome_extraction_round_time_ns*substrate_mismatch_factor, 
                                                         epr_ll_buffer_capacity);
         ed_alloc = sim::configuration::allocate_entanglement_distillation_units(epr_physical_qubit_budget, ed_specs);
+        ed_alloc.physical_qubit_count += faster_substrate_ed_overhead(ed_specs.back(), substrate_mismatch_factor);
         conf.ed_units = ed_alloc.producers;
     }
 
@@ -351,7 +364,7 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", ms_alloc.physical_qubit_count);
 
     if (use_remote_memory)
-        print_stat_line(std::cout, "ED_PHYSICAL_QUBITS_PER_SIDE", ed_alloc.physical_qubit_count);
+        print_stat_line(std::cout, "ED_PHYSICAL_QUBITS", ed_alloc.physical_qubit_count);
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
 
@@ -553,7 +566,53 @@ get_default_ed_specifications(std::string_view regime,
                                 int64_t c_round_time_ns,
                                 int64_t ll_buffer_capacity)
 {
-    return sim::configuration::ed::protocol_3(c_round_time_ns, ll_buffer_capacity);
+    auto specs = sim::configuration::ed::protocol_3(ll_buffer_capacity);
+    for (auto& s : specs)
+        s.syndrome_extraction_round_time_ns = c_round_time_ns;
+    return specs;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+faster_substrate_ed_overhead(ED_SPECIFICATION& s, int64_t substrate_mismatch_factor)
+{
+    // first, compute measurement distance for slower substrate
+    const size_t slow_dm = sim::configuration::surface_code_distance_for_target_logical_error_rate(s.output_error_rate,
+                                                                                                    sim::GL_PHYSICAL_ERROR_RATE);
+
+    // use this to compute idle time
+    const size_t idle_cycles = (s.output_count-s.input_count) * slow_dm * substrate_mismatch_factor;
+
+    // there is no good analytical expression for the faster substrate code distance, but we know it is 
+    // greater than or equal to `slow_dm`, so we can work from there
+    size_t dm{slow_dm};
+    auto f_error_rate = [idle_cycles, e_protocol=s.output_error_rate] (size_t d)
+                        {
+                            double ler = sim::configuration::surface_code_logical_error_rate(d, sim::GL_PHYSICAL_ERROR_RATE);
+                            double log_idle_fidelity = mean(idle_cycles, d) * std::log(1-ler);
+                            return 1 - (1-e_protocol)*std::exp(log_idle_fidelity);
+                        };
+    while (f_error_rate(dm) > s.output_error_rate)
+        dm++;
+
+    size_t idx = dm / s.dx,
+           idz = dm / s.dz;
+    size_t p = sim::configuration::surface_code_physical_qubit_count(idx,idz) * s.input_count;
+    p += p/2; // assume routing overheads add 50%
+
+    std::cout << "faster_substrate_ed_overhead: [[ " << s.input_count 
+                << ", " << s.output_count
+                << ", dx=" << s.dx 
+                << ", dz=" << s.dz 
+                << " ]] uses inner codes with distance"
+                << " dx = " << idx 
+                << ", dz = " << idz
+                << "\tphysical qubit overhead = " << p
+                << "\n";
+    
+    return p;
 }
 
 ////////////////////////////////////////////////////////////

@@ -51,11 +51,20 @@ struct FACTORY_SPECIFICATION
 struct ED_SPECIFICATION /* entanglement distillation */
 {
     /* Defaults are for distillation via a [3, 1, 3]_x code */
-    uint64_t syndrome_extraction_round_time_ns{1200};
     size_t   buffer_capacity{1};
     double   output_error_rate{1e-2};
     size_t   input_count{3};
     size_t   output_count{1};
+
+    /*
+     * Syndrome extraction latency should be for the slower substrate.
+     * */
+    uint64_t syndrome_extraction_round_time_ns{1200};
+
+    /*
+     * `is_last_level` is needed for resource estimates
+     * */
+    bool is_last_level{false};
 
     /*
      * `dx` and `dz` are parameters of the code used for distillation, not the

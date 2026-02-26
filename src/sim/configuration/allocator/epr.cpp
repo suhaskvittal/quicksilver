@@ -70,6 +70,7 @@ _physical_qubit_count(ED_SPECIFICATION s)
     const size_t idz = _compute_inner_code_distance(d_base, s.dz, idmin);
 
     size_t p = surface_code_physical_qubit_count(idx, idz) * s.input_count;
+    p *= 2;  // multiply by 2 to account for routing overheads.
 
     std::cout << "ED::_physical_qubit_count: [[ " << s.input_count 
                 << ", " << s.output_count
@@ -129,8 +130,6 @@ _compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_inner_m
     size_t d_inner = static_cast<size_t>( std::ceil(mean(d_required, d_outer)) );
     if (d_inner <= d_inner_min)
         return d_inner_min;
-    if ((d_inner & 1) == 0)
-        d_inner++;
     return d_inner;
 }
 

@@ -97,25 +97,27 @@ main(int argc, char* argv[])
         switch (epr_protocol_id)
         {
         case 0:
-            specs = sim::configuration::ed::protocol_0(1200000, 1);
+            specs = sim::configuration::ed::protocol_0(1);
             break;
         case 1:
-            specs = sim::configuration::ed::protocol_1(1200000, 1);
+            specs = sim::configuration::ed::protocol_1(1);
             break;
         case 2:
-            specs = sim::configuration::ed::protocol_2(1200000, 1);
+            specs = sim::configuration::ed::protocol_2(1);
             break;
         case 3:
-            specs = sim::configuration::ed::protocol_3(1200000, 1);
+            specs = sim::configuration::ed::protocol_3(1);
             break;
         case 4:
-            specs = sim::configuration::ed::protocol_4(1200000, 1);
+            specs = sim::configuration::ed::protocol_4(1);
             break;
         case 5:
-            specs = sim::configuration::ed::protocol_5(1200000, 1);
+            specs = sim::configuration::ed::protocol_5(1);
             break;
         }
 
+        for (auto& s : specs)
+            s.syndrome_extraction_round_time_ns = 1'200'000;
         alloc = sim::configuration::allocate_entanglement_distillation_units(physical_qubit_budget, specs);
     }
     else
