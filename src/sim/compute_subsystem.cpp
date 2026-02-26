@@ -543,10 +543,14 @@ COMPUTE_SUBSYSTEM::update_instruction_stats_on_fetch(inst_ptr inst, std::array<Q
     _assign_if_empty(inst->first_ready_cycle, current_cycle());
     _assign_if_empty(inst->first_ready_cycle_for_current_uop, current_cycle());
 
+    const size_t qubit_count = (inst->uop_count() > 0)
+                                ? inst->current_uop()->qubit_count
+                                : inst->qubit_count;
+
     if (!inst->first_cycle_with_all_load_results_available.has_value())
     {
         cycle_type latest_load_result_cycle{current_cycle()};
-        for (size_t i = 0; i < inst->qubit_count; i++)
+        for (size_t i = 0; i < qubit_count; i++)
             if (operands[i]->last_operation_was_memory_access)
                 latest_load_result_cycle = std::max(operands[i]->cycle_available, latest_load_result_cycle);
         inst->first_cycle_with_all_load_results_available = latest_load_result_cycle;
