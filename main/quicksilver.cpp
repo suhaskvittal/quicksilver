@@ -182,7 +182,7 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    GL_USE_RPC_ISA = 1;
+    GL_USE_RPC_ISA = 0;
 
     /* Parse trace string and do jit compilation if neeeded */
 
