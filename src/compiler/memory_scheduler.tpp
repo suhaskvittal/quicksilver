@@ -34,7 +34,7 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
     dag_ptr               dag{new DAG{num_qubits}};
     std::deque<inst_ptr>  outgoing_buffer;
     int64_t               inst_done{0};
-    while (inst_done < conf.inst_compile_limit)
+    while (inst_done < conf.inst_compile_limit && !generic_strm_eof(istrm))
     {
         const uint64_t inst_done_before{inst_done};
 

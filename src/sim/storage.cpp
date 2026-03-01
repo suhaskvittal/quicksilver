@@ -187,6 +187,20 @@ STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
         total_latency = access_latency + adapter_manip_latency;
         *adapter_it = total_latency;
     }
+
+    switch (type)
+    {
+    case ACCESS_TYPE::LOAD:
+        s_surgery_operations += 2;
+        break;
+    case ACCESS_TYPE::STORE:
+        s_surgery_operations += 1;
+        break;
+    case ACCESS_TYPE::COUPLED_LOAD_STORE:
+        s_surgery_operations += 3;
+        break;
+    }
+
     return access_result_type{ .success=true, .latency=total_latency, .storage_freq_khz=freq_khz };
 }
 

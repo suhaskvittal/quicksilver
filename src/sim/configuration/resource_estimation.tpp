@@ -30,7 +30,7 @@ constexpr size_t
 bivariate_bicycle_code_physical_qubit_count(size_t d)
 {
     const size_t scaling_factor = 1 << (d/6-1);
-    return (2*72 + 45)*scaling_factor;  // 45 is for the adapter
+    return (2*72 + 50)*scaling_factor;  // 45 is for the adapter
 }
 
 constexpr size_t

@@ -35,7 +35,7 @@ namespace ed
  * 1 = [[17,9,4]] * [[25,18,3]]                       -- output error is 3e-13      
  *
  * 2 = [2,1,2]_x * [2,1,2]_y * [2,1,2]_x * [[4,2,2]]  -- output error is 4.5e-12    * found using code
- * 3 = [[4,2,2]] * [[14,6,4]]                         -- output error is 7.4e-11    * found using code
+ * 3 = [[17,9,4]] * [[25,18,3]]                        -- output error is 7.4e-11    * found using code
  * */
 std::vector<ED_SPECIFICATION> protocol_0(int64_t ll_buffer_capacity);
 std::vector<ED_SPECIFICATION> protocol_1(int64_t ll_buffer_capacity);

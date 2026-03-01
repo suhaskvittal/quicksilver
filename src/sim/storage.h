@@ -50,6 +50,8 @@ public:
     const size_t logical_qubit_count;
     const size_t code_distance;
 
+    uint64_t s_surgery_operations{0};
+
     /*
      * Latency variables: relevant to simulation
      * */

@@ -45,6 +45,15 @@ def get_simulation_stats_folder_path(project: str, policy: str) -> str:
     os.system(f'mkdir -p {folder_path}')
     return folder_path
 
+def get_total_inst_count_for_workload(filepath: str):
+    w = get_workload_name(filepath)
+    stats_path = f'benchmarks/stats/{w}.txt'
+    with open(stats_path) as f:
+        for line in f:
+            key, _, value = line.partition(' ')
+            if key == 'UNROLLED_INSTRUCTION_COUNT':
+                return int(value.strip())
+
 ##############################################
 ##############################################
 
@@ -89,7 +98,7 @@ def run_memory_scheduler(workload_file_path: str,
           + f' -s {scheduler_id}'
     if kwargs is not None:
         cmd = join_command_line_args(cmd, kwargs)
-    cmd = f'{cmd} > {stats_path}'
+    cmd = f'{cmd} &> {stats_path}'
     print(cmd)
     return cmd
 
@@ -97,6 +106,7 @@ def run_memory_scheduler(workload_file_path: str,
 def run_quicksilver(workload_file_path: str,
                     project: str,
                     policy: str,
+                    compiler_policy: str,
                     inst_limit=100_000_000,
                     active_set_capacity=12,
                     total_program_inst=1_000_000_000,
@@ -108,8 +118,8 @@ def run_quicksilver(workload_file_path: str,
     w = get_workload_name(workload_file_path)
 
     if use_compiled_binary:
-        compiled_binary_folder_path = get_compiler_output_folder_path(project, policy)
-        compiled_binary_path = f'{output_folder_path}/{w}.gz'
+        compiled_binary_folder_path = get_compiler_output_folder_path(project, compiler_policy)
+        compiled_binary_path = f'{compiled_binary_folder_path}/{w}.gz'
     else:
         compiled_binary_path = workload_file_path
     stats_folder_path = get_simulation_stats_folder_path(project, policy)
@@ -122,7 +132,7 @@ def run_quicksilver(workload_file_path: str,
             + f' -f {factory_budget}'
     if kwargs is not None:
         cmd = join_command_line_args(cmd, kwargs)
-    cmd = f'{cmd} > {stats_path}'
+    cmd = f'{cmd} &> {stats_path}'
     print(cmd)
     return cmd
 

@@ -59,6 +59,11 @@ double bivariate_bicycle_code_block_error_rate(size_t, double p);
 size_t surface_code_distance_for_target_logical_error_rate(double, double p);
 size_t bivariate_bicycle_code_distance_for_target_block_error_rate(double, double p);
 
+/*
+ * This is for a code-concatenation scheme:
+ * */
+size_t inner_surface_code_distance_for_target_logical_error_rate(double, size_t outer_d, double p);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

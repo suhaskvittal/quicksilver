@@ -96,7 +96,7 @@ CLIENT::get_ready_instructions(const PRED& pred)
 {
     constexpr size_t DAG_WATERMARK = 16384;
     // fill up the DAG if it is below some count:
-    while (dag_->inst_count() < DAG_WATERMARK)
+    while (dag_->inst_count() < DAG_WATERMARK && !eof())
     {
         inst_ptr inst = read_instruction_from_trace();
         // immediately elide software instructions here

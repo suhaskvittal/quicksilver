@@ -51,9 +51,9 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
     else if (d == 12)
         return 2e-7;
     else if (d == 18)
-        return 2e-12;
+        return 2e-18;
     else  // (d = 24)
-        return 2e-17; // don't actually know, but fits the trend
+        return 2e-25; // don't actually know, but fits the trend
 }
 
 ////////////////////////////////////////////////////////////
@@ -80,10 +80,24 @@ bivariate_bicycle_code_distance_for_target_block_error_rate(double e, double p)
         return 6;
     else if (e >= 2e-7)
         return 12;
-    else if (e >= 2e-12)
+    else if (e >= 2e-18)
         return 18;
-    else // (e >= 2e-17)
+    else // (e >= 2e-25)
         return 24;
+}
+
+size_t
+inner_surface_code_distance_for_target_logical_error_rate(double e, size_t d_outer, double p)
+{
+    const size_t d_inner_min = (e < 1e-3) ? size_t{3} : size_t{2};
+    const size_t d_target = surface_code_distance_for_target_logical_error_rate(e, p);
+    
+    size_t d_inner = static_cast<size_t>( std::ceil(mean(d_target, d_outer)) );
+    if (d_inner <= d_inner_min)
+        return d_inner_min;
+    if (d_inner % 2 == 0)
+        d_inner++;
+    return d_inner;
 }
 
 ////////////////////////////////////////////////////////////

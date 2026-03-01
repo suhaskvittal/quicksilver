@@ -50,11 +50,13 @@ TEMPL_CLASS::add_stall_range(T stall_type, cycle_type start, cycle_type end, boo
     if (start >= end)
         return;
 
+    /*
     if (start < committed_up_to_)
     {
         std::cerr << "STALL_MONITOR::add_stall_range: start cycle is earlier than committed cycle: "
                     << start << " < " << committed_up_to_ << _die{};
     }
+    */
 
     const entry_type f = static_cast<entry_type>( 1 << static_cast<int>(stall_type) );
 

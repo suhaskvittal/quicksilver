@@ -182,7 +182,7 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    GL_USE_RPC_ISA = 0;
+    GL_USE_RPC_ISA = 1;
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -344,7 +344,8 @@ main(int argc, char* argv[])
     /* print stats */
 
     size_t compute_physical_qubits = sim::configuration::surface_code_physical_qubit_count(compute_code_distance)
-                                            * compute_local_memory_capacity;
+                                            * compute_local_memory_capacity
+                                            * 1.5;  // multiple by 1.5x to account for routing overhead
     size_t memory_physical_qubits = std::transform_reduce(memory_subsystem->storages().begin(),
                                                             memory_subsystem->storages().end(),
                                                             size_t{0},
@@ -583,7 +584,7 @@ faster_substrate_ed_overhead(ED_SPECIFICATION& s, int64_t substrate_mismatch_fac
                                                                                                     sim::GL_PHYSICAL_ERROR_RATE);
 
     // use this to compute idle time
-    const size_t idle_cycles = (s.output_count-s.input_count) * slow_dm * substrate_mismatch_factor;
+    const size_t idle_cycles = (s.input_count-s.output_count) * slow_dm * substrate_mismatch_factor;
 
     // there is no good analytical expression for the faster substrate code distance, but we know it is 
     // greater than or equal to `slow_dm`, so we can work from there
@@ -594,11 +595,18 @@ faster_substrate_ed_overhead(ED_SPECIFICATION& s, int64_t substrate_mismatch_fac
                             double log_idle_fidelity = mean(idle_cycles, d) * std::log(1-ler);
                             return 1 - (1-e_protocol)*std::exp(log_idle_fidelity);
                         };
-    while (f_error_rate(dm) > s.output_error_rate)
+    while (f_error_rate(dm) > 2*s.output_error_rate)
+    {
+        std::cout << "faster_substrate_ed_overhead: " << f_error_rate(dm) << " @ d = " << dm 
+                    << ", need = " << s.output_error_rate
+                    << "\t| idle_cycles = " << idle_cycles
+                    << "\n";
         dm++;
+    }
 
-    size_t idx = dm / s.dx,
-           idz = dm / s.dz;
+    double e = f_error_rate(dm);
+    size_t idx = sim::configuration::inner_surface_code_distance_for_target_logical_error_rate(e, s.dx, sim::GL_PHYSICAL_ERROR_RATE);
+    size_t idz = sim::configuration::inner_surface_code_distance_for_target_logical_error_rate(e, s.dz, sim::GL_PHYSICAL_ERROR_RATE);
     size_t p = sim::configuration::surface_code_physical_qubit_count(idx,idz) * s.input_count;
     p += p/2; // assume routing overheads add 50%
 
@@ -641,7 +649,14 @@ compute_application_fidelity(uint64_t scale_to_inst, sim::CLIENT* c, sim::COMPUT
         auto final_cycle = sim::convert_cycles_between_frequencies(c->s_cycle_complete, cs->freq_khz, s->freq_khz);
         double error_rate_per_d_cycles = sim::configuration::bivariate_bicycle_code_block_error_rate(s->code_distance, sim::GL_PHYSICAL_ERROR_RATE);
         double scaled_cycles = scale * final_cycle;
-        double lgs = mean(scaled_cycles, s->code_distance) * std::log(1.0-error_rate_per_d_cycles);
+
+        // also handle errors from memory accesses (the surgery + automorphism operations)
+        double scaled_surgery_ops = s->s_surgery_operations * scale;
+        double error_rate_per_surgery_op = (100+10) * error_rate_per_d_cycles; // 100x error is from surgery,
+                                                                               // 10x is from automorphism
+
+        double lgs = mean(scaled_cycles, s->code_distance) * std::log(1.0-error_rate_per_d_cycles) 
+                     + scaled_surgery_ops * std::log(1.0-error_rate_per_surgery_op);
         memory_log_success_prob += lgs;
     }
 
