@@ -5,7 +5,9 @@
 
 #include <deque>
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -88,7 +90,7 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
                         << "\nactive set =";
             for (auto q : active_set)
                 std::cout << " " << q;
-            std::cout << "\nDAG inst count = " << dag->inst_count() 
+            std::cout << "\nDAG inst count = " << dag->inst_count()
                             << " of " << conf.dag_inst_capacity
                             << ", front layer =";
             if (front_layer.size() > 8)
@@ -114,19 +116,6 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class ITER> void
-drain_buffer_into_stream(ITER begin, ITER end, generic_strm_type& ostrm)
-{
-    std::for_each(begin, end, 
-            [&ostrm] (inst_ptr inst) 
-            {
-                write_instruction_to_stream(ostrm, inst);
-                delete inst;
-            });
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 }  // namespace memory_scheduler
-}  // namespace compile
+}  // namespace pass
+}  // namespace compiler

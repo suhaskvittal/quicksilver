@@ -3,12 +3,14 @@
  *  date:   4 January 2026
  * */
 
-#include "compiler/memory_scheduler/impl.h"
+#include "compiler/pass/memory_scheduler/impl.h"
 
 #include <algorithm>
 #include <unordered_map>
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -56,4 +58,5 @@ eif(const active_set_type& active_set, const dag_ptr& dag, config_type conf)
 ////////////////////////////////////////////////////////////
 
 }  // namespace memory_scheduler
-}  // namespace compile
+}  // namespace pass
+}  // namespace compiler

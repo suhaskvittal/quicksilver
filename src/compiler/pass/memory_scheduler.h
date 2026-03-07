@@ -3,16 +3,19 @@
  *  date:   4 January 2026
  * */
 
-#ifndef COMPILER_MEMORY_SCHEDULER_h
-#define COMPILER_MEMORY_SCHEDULER_h
+#ifndef COMPILER_PASS_MEMORY_SCHEDULER_h
+#define COMPILER_PASS_MEMORY_SCHEDULER_h
 
 #include "dag.h"
 #include "generic_io.h"
+#include "compiler/pass/util.h"
 
 #include <memory>
 #include <unordered_set>
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -140,33 +143,10 @@ stats_type run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDUL
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-/*
- * Helper functions for memory scheduling
- * */
-
-/*
- * Reads instructions into the DAG until `DAG::inst_count() >= until_capacity`
- * */
-void read_instructions_into_dag(dag_ptr& dag, generic_strm_type& istrm, size_t until_capacity);
-
-/*
- * Returns true if all of the instruction's args are in `active_set`
- * */
-bool instruction_is_ready(inst_ptr inst, const active_set_type& active_set);
-
-/*
- * Drains all instructions from `begin` to `end` and writes them to `ostrm`.
- * Instructions are also freed after doing so.
- * */
-template <class ITER>
-void drain_buffer_into_stream(ITER begin, ITER end, generic_strm_type& ostrm);
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 }  // namespace memory_scheduler
-}  // namespace compile
+}  // namespace pass
+}  // namespace compiler
 
-#include "compiler/memory_scheduler.tpp"
+#include "compiler/pass/memory_scheduler.tpp"
 
-#endif  // COMPILER_MEMORY_SCHEDULER_h
+#endif  // COMPILER_PASS_MEMORY_SCHEDULER_h

@@ -3,9 +3,11 @@
  *  date:   4 January 2026
  * */
 
-#include "compiler/memory_scheduler.h"
+#include "compiler/pass/memory_scheduler.h"
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -43,25 +45,6 @@ transform_active_set(const active_set_type& current, const active_set_type& targ
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
-read_instructions_into_dag(dag_ptr& dag, generic_strm_type& istrm, size_t until_capacity)
-{
-    while (dag->inst_count() < until_capacity && !generic_strm_eof(istrm))
-    {
-        inst_ptr inst = read_instruction_from_stream(istrm);
-        dag->add_instruction(inst);
-    }
-}
-
-bool
-instruction_is_ready(inst_ptr inst, const active_set_type& active_set)
-{
-    return is_software_instruction(inst->type)
-           || std::all_of(inst->q_begin(), inst->q_end(), [&active_set] (auto q) { return active_set.count(q) > 0; });
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 }  // namespace memory_scheduler
-}  // namespace compile
+}  // namespace pass
+}  // namespace compiler

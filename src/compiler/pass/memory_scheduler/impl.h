@@ -3,12 +3,14 @@
  *  date:   4 January 2026
  * */
 
-#ifndef COMPILER_MEMORY_SCHEDULER_IMPL_h
-#define COMPILER_MEMORY_SCHEDULER_IMPL_h
+#ifndef COMPILER_PASS_MEMORY_SCHEDULER_IMPL_h
+#define COMPILER_PASS_MEMORY_SCHEDULER_IMPL_h
 
-#include "compiler/memory_scheduler.h"
+#include "compiler/pass/memory_scheduler.h"
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -30,6 +32,7 @@ result_type hint(const active_set_type&, const dag_ptr&, config_type);
 ////////////////////////////////////////////////////////////
 
 }   // namespace memory_scheduler
-}   // namespace compile
+}   // namespace pass
+}   // namespace compiler
 
-#endif  // COMPILER_MEMORY_SCHEDULER_IMPL_h
+#endif  // COMPILER_PASS_MEMORY_SCHEDULER_IMPL_h

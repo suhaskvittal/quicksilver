@@ -13,8 +13,8 @@
 #include "sim/production/epr.h"
 #include "sim/production/magic_state.h"
 
-#include "compiler/memory_scheduler.h"
-#include "compiler/memory_scheduler/impl.h"
+#include "compiler/pass/memory_scheduler.h"
+#include "compiler/pass/memory_scheduler/impl.h"
 
 #include "argparse.h"
 
@@ -447,7 +447,7 @@ split_trace_string(std::string s)
 void
 jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
 {
-    constexpr auto MEMORY_ACCESS_SCHEDULER{compile::memory_scheduler::hint};
+    constexpr auto MEMORY_ACCESS_SCHEDULER{compiler::pass::memory_scheduler::hint};
 
     std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
     std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
@@ -470,7 +470,7 @@ jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
     generic_strm_open(istrm, trace, "rb");
     generic_strm_open(ostrm, compiled_trace, "wb");
 
-    compile::memory_scheduler::config_type conf;
+    compiler::pass::memory_scheduler::config_type conf;
     conf.active_set_capacity = active_set_capacity;
     conf.inst_compile_limit = static_cast<int64_t>(5 * inst_sim);
     conf.print_progress_frequency = 0;

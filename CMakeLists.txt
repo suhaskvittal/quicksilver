@@ -198,9 +198,10 @@ endif()
 # Memory scheduler (qs_memory_scheduler)
 
 add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp
-                                    src/compiler/memory_scheduler.cpp
-                                    src/compiler/memory_scheduler/eif.cpp
-                                    src/compiler/memory_scheduler/hint.cpp)
+                                    src/compiler/pass/util.cpp
+                                    src/compiler/pass/memory_scheduler.cpp
+                                    src/compiler/pass/memory_scheduler/eif.cpp
+                                    src/compiler/pass/memory_scheduler/hint.cpp)
 target_include_directories(qs_memory_scheduler PRIVATE "src")
 target_compile_options(qs_memory_scheduler PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
@@ -241,9 +242,10 @@ target_link_libraries(qs_report PRIVATE qs_common)
 # Main simulator (quicksilver)
 
 add_executable(quicksilver main/quicksilver.cpp
-                            src/compiler/memory_scheduler.cpp
-                            src/compiler/memory_scheduler/eif.cpp
-                            src/compiler/memory_scheduler/hint.cpp)
+                            src/compiler/pass/util.cpp
+                            src/compiler/pass/memory_scheduler.cpp
+                            src/compiler/pass/memory_scheduler/eif.cpp
+                            src/compiler/pass/memory_scheduler/hint.cpp)
 target_include_directories(quicksilver PRIVATE "src")
 target_compile_options(quicksilver PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(quicksilver PRIVATE qs_simulator)

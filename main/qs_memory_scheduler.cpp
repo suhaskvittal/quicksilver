@@ -5,8 +5,8 @@
 
 #include "argparse.h"
 #include "generic_io.h"
-#include "compiler/memory_scheduler.h"
-#include "compiler/memory_scheduler/impl.h"
+#include "compiler/pass/memory_scheduler.h"
+#include "compiler/pass/memory_scheduler/impl.h"
 
 #include <chrono>
 #include <iomanip>
@@ -19,7 +19,7 @@ main(int argc, char* argv[])
 {
     std::string                            input_trace_file;
     std::string                            output_trace_file;
-    compile::memory_scheduler::config_type conf;
+    compiler::pass::memory_scheduler::config_type conf;
     int64_t                                scheduler_impl_id;
 
     ARGPARSE()
@@ -43,12 +43,12 @@ main(int argc, char* argv[])
     generic_strm_open(istrm, input_trace_file, "rb");
     generic_strm_open(ostrm, output_trace_file, "wb");
 
-    compile::memory_scheduler::stats_type stats;
+    compiler::pass::memory_scheduler::stats_type stats;
     auto compile_start = std::chrono::high_resolution_clock::now();
     if (scheduler_impl_id == 0)
-        stats = run(ostrm, istrm, compile::memory_scheduler::eif, conf);
+        stats = run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);
     else if (scheduler_impl_id == 1)
-        stats = run(ostrm, istrm, compile::memory_scheduler::hint, conf);
+        stats = run(ostrm, istrm, compiler::pass::memory_scheduler::hint, conf);
     else
         std::cerr << "unknown memory scheduler id: " << scheduler_impl_id << _die{};
     auto compile_end = std::chrono::high_resolution_clock::now();

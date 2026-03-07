@@ -3,13 +3,15 @@
  *  date:   4 January 2026
  * */
 
-#include "compiler/memory_scheduler/impl.h"
+#include "compiler/pass/memory_scheduler/impl.h"
 
 #include <algorithm>
 #include <iostream>
 #include <unordered_set>
 
-namespace compile
+namespace compiler
+{
+namespace pass
 {
 namespace memory_scheduler
 {
@@ -402,4 +404,5 @@ _score_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 }  // namespace memory_scheduler
-}  // namespace compile
+}  // namespace pass
+}  // namespace compiler
