@@ -228,6 +228,16 @@ target_link_libraries(qs_tpest PRIVATE qs_simulator)
 ###################################################
 ###################################################
 
+# Static program report (qs_report)
+
+add_executable(qs_report main/qs_report.cpp)
+target_include_directories(qs_report PRIVATE "src")
+target_compile_options(qs_report PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_report PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Main simulator (quicksilver)
 
 add_executable(quicksilver main/quicksilver.cpp

@@ -274,6 +274,7 @@ void         write_instruction_to_stream(generic_strm_type&, const INSTRUCTION*)
  * */
 constexpr bool is_software_instruction(INSTRUCTION::TYPE);
 constexpr bool is_memory_access(INSTRUCTION::TYPE);
+constexpr bool is_s_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
 constexpr bool is_cx_like_instruction(INSTRUCTION::TYPE);

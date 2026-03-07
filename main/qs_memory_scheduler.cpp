@@ -35,6 +35,7 @@ main(int argc, char* argv[])
 
         /* HINT PARAMETERS START HERE */
         .optional("", "--hint-lookahead-depth", "HINT Lookahead Depth (layers)", conf.hint_lookahead_depth, 16)
+        .optional("", "--hint-use-coalescing", "Enable HINT CST Coalescing", conf.hint_use_complex_selection, false)
 
         .parse(argc, argv);
 

@@ -90,9 +90,35 @@ elif experiment == 'sim_hint':
                                     '--substrate-mismatch-factor': 1000
                                  })
 
+elif experiment == 'sim_eif_ed_sensitivity':
+    for w in workload_list():
+        for epr_unit_count in [4, 8, 16]:
+            run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_u{epr_unit_count}', f'eif_a12',
+                                 inst_limit=SIM_INST_COUNT, 
+                                 active_set_capacity=12,
+                                 total_program_inst=get_total_inst_count_for_workload(w),
+                                 print_progress=PRINT_PROGRESS,
+                                 factory_budget=FACTORY_BUDGET,
+                                 kwargs={
+                                    '--memory-is-remote': '',
+                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
+                                    '-epr': epr_unit_count*EPR_BULK_COUNT,
+                                    '--epr-ll-buffer-capacity': 1,
+                                    '--substrate-mismatch-factor': 1000
+                                 })
+        run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_perfect', f'eif_a12',
+                             inst_limit=SIM_INST_COUNT, 
+                             active_set_capacity=12,
+                             total_program_inst=get_total_inst_count_for_workload(w),
+                             print_progress=PRINT_PROGRESS,
+                             factory_budget=FACTORY_BUDGET,
+                             kwargs={
+                                '--memory-syndrome-extraction-round-time-ns': 1_250_000,
+                             })
+
 elif experiment == 'sim_hint_ed_sensitivity':
     for w in workload_list():
-        for epr_unit_count in [1, 4, 8, 16]:
+        for epr_unit_count in [4, 8, 16]:
             run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_u{epr_unit_count}', f'hint_a12',
                                  inst_limit=SIM_INST_COUNT, 
                                  active_set_capacity=12,
@@ -148,6 +174,19 @@ elif experiment == 'sim_hint_mismatch_sensitivity':
                                     '-epr': 2*EPR_BULK_COUNT,
                                     '--epr-ll-buffer-capacity': 1,
                                     '--substrate-mismatch-factor': smf
+                                 })
+
+elif experiment == 'sim_baseline_factory_sensitivity':
+    for w in workload_list():
+        for f in [10000, 25000, 100_000]:
+            run_quicksilver(w, PROJECT, f'baseline_factory_sensitivity_f{f}', f'eif_a12',
+                                 inst_limit=SIM_INST_COUNT, 
+                                 active_set_capacity=12,
+                                 total_program_inst=get_total_inst_count_for_workload(w),
+                                 print_progress=PRINT_PROGRESS,
+                                 factory_budget=f,
+                                 kwargs={
+                                    '--memory-syndrome-extraction-round-time-ns': 1250,
                                  })
 
 elif experiment == 'sim_hint_factory_sensitivity':

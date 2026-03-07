@@ -70,6 +70,15 @@ is_memory_access(INSTRUCTION::TYPE t)
 }
 
 constexpr bool
+is_s_like_instruction(INSTRUCTION::TYPE t)
+{
+    return t == INSTRUCTION::TYPE::S
+            || t == INSTRUCTION::TYPE::SX
+            || t == INSTRUCTION::TYPE::SDG
+            || t == INSTRUCTION::TYPE::SXDG;
+}
+
+constexpr bool
 is_t_like_instruction(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::T
