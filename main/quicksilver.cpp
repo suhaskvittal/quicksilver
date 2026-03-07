@@ -10,6 +10,7 @@
 #include "sim/compute_subsystem.h"
 #include "sim/memory/remote.h"
 #include "sim/memory_subsystem.h"
+#include "sim/production/epr.h"
 #include "sim/production/magic_state.h"
 
 #include "compiler/memory_scheduler.h"
@@ -352,6 +353,7 @@ main(int argc, char* argv[])
                                                             std::plus<size_t>{},
                                                             [] (auto* s) { return s->physical_qubit_count; });
 
+
     sim::print_compute_subsystem_stats(std::cout, compute_subsystem);
 
     sim::print_stats_for_factories(std::cout, "L1_FACTORY", ms_alloc.producers[0]);
@@ -370,7 +372,21 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
 
     if (use_remote_memory)
+    {
+        uint64_t total_consumed_physical_epr_pairs = 
+            std::transform_reduce(ed_alloc.producers[0].begin(), ed_alloc.producers[0].end(), uint64_t{0},
+                                        std::plus<uint64_t>{},
+                                        [] (const auto* _p)
+                                        {
+                                            const auto* p = static_cast<const sim::producer::ENT_DISTILLATION*>(_p);
+                                            return p->s_physical_epr_pairs_consumed;
+                                        });
+        double physical_epr_bw = mean(total_consumed_physical_epr_pairs,
+                                        compute_subsystem->current_cycle() / (1e3*compute_subsystem->freq_khz));
         print_stat_line(std::cout, "ED_BANDWIDTH_MAX_PER_S", ed_alloc.estimated_throughput);
+        print_stat_line(std::cout, "PHYSICAL_EPR_PAIRS_CONSUMED", total_consumed_physical_epr_pairs);
+        print_stat_line(std::cout, "PHYSICAL_EPR_BANDWIDTH", physical_epr_bw);
+    }
 
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 

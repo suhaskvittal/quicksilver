@@ -25,6 +25,8 @@ public:
      * */
     const size_t measurement_distance;
     const size_t num_checks;
+
+    uint64_t s_physical_epr_pairs_consumed{0};
 private:
     size_t step_{0};
     size_t inputs_available_{0};
