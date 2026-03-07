@@ -91,6 +91,7 @@ ENT_DISTILLATION::production_step()
     {
         inputs_available_ = input_count;
         error_probability_ = input_count * _injection_error_probability();
+        s_physical_epr_pairs_consumed += input_count;
     }
 
     // fetch EPR pairs from the previous level of production

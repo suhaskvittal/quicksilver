@@ -51,9 +51,15 @@ magic_state_cultivation_physical_qubit_count(size_t d /* escape distance */)
 constexpr size_t
 magic_state_distillation_physical_qubit_count(size_t input_count, size_t output_count, size_t dx, size_t dz)
 {
+    /*
     const size_t total_logical_qubits = input_count+output_count;
     const size_t assumed_routing_overhead = total_logical_qubits/2;
     return (total_logical_qubits+assumed_routing_overhead) * surface_code_physical_qubit_count(dx, dz);
+    */
+    const size_t output_pq_count = surface_code_physical_qubit_count(dx,dx) * output_count,
+                 input_pq_count = surface_code_physical_qubit_count(dz,dz) * input_count;
+    const size_t assumed_routing_overhead = (input_count/2) * surface_code_physical_qubit_count(dx,dz);
+    return output_pq_count + assumed_routing_overhead;
 }
 
 ////////////////////////////////////////////////////////////
