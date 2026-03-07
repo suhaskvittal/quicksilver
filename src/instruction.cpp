@@ -49,7 +49,6 @@ struct io_encoding
     uint8_t  corr_urotseq_count{0};
     uint16_t corr_urotseq_sizes[MAX_CORR_UROTSEQ];
     uint8_t  corr_urotseq[MAX_CORR_UROTSEQ][UROTSEQ_CAPACITY];
-
 };
 
 INSTRUCTION::urotseq_type _retrieve_urotseq_from_encoded_data(uint16_t size, uint8_t*);
@@ -58,9 +57,11 @@ void                      _write_urotseq_to_encoded_data(uint16_t& size, uint8_t
 /*
  * `_fill_or_consume_serialized_instruction` either sets the data in `io_encoding` (if using an input stream),
  *  or writes its data to a file (output stream)
+ *
+ *  Returns true on EOF.
  * */
 template <class IO_FUNCTION>
-void _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type&, const IO_FUNCTION&);
+bool _fill_or_consume_serialized_instruction(io_encoding&, generic_strm_type&, const IO_FUNCTION&);
 
 /*
  * Function for writing or reading a unrolled rotation sequence. This is a helper for
@@ -261,7 +262,9 @@ INSTRUCTION*
 read_instruction_from_stream(generic_strm_type& istrm)
 {
     io_encoding enc;
-    _fill_or_consume_serialized_instruction(enc, istrm, generic_strm_read);
+    bool eof = _fill_or_consume_serialized_instruction(enc, istrm, generic_strm_read);
+    if (eof)
+        return nullptr;
 
     INSTRUCTION::TYPE         type = static_cast<INSTRUCTION::TYPE>(enc.type_id);
     auto                      q_begin = std::begin(enc.qubits);
@@ -345,13 +348,17 @@ _write_urotseq_to_encoded_data(uint16_t& size, uint8_t* data, const INSTRUCTION:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class IO_FUNCTION> void
+template <class IO_FUNCTION> bool
 _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& strm, const IO_FUNCTION& io_fn)
 {
     constexpr uint8_t RZ_TYPE_ID = static_cast<uint8_t>(INSTRUCTION::TYPE::RZ),
                       RX_TYPE_ID = static_cast<uint8_t>(INSTRUCTION::TYPE::RX);
 
     io_fn(strm, &enc.type_id, sizeof(enc.type_id));
+    
+    if (generic_strm_eof(strm))
+        return true;
+
     io_fn(strm, &enc.qubits, sizeof(qubit_type)*io_encoding::MAX_QUBITS);
 
     if (enc.type_id == RZ_TYPE_ID || enc.type_id == RX_TYPE_ID)
@@ -376,6 +383,8 @@ _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& str
                 _fill_or_consume_urotseq(strm, enc.corr_urotseq_sizes+i, enc.corr_urotseq[i], io_fn);
         }
     }
+
+    return false;
 }
 
 ////////////////////////////////////////////////////////////

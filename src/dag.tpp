@@ -68,57 +68,6 @@ DAG::find_earliest_dependent_instruction_such_that(const PRED& pred,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> size_t
-DAG::contract_instructions_such_that(const PRED& pred, size_t min_layer, size_t max_layer)
-{
-    size_t num_deleted{0};
-    generic_operate_on_nodes_in_layer_order(
-            [this, &pred, &num_deleted] (node_type* parent)
-            {
-                if (parent->dependent.size() != 1)
-                    return;
-                auto* child = parent->dependent[0];
-                if (pred(parent, child))
-                {
-                    const bool child_is_back_inst = child->dependent.empty();
-
-                    // merge dependent lists
-                    std::unordered_set<node_type*> dependent_set(parent->dependent.begin(), 
-                                                                 parent->dependent.end());
-                    for (auto* x : child->dependent)
-                    {
-                        if (!dependent_set.count(x))
-                        {
-                            parent->dependent.push_back(x);
-                            x->pred_count++;
-                        }
-                    }
-
-                    // handle the case where the child is at the end of the DAG:
-                    if (child_is_back_inst)
-                    {
-                        auto it = std::find(back_instructions_.begin(), back_instructions_.end(), child);
-                        *it = parent;
-                    }
-
-                    // mark parent as `deleteable` (cannot delete yet since the template function needs
-                    // `parent` to traverse through the DAG)
-                    parent->deleteable = true;
-
-                    delete child;
-                    num_deleted++;
-                }
-            },
-            min_layer,
-            max_layer);
-
-    num_deleted += delete_any_deletable_nodes();  // this should clean up parents
-    return num_deleted;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 template <class CALLBACK> void
 DAG::generic_operate_on_nodes_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer)
 {

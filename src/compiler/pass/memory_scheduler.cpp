@@ -45,6 +45,16 @@ transform_active_set(const active_set_type& current, const active_set_type& targ
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+instruction_is_ready(DAG::inst_ptr inst, const std::unordered_set<qubit_type>& active_set)
+{
+    return is_software_instruction(inst->type)
+           || std::all_of(inst->q_begin(), inst->q_end(), [&active_set] (auto q) { return active_set.count(q) > 0; });
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 }  // namespace memory_scheduler
 }  // namespace pass
 }  // namespace compiler

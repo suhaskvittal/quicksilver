@@ -46,9 +46,9 @@ main(int argc, char* argv[])
     compiler::pass::memory_scheduler::stats_type stats;
     auto compile_start = std::chrono::high_resolution_clock::now();
     if (scheduler_impl_id == 0)
-        stats = run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);
+        stats = compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);
     else if (scheduler_impl_id == 1)
-        stats = run(ostrm, istrm, compiler::pass::memory_scheduler::hint, conf);
+        stats = compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::hint, conf);
     else
         std::cerr << "unknown memory scheduler id: " << scheduler_impl_id << _die{};
     auto compile_end = std::chrono::high_resolution_clock::now();

@@ -50,8 +50,8 @@ int main(int argc, char* argv[])
     std::string stats_output_file;
 
     ARGPARSE()
-        .required("input-file", "input file qasm file (can be compressed)", input_file)
-        .required("output-file", "output file binary (.bin or .gz only)", output_file)
+        .required("input-file", "input qasm file (can be compressed)", input_file)
+        .required("output-file", "output binary file (.bin or .gz only)", output_file)
         .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
         .optional("-p", "--print-progress", "the number of instructions to print progress", prog::GL_PRINT_PROGRESS, 1'000'000)
         .optional("-rpc", "--rotation-recomputation-isa", "use RPC isa (argument of this option is the level)", GL_USE_RPC_ISA, 0)

@@ -118,8 +118,12 @@ struct result_type
  * in the active set. This function converts between the
  * current active set and desired active set.
  * */
-result_type transform_active_set(const active_set_type& current,
-                                 const active_set_type& target);
+result_type transform_active_set(const active_set_type& current, const active_set_type& target);
+
+/*
+ * Returns true if all of the instruction's args are in `active_set`
+ * */
+bool instruction_is_ready(inst_ptr, const active_set_type&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

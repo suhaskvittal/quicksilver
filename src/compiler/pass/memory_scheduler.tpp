@@ -18,14 +18,10 @@ namespace memory_scheduler
 template <class SCHEDULER_IMPL> stats_type
 run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& scheduler, config_type conf)
 {
-    constexpr size_t OUTGOING_CAPACITY{16384};
-
     stats_type stats;
 
     // read number of qubits from `istrm`
-    uint32_t num_qubits;
-    generic_strm_read(istrm, &num_qubits, sizeof(num_qubits));
-    generic_strm_write(ostrm, &num_qubits, sizeof(num_qubits));
+    IO_UTILITY io(istrm, ostrm);
 
     // initialize `active_set`:
     active_set_type active_set;
@@ -33,16 +29,14 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
     for (qubit_type i = 0; i < conf.active_set_capacity; i++)
         active_set.insert(i);
 
-    dag_ptr               dag{new DAG{num_qubits}};
-    std::deque<inst_ptr>  outgoing_buffer;
-    int64_t               inst_done{0};
-    while (inst_done < conf.inst_compile_limit && !generic_strm_eof(istrm))
+    dag_ptr  dag{new DAG{io.num_qubits}};
+    int64_t  inst_done{0};
+    while (inst_done < conf.inst_compile_limit && (dag->inst_count() > 0 || !generic_strm_eof(istrm)))
     {
         const uint64_t inst_done_before{inst_done};
 
         // try to fill up the DAG during every iteration
-        if (!generic_strm_eof(istrm))
-            read_instructions_into_dag(dag, istrm, conf.dag_inst_capacity);
+        io.read_instructions(dag.get(), conf.dag_inst_capacity);
 
         // try to complete as many instructions as possible using the `active_set`
         auto completable = dag->get_front_layer_if(
@@ -53,7 +47,7 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
             auto out = scheduler(active_set, dag, conf);
             assert(out.active_set.size() == conf.active_set_capacity);
 
-            outgoing_buffer.insert(outgoing_buffer.end(), out.memory_accesses.begin(), out.memory_accesses.end());
+            io.write_instructions(out.memory_accesses.begin(), out.memory_accesses.end());
             active_set = std::move(out.active_set);
 
             stats.memory_accesses += out.memory_accesses.size();
@@ -64,18 +58,10 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
         {
             for (auto* inst : completable)
             {
-                outgoing_buffer.push_back(inst);
+                io.write_instruction(inst);
                 dag->remove_instruction_from_front_layer(inst);
                 inst_done += inst->uop_count();
             }
-        }
-
-        if (outgoing_buffer.size() >= OUTGOING_CAPACITY)
-        {
-            auto begin = outgoing_buffer.begin();
-            auto end = begin + (OUTGOING_CAPACITY/2);
-            drain_buffer_into_stream(begin, end, ostrm);
-            outgoing_buffer.erase(begin, end);
         }
 
         if (conf.print_progress_frequency > 0
@@ -105,9 +91,6 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& sc
             std::cout << "\n";
         }
     }
-
-    drain_buffer_into_stream(outgoing_buffer.begin(), outgoing_buffer.end(), ostrm);
-    outgoing_buffer.clear();
 
     stats.unrolled_inst_done = inst_done;
     return stats;

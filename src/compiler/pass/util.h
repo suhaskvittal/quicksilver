@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <unordered_set>
+#include <vector>
 
 namespace compiler
 {
@@ -21,28 +22,85 @@ namespace pass
 ////////////////////////////////////////////////////////////
 
 /*
- * Reads instructions into the DAG until `DAG::inst_count() >= until_capacity`
+ * This is a utility class for managing IO during pass execution.
  * */
-void read_instructions_into_dag(std::unique_ptr<DAG>&, generic_strm_type&, size_t until_capacity);
+class IO_UTILITY
+{
+public:
+    constexpr static size_t OUTGOING_CAPACITY{16384};
+
+    using fixed_buffer_type = std::vector<DAG::inst_ptr>;
+
+    const size_t num_qubits;
+private:
+    generic_strm_type& istrm;
+    generic_strm_type& ostrm;
+
+    /*
+     * Buffer of instructions to be written. Once the buffer is full,
+     * half of the entries are written.
+     * */
+    fixed_buffer_type outgoing_buffer_;
+public:
+    IO_UTILITY(generic_strm_type& istrm, generic_strm_type& ostrm);
+
+    /*
+     * Note: `IO_UTILITY` does not close either `istrm` or `ostrm`.
+     * It only drains `outgoing_buffer_` on deletion.
+     * */
+    ~IO_UTILITY();
+
+    /*
+     * Reads instructions from `istrm` and adds then to the DAG.
+     * Stops when the DAG reaches `max_capacity`.
+     * */
+    void read_instructions(DAG*, size_t max_capacity);
+
+    /*
+     * Adds an instruction to `outgoing_buffer_`. If necessary,
+     * the buffer is drained.
+     * */
+    void write_instruction(DAG::inst_ptr);
+
+    template <class ITER>
+    void write_instructions(ITER begin, ITER end);
+private:
+    void drain_outgoing_buffer();
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 /*
- * Returns true if all of the instruction's args are in `active_set`
+ * Implementation of `IO_UTILITY::write_instructions()`
  * */
-bool instruction_is_ready(DAG::inst_ptr, const std::unordered_set<qubit_type>&);
 
-/*
- * Drains all instructions from `begin` to `end` and writes them to `ostrm`.
- * Instructions are also freed after doing so.
- * */
-template <class ITER>
-void drain_buffer_into_stream(ITER begin, ITER end, generic_strm_type& ostrm);
+template <class ITER> void
+IO_UTILITY::write_instructions(ITER begin, ITER end)
+{
+    size_t remaining_capacity = OUTGOING_CAPACITY - outgoing_buffer_.size();
+    size_t d = std::distance(begin, end);
+    if (d > remaining_capacity)
+    {
+        // we cannot add the entire range at once:
+        auto _end = begin + remaining_capacity;
+        outgoing_buffer_.insert(outgoing_buffer_.end(), begin, _end);
+        drain_outgoing_buffer();
+        outgoing_buffer_.insert(outgoing_buffer_.end(), _end, end);
+    }
+    else
+    {
+        outgoing_buffer_.insert(outgoing_buffer_.end(), begin, end);
+    }
+
+    if (outgoing_buffer_.size() >= OUTGOING_CAPACITY)
+        drain_outgoing_buffer();
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 }  // namespace pass
 }  // namespace compiler
-
-#include "compiler/pass/util.tpp"
 
 #endif  // COMPILER_PASS_UTIL_h

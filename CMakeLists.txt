@@ -108,6 +108,9 @@ set(BINARY_GEN_FILES
     src/compiler/program/rotation_manager.cpp
     src/compiler/program/value_info.cpp)
 
+set(COMPILER_FILES
+    src/compiler/pass/util.cpp)
+
 set(SIM_FILES
     src/sim/configuration/allocator/epr.cpp
     src/sim/configuration/allocator/magic_state.cpp
@@ -198,7 +201,7 @@ endif()
 # Memory scheduler (qs_memory_scheduler)
 
 add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp
-                                    src/compiler/pass/util.cpp
+                                    ${COMPILER_FILES}
                                     src/compiler/pass/memory_scheduler.cpp
                                     src/compiler/pass/memory_scheduler/eif.cpp
                                     src/compiler/pass/memory_scheduler/hint.cpp)
@@ -206,15 +209,14 @@ target_include_directories(qs_memory_scheduler PRIVATE "src")
 target_compile_options(qs_memory_scheduler PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
 
-###################################################
-###################################################
+# Optimization passes:
 
-# Simple context switch simulator (qs_ctxsim)
-
-#add_executable(qs_ctxsim main/qs_ctxsim.cpp)
-#target_include_directories(qs_ctxsim PRIVATE "src")
-#target_compile_options(qs_ctxsim PRIVATE ${COMPILE_OPTIONS})
-#target_link_libraries(qs_ctxsim PRIVATE qs_simulator)
+add_executable(qs_optimizer main/qs_optimizer.cpp
+                            ${COMPILER_FILES}
+                            src/compiler/pass/optimization/gate_cancellation.cpp)
+target_include_directories(qs_optimizer PRIVATE "src")
+target_compile_options(qs_optimizer PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_optimizer PRIVATE qs_common)
 
 ###################################################
 ###################################################

@@ -112,13 +112,14 @@ CLIENT::open_file_and_read_qubit_count()
 CLIENT::inst_ptr
 CLIENT::read_instruction_from_trace()
 {
-    if (eof())
+    inst_ptr inst = read_instruction_from_stream(tristrm_);
+    
+    if (inst == nullptr)
     {
         std::cerr << "CLIENT::read_instruction_from_file: client " << static_cast<int>(id)
                 << " hit eof for trace \"" << trace_file << "\"" << _die{};
     }
 
-    inst_ptr inst = read_instruction_from_stream(tristrm_);
     inst->number = s_inst_read++;
 
     if (GL_ELIDE_CLIFFORDS && !is_rotation_instruction(inst->type) && !is_memory_access(inst->type))
