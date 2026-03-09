@@ -12,6 +12,8 @@
 
 //#define EXPRESSION_EVAL_DEBUG
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -171,3 +173,4 @@ _evaluate_expval(const EXPONENTIAL_VALUE& expval)
 ////////////////////////////////////////////////////////////
 
 }   // namespace prog
+}   // namespace compiler

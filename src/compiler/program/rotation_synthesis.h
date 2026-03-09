@@ -8,6 +8,8 @@
 
 #include "instruction.h"
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -33,5 +35,6 @@ bool validate_urotseq(const INSTRUCTION::urotseq_type&, const INSTRUCTION::fpa_t
 ////////////////////////////////////////////////////////////
 
 } // namespace prog
+} // namespace compiler
 
 #endif  // COMPILER_PROGRAM_ROTATION_SYNTHESIS_h

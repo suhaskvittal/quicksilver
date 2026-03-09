@@ -65,26 +65,26 @@ class OQ2_LEXER;
 %nterm                                              program
 %nterm                                              line
 %nterm <PROGRAM_INFO>                               include_stmt
-%nterm <prog::REGISTER>                             register_decl
+%nterm <compiler::prog::REGISTER>                             register_decl
 
-%nterm <prog::GATE_DEFINITION>                      gate_decl
+%nterm <compiler::prog::GATE_DEFINITION>                      gate_decl
 %nterm <std::vector<std::string>>                   optional_gate_params
 %nterm <std::vector<std::string>>                   gate_params_or_arguments
-%nterm <std::vector<prog::QASM_INST_INFO>>          gate_decl_body
+%nterm <std::vector<compiler::prog::QASM_INST_INFO>>          gate_decl_body
 
-%nterm <prog::QASM_INST_INFO>                               conditional_instruction
-%nterm <prog::QASM_INST_INFO>                               instruction
-%nterm <std::vector<prog::EXPRESSION>>                      optional_instruction_params
-%nterm <std::vector<prog::EXPRESSION>>                      instruction_params
-%nterm <std::vector<prog::QASM_OPERAND>>    instruction_arguments
-%nterm <prog::QASM_INST_INFO>                               measurement
+%nterm <compiler::prog::QASM_INST_INFO>                               conditional_instruction
+%nterm <compiler::prog::QASM_INST_INFO>                               instruction
+%nterm <std::vector<compiler::prog::EXPRESSION>>                      optional_instruction_params
+%nterm <std::vector<compiler::prog::EXPRESSION>>                      instruction_params
+%nterm <std::vector<compiler::prog::QASM_OPERAND>>    instruction_arguments
+%nterm <compiler::prog::QASM_INST_INFO>                               measurement
 
-%nterm <prog::EXPRESSION>                   expression
-%nterm <prog::TERM>                         term
-%nterm <prog::EXPONENTIAL_VALUE>            signed_expval;
-%nterm <prog::EXPONENTIAL_VALUE>            expval;
-%nterm <prog::generic_value_type>           generic_value
-%nterm <prog::QASM_OPERAND> argument;
+%nterm <compiler::prog::EXPRESSION>                   expression
+%nterm <compiler::prog::TERM>                         term
+%nterm <compiler::prog::EXPONENTIAL_VALUE>            signed_expval;
+%nterm <compiler::prog::EXPONENTIAL_VALUE>            expval;
+%nterm <compiler::prog::generic_value_type>           generic_value
+%nterm <compiler::prog::QASM_OPERAND> argument;
 
 %%
 
@@ -112,8 +112,8 @@ include_stmt: INCLUDE STRING_LITERAL ';'    {
             ; 
 
 register_decl: REGISTER argument ';'        {
-                                                $$.type = ($1 == "creg") ? prog::REGISTER::TYPE::BIT
-                                                                         : prog::REGISTER::TYPE::QUBIT;
+                                                $$.type = ($1 == "creg") ? compiler::prog::REGISTER::TYPE::BIT
+                                                                         : compiler::prog::REGISTER::TYPE::QUBIT;
                                                 $$.name = $2.name;
                                                 if ($2.index >= 0)
                                                     $$.width = $2.index;
@@ -146,7 +146,7 @@ conditional_instruction: IF '(' IDENTIFIER COMPARISON_OPERATOR expression ')' in
             ;
 instruction: IDENTIFIER optional_instruction_params instruction_arguments ';'  
                         {
-                            $$ = prog::QASM_INST_INFO{$1, $2, $3};
+                            $$ = compiler::prog::QASM_INST_INFO{$1, $2, $3};
                         }
             ;
 optional_instruction_params: '(' instruction_params ')'     { $$ = $2; }
@@ -166,32 +166,32 @@ measurement: MEASURE argument ARROW argument ';'    {
             ;
 
 expression: term                                {
-                                                    prog::TERM_ENTRY entry;
+                                                    compiler::prog::TERM_ENTRY entry;
                                                     entry.term = $1;
-                                                    entry.operator_with_previous = prog::OPERATOR::ADD;
+                                                    entry.operator_with_previous = compiler::prog::OPERATOR::ADD;
                                                     $$.terms.push_back(entry);
                                                 }
             | expression PLUS_MINUS term        {
-                                                    auto op = static_cast<prog::OPERATOR>($2);
+                                                    auto op = static_cast<compiler::prog::OPERATOR>($2);
                                                     $$ = std::move($1);
-                                                    prog::TERM_ENTRY entry;
+                                                    compiler::prog::TERM_ENTRY entry;
                                                     entry.term = $3;
                                                     entry.operator_with_previous = op;
                                                     $$.terms.push_back(entry);
                                                 }
             ;
 term: term MULTIPLY_DIVIDE signed_expval        {
-                                                    auto op = static_cast<prog::OPERATOR>($2 + 2);
+                                                    auto op = static_cast<compiler::prog::OPERATOR>($2 + 2);
                                                     $$ = std::move($1);
-                                                    prog::FACTOR factor;
+                                                    compiler::prog::FACTOR factor;
                                                     factor.exponential_value = $3;
                                                     factor.operator_with_previous = op;
                                                     $$.factors.push_back(factor);
                                                 }
     | signed_expval                             {
-                                                    prog::FACTOR factor;
+                                                    compiler::prog::FACTOR factor;
                                                     factor.exponential_value = $1;
-                                                    factor.operator_with_previous = prog::OPERATOR::MULTIPLY;
+                                                    factor.operator_with_previous = compiler::prog::OPERATOR::MULTIPLY;
                                                     $$.factors.push_back(factor);
                                                 }
     ;
@@ -208,7 +208,7 @@ generic_value: INTEGER_LITERAL                  { $$ = $1; }
             | FLOAT_LITERAL                     { $$ = $1; }
             | IDENTIFIER                        { $$ = $1; }
             | '(' expression ')'                {
-                                                    prog::expr_ptr e_p{new prog::EXPRESSION};
+                                                    compiler::prog::expr_ptr e_p{new compiler::prog::EXPRESSION};
                                                     *e_p = $2;
                                                     $$ = std::move(e_p);
                                                 }

@@ -5,6 +5,8 @@
 
 #include "compiler/program/value_info.h"
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -415,3 +417,4 @@ operator^(VALUE_INFO a, VALUE_INFO b)
 ////////////////////////////////////////////////////////////
 
 }   // namespace prog
+}   // namespace compiler

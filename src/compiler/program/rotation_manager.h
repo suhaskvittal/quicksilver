@@ -10,6 +10,8 @@
 
 #include <vector>
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -36,5 +38,6 @@ INSTRUCTION::urotseq_type rotation_manager_lookup(const INSTRUCTION::fpa_type&);
 ////////////////////////////////////////////////////////////
 
 }  // namespace prog
+}  // namespace compiler
 
 #endif  // COMPILER_PROGRAM_ROTATION_MANAGER_h

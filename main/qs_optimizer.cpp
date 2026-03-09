@@ -44,7 +44,6 @@ main(int argc, char* argv[])
     ARGPARSE()
         .required("input-file", "input binary file", input_file)
         .required("output-file", "output binary file", output_file)
-        .optional("-rpc", "--rotation-recomputation-isa", "Use RPC ISA (argument is level)", GL_USE_RPC_ISA, 0)
         .parse(argc, argv);
 
     generic_strm_type istrm;
@@ -63,7 +62,7 @@ main(int argc, char* argv[])
 
         out = result_type{};
         /* passes start here */
-        run_pass(istrm, compiler::pass::optimization::gate_cancellation, out);
+        run_pass(istrm, compiler::pass::optimization::cancel_and_coalesce, out);
 
         // end of iteration -- return time it took to complete
         auto iter_end =  std::chrono::high_resolution_clock::now();

@@ -6,6 +6,8 @@
 #include "compiler/program/rotation_manager.h"
 #include "generic_io.h"
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -236,3 +238,4 @@ _get_lut_array_idx(const fpa_type& angle)
 ////////////////////////////////////////////////////////////
 
 } // namespace prog
+} // namespace compiler

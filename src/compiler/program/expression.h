@@ -12,6 +12,8 @@
 #include <variant>
 #include <vector>
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -73,5 +75,6 @@ VALUE_INFO evaluate_expression(const EXPRESSION&);
 ////////////////////////////////////////////////////////////
 
 }   // namespace prog
+}   // namespace compiler
 
 #endif  // COMPILER_PROGRAM_EXPRESSION_h

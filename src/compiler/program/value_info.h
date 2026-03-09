@@ -11,6 +11,8 @@
 
 #include <cstdint>
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -72,5 +74,6 @@ VALUE_INFO operator^(VALUE_INFO, VALUE_INFO);
 ////////////////////////////////////////////////////////////
 
 } // namespace prog
+} // namespace compiler
 
 #endif  // COMPILER_PROGRAM_VALUE_INFO_h

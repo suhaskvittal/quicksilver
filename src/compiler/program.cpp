@@ -27,17 +27,20 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+namespace compiler
+{
 namespace prog
 {
 
 int64_t GL_PRINT_PROGRESS{1'000'000};
 
 } // namespace prog
+} // namespace compiler
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-using namespace prog;
+using namespace compiler::prog;
 
 /*
  * Helper functions and other useful data structures
@@ -67,7 +70,7 @@ constexpr static INSTRUCTION::TYPE SELF_INVERSES[]
  * */
 template <class T> using subst_map_type = std::unordered_map<std::string, T>;
 
-std::string _qasm_inst_to_string(const prog::QASM_INST_INFO&);
+std::string _qasm_inst_to_string(const compiler::prog::QASM_INST_INFO&);
 
 /*
  * `_make_substitution_map` creates a dictionary mapping entries in `names`
@@ -88,7 +91,7 @@ subst_map_type<T> _make_substitution_map(const std::vector<std::string>& names,
  * will update this to be `2*(pi/2)+3`
  * */
 void _parameter_substitution(EXPRESSION&, const subst_map_type<EXPRESSION>&);
-void _argument_substitution(prog::QASM_OPERAND&, const subst_map_type<prog::QASM_OPERAND>&);
+void _argument_substitution(compiler::prog::QASM_OPERAND&, const subst_map_type<compiler::prog::QASM_OPERAND>&);
 
 /*
  * Checks if two maps have the same key. If so, the programs exits with an error.
@@ -356,7 +359,7 @@ PROGRAM_INFO::flush_and_clear_instructions()
 ////////////////////////////////////////////////////////////
 
 qubit_type
-PROGRAM_INFO::get_qubit_id_from_operand(const prog::QASM_OPERAND& operand) const
+PROGRAM_INFO::get_qubit_id_from_operand(const compiler::prog::QASM_OPERAND& operand) const
 {
     // get register:
     auto it = registers_.find(operand.name);
@@ -397,7 +400,7 @@ PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& an
 
 void
 PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type, 
-                                      const std::vector<prog::QASM_OPERAND>& args, 
+                                      const std::vector<compiler::prog::QASM_OPERAND>& args, 
                                       fpa_type rotation)
 {
     // convert operands to qubits:
@@ -407,8 +410,6 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
 
     auto urotseq = is_rotation_instruction(type) ? rotation_manager_lookup(rotation) : urotseq_type{};
     inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
-    for (size_t i = 0; i < GL_USE_RPC_ISA; i++)
-        inst->corr_urotseq_array.push_back(rotation_manager_lookup(fpa::scalar_mul(rotation, 2*(i+1))));
 
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "\tevaluated as: " << *inst << "\n";
@@ -421,7 +422,7 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INFO& qasm_inst, fpa_type rotation,
+PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, compiler::prog::QASM_INST_INFO& qasm_inst, fpa_type rotation,
                                       size_t width, const std::vector<bool>& v_op_vec, const std::vector<size_t>& v_op_width)
 {
 #if defined(PROGRAM_INFO_VERBOSE)
@@ -431,9 +432,6 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
     // apply the operation multiple times:
     std::vector<qubit_type> qubits(qasm_inst.args.size());
     auto urotseq = is_rotation_instruction(type) ? rotation_manager_lookup(rotation) : urotseq_type{};
-    std::deque<urotseq_type> corr_urotseq_array;
-    for (size_t k = 0; k < GL_USE_RPC_ISA; k++)
-        corr_urotseq_array.push_back(rotation_manager_lookup(fpa::scalar_mul(rotation, 2*(k+1))));
 
     for (size_t i = 0; i < width; i++)
     {
@@ -450,7 +448,6 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
 
         // create and push the instruction:
         inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
-        inst->corr_urotseq_array = corr_urotseq_array;
 
 #if defined(PROGRAM_INFO_VERBOSE)
         std::cout << "\t\t( " << i << " ) " << *inst << "\n";
@@ -464,7 +461,7 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, prog::QASM_INST_INF
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::expand_user_defined_gate(prog::QASM_INST_INFO&& qasm_inst)
+PROGRAM_INFO::expand_user_defined_gate(compiler::prog::QASM_INST_INFO&& qasm_inst)
 {
     // check for gate definition:
     auto gate_it = user_defined_gates_.find(qasm_inst.gate_name);
@@ -493,7 +490,7 @@ PROGRAM_INFO::expand_user_defined_gate(prog::QASM_INST_INFO&& qasm_inst)
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_basis_gate_instruction(prog::QASM_INST_INFO&& qasm_inst, INSTRUCTION::TYPE type)
+PROGRAM_INFO::add_basis_gate_instruction(compiler::prog::QASM_INST_INFO&& qasm_inst, INSTRUCTION::TYPE type)
 {
     if (inst_read_ % GL_PRINT_PROGRESS == 0)
         std::cout << "[ PROGRAM_INFO ] read " << inst_read_ << " instructions\n";
@@ -518,7 +515,7 @@ PROGRAM_INFO::add_basis_gate_instruction(prog::QASM_INST_INFO&& qasm_inst, INSTR
         if (it == registers_.end())
             std::cerr << "PROGRAM_INFO::add_basis_gate_instruction: register not found: " << operand.name << _die{};
 
-        v_op_vec[i] = (it->second.width > 1) && (operand.index == prog::QASM_OPERAND::NO_INDEX);
+        v_op_vec[i] = (it->second.width > 1) && (operand.index == compiler::prog::QASM_OPERAND::NO_INDEX);
         v_op_width[i] = it->second.width;
     }
 
@@ -697,7 +694,7 @@ _qasm_inst_to_string(const QASM_INST_INFO& inst)
         if (i > 0)
             ss << ", ";
         ss << inst.args[i].name;
-        if (inst.args[i].index != prog::QASM_OPERAND::NO_INDEX)
+        if (inst.args[i].index != compiler::prog::QASM_OPERAND::NO_INDEX)
             ss << "[" << inst.args[i].index << "]";
     }
 
@@ -751,8 +748,8 @@ _parameter_substitution(EXPRESSION& param, const subst_map_type<EXPRESSION>& sub
 ////////////////////////////////////////////////////////////
 
 void
-_argument_substitution(prog::QASM_OPERAND& arg,
-                        const subst_map_type<prog::QASM_OPERAND>& subst_map) 
+_argument_substitution(compiler::prog::QASM_OPERAND& arg,
+                        const subst_map_type<compiler::prog::QASM_OPERAND>& subst_map) 
 {
     auto it = subst_map.find(arg.name);
     if (it != subst_map.end())

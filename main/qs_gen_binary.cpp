@@ -53,11 +53,10 @@ int main(int argc, char* argv[])
         .required("input-file", "input qasm file (can be compressed)", input_file)
         .required("output-file", "output binary file (.bin or .gz only)", output_file)
         .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
-        .optional("-p", "--print-progress", "the number of instructions to print progress", prog::GL_PRINT_PROGRESS, 1'000'000)
-        .optional("-rpc", "--rotation-recomputation-isa", "use RPC isa (argument of this option is the level)", GL_USE_RPC_ISA, 0)
+        .optional("-p", "--print-progress", "the number of instructions to print progress", compiler::prog::GL_PRINT_PROGRESS, 1'000'000)
         .parse(argc, argv);
 
-    prog::rotation_manager_init();
+    compiler::prog::rotation_manager_init();
     auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
     std::cout << "DONE\n";
 
@@ -71,7 +70,7 @@ int main(int argc, char* argv[])
         print_stats(stats_out, stats);
     }
 
-    prog::rotation_manager_end();
+    compiler::prog::rotation_manager_end();
     return 0;
 }
 

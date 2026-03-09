@@ -31,8 +31,6 @@ main(int argc, char* argv[])
         .optional("", "--dag-capacity", "DAG instruction capacity", conf.dag_inst_capacity, 8192)
         .optional("-v", "--verbose", "Verbose flag", conf.verbose, false)
         .optional("-s", "--scheduler", "Scheduler ID (0 = EIF, 1 = HINT)", scheduler_impl_id, 0)
-        .optional("-rpc", "", "Use RPC ISA", GL_USE_RPC_ISA, 0)
-
         /* HINT PARAMETERS START HERE */
         .optional("", "--hint-lookahead-depth", "HINT Lookahead Depth (layers)", conf.hint_lookahead_depth, 16)
         .optional("", "--hint-use-coalescing", "Enable HINT CST Coalescing", conf.hint_use_complex_selection, false)

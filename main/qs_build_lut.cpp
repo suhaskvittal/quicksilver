@@ -98,8 +98,8 @@ main(int argc, char* argv[])
             threads[i] = std::thread([&results, a, i, p] () 
                             { 
                                 auto fpa = convert_float_to_fpa<64>(a, std::pow(10, -p));
-                                results[i] = prog::synthesize_rotation(fpa, p, false);
-//                              prog::validate_urotseq(results[i], fpa, p);
+                                results[i] = compiler::prog::synthesize_rotation(fpa, p, false);
+//                              compiler::prog::validate_urotseq(results[i], fpa, p);
                             });
         }
 

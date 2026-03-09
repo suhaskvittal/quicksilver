@@ -213,10 +213,26 @@ target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
 
 add_executable(qs_optimizer main/qs_optimizer.cpp
                             ${COMPILER_FILES}
-                            src/compiler/pass/optimization/gate_cancellation.cpp)
+                            src/compiler/program/rotation_manager.cpp
+                            src/compiler/pass/optimization/cancel_and_coalesce.cpp)
 target_include_directories(qs_optimizer PRIVATE "src")
 target_compile_options(qs_optimizer PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_optimizer PRIVATE qs_common)
+
+target_compile_definitions(qs_optimizer PRIVATE -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
+
+###################################################
+###################################################
+
+# RPC ISA conversion (qs_convert_to_rpc_isa)
+
+add_executable(qs_convert_to_rpc_isa main/qs_convert_to_rpc_isa.cpp
+                                      src/compiler/program/rotation_manager.cpp)
+target_include_directories(qs_convert_to_rpc_isa PRIVATE "src")
+target_compile_options(qs_convert_to_rpc_isa PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_convert_to_rpc_isa PRIVATE
+    -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
+target_link_libraries(qs_convert_to_rpc_isa PRIVATE qs_common)
 
 ###################################################
 ###################################################

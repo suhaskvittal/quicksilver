@@ -84,17 +84,15 @@ public:
 
     /*
      * `type` corresponds to some basic instruction.
-     * This can be a Clifford=T gate (i.e., T, H, etc.),
-     * or some other instruction (like MSWAP)
      * */
-    const TYPE type;
+    TYPE type;
 
     /*
      * `qubits` is a small-buffer-optimized array (inline for <=3 qubits, heap otherwise).
      *
      * The number of valid qubits is `qubit_count`, which is set from `qubits.size()`.
      * */
-    const qubit_array qubits;
+    qubit_array qubits;
 
     /*
      * `angle` and `urotseq` are only useful for RZ and RX gates.
@@ -107,8 +105,8 @@ public:
      * need to be changed during compilation (to support asynchrnous 
      * synthesis).
      * */
-    const fpa_type angle;
-    urotseq_type   urotseq;
+    fpa_type angle;
+    urotseq_type urotseq;
 
     /*
      * `corr_urotseq_array` contains corrective sequences for the given rotation,

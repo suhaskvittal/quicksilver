@@ -7,6 +7,8 @@
 
 #include "nwqec/gridsynth/gridsynth.hpp"
 
+namespace compiler
+{
 namespace prog
 {
 
@@ -424,3 +426,4 @@ _apply_z_rotation(state_type& q, int8_t degree)
 ////////////////////////////////////////////////////////////
 
 } // namespace prog
+} // namespace compiler
