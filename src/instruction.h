@@ -9,8 +9,7 @@
 #include "fixed_point/angle.h"
 #include "generic_io.h"
 #include "globals.h"
-
-#include <array>
+#include "small_vector.h"
 #include <deque>
 #include <iosfwd>
 #include <optional>
@@ -42,10 +41,9 @@ class INSTRUCTION
 {
 public:
     constexpr static size_t FPA_PRECISION{64};
-    constexpr static size_t MAX_QUBITS{3};
     constexpr static int64_t INVALID_NUMBER{-1};
 
-    using qubit_array = std::array<qubit_type, MAX_QUBITS>;
+    using qubit_array = small_vector<qubit_type, 3>;
     using fpa_type = FPA_TYPE<FPA_PRECISION>;
 
     enum class TYPE
@@ -92,11 +90,9 @@ public:
     const TYPE type;
 
     /*
-     * `qubits` is stored in a fixed-width array (see `MAX_QUBITS`)
-     * By default, an entry is `0`.
+     * `qubits` is a small-buffer-optimized array (inline for <=3 qubits, heap otherwise).
      *
-     * The number of valid qubits is determined by the function
-     * `get_inst_qubit_count(INSTRUCTION::TYPE)`.
+     * The number of valid qubits is `qubit_count`, which is set from `qubits.size()`.
      * */
     const qubit_array qubits;
 
@@ -294,14 +290,6 @@ constexpr size_t get_inst_qubit_count(INSTRUCTION::TYPE t);
 /*
  * Other useful functions:
  * */
-
-/*
- * `convert_qubit_container_into_qubit_array` copies the data in the range to an array and returns it.
- * An error is thrown if `std::distance(begin, end)` is not equal to the number of arguments specificed
- * by `INSTRUCTION::TYPE`.
- * */
-template <class ITER>
-INSTRUCTION::qubit_array convert_qubit_container_into_qubit_array(INSTRUCTION::TYPE, ITER begin, ITER end);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

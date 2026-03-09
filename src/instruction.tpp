@@ -11,11 +11,14 @@
 template <class ITER_TYPE>
 INSTRUCTION::INSTRUCTION(TYPE _type, ITER_TYPE q_begin, ITER_TYPE q_end)
     :type{_type},
-    qubits(convert_qubit_container_into_qubit_array(_type, q_begin, q_end)),
+    qubits(q_begin, q_end),
     angle{},
     urotseq{},
-    qubit_count{get_inst_qubit_count(_type)}
-{}
+    qubit_count{qubits.size()}
+{
+    assert(get_inst_qubit_count(_type) == 0
+           || std::distance(q_begin, q_end) == (ptrdiff_t)get_inst_qubit_count(_type));
+}
 
 template <class ITER_TYPE>
 INSTRUCTION::INSTRUCTION(TYPE _type,
@@ -24,11 +27,13 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
                          ITER_TYPE urotseq_begin,
                          ITER_TYPE urotseq_end)
     :type{_type},
-    qubits(convert_qubit_container_into_qubit_array(_type, qubits_init.begin(), qubits_init.end())),
+    qubits(qubits_init.begin(), qubits_init.end()),
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
-    qubit_count{get_inst_qubit_count(_type)}
+    qubit_count{qubits.size()}
 {
+    assert(get_inst_qubit_count(_type) == 0
+           || (ptrdiff_t)qubits_init.size() == (ptrdiff_t)get_inst_qubit_count(_type));
     if (uop_count() > 0)
         get_next_uop();
 }
@@ -40,11 +45,13 @@ INSTRUCTION::INSTRUCTION(TYPE _type,
                          U_IT_TYPE urotseq_begin,
                          U_IT_TYPE urotseq_end)
     :type{_type},
-    qubits(convert_qubit_container_into_qubit_array(_type, q_begin, q_end)),
+    qubits(q_begin, q_end),
     angle{_angle},
     urotseq(urotseq_begin, urotseq_end),
-    qubit_count{get_inst_qubit_count(_type)}
+    qubit_count{qubits.size()}
 {
+    assert(get_inst_qubit_count(_type) == 0
+           || std::distance(q_begin, q_end) == (ptrdiff_t)get_inst_qubit_count(_type));
     if (uop_count() > 0)
         get_next_uop();
 }
@@ -151,19 +158,6 @@ get_inst_qubit_count(INSTRUCTION::TYPE t)
             return 0;
     }
     return 0;  // default case
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-template <class ITER> INSTRUCTION::qubit_array 
-convert_qubit_container_into_qubit_array(INSTRUCTION::TYPE type, ITER begin, ITER end)
-{
-    assert(std::distance(begin, end) == get_inst_qubit_count(type));
-    assert(std::none_of(begin, end, [] (auto q) { return q < 0; }));
-    INSTRUCTION::qubit_array qubits;
-    std::copy(begin, end, qubits.begin());
-    return qubits;
 }
 
 ////////////////////////////////////////////////////////////

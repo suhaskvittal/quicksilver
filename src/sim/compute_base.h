@@ -10,7 +10,6 @@
 #include "sim/production/magic_state.h"
 #include "sim/storage.h"
 
-#include <array>
 #include <memory>
 #include <vector>
 
@@ -62,7 +61,7 @@ public:
     const production_level_type&    top_level_t_factories() const;
     MEMORY_SUBSYSTEM*               memory_hierarchy() const;
 protected:
-    virtual execute_result_type execute_instruction(inst_ptr, std::array<QUBIT*, 3>&& args);
+    virtual execute_result_type execute_instruction(inst_ptr, std::vector<QUBIT*> args);
 
     virtual execute_result_type do_h_or_s_gate(inst_ptr, QUBIT*);
     virtual execute_result_type do_cx_like_gate(inst_ptr, QUBIT* ctrl, QUBIT* target);

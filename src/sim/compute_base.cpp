@@ -60,7 +60,7 @@ COMPUTE_BASE::memory_hierarchy() const
 ////////////////////////////////////////////////////////////
 
 COMPUTE_BASE::execute_result_type
-COMPUTE_BASE::execute_instruction(inst_ptr inst, std::array<QUBIT*, 3>&& args)
+COMPUTE_BASE::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
 {
     if (is_software_instruction(inst->type))
         return execute_result_type{.progress=1, .latency=0};

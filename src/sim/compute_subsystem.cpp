@@ -469,7 +469,7 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 
         // translate the operands of the instruction into the actual program qubits
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-        std::array<QUBIT*, 3> operands;
+        std::vector<QUBIT*> operands(executed_inst->qubit_count);
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
@@ -517,7 +517,7 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         }
         else
         {
-            auto result = execute_instruction(executed_inst, std::move(operands));
+            auto result = execute_instruction(executed_inst, operands);
             success_count += result.progress;
             if (result.progress)
             {
@@ -538,7 +538,7 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE_SUBSYSTEM::update_instruction_stats_on_fetch(inst_ptr inst, std::array<QUBIT*, 3> operands)
+COMPUTE_SUBSYSTEM::update_instruction_stats_on_fetch(inst_ptr inst, const std::vector<QUBIT*>& operands)
 {
     _assign_if_empty(inst->first_ready_cycle, current_cycle());
     _assign_if_empty(inst->first_ready_cycle_for_current_uop, current_cycle());

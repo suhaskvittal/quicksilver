@@ -220,7 +220,7 @@ private:
      * that any logic does not assume that this is the first call for the
      * input instruction.
      * */
-    void update_instruction_stats_on_fetch(inst_ptr, std::array<QUBIT*, 3> operands);
+    void update_instruction_stats_on_fetch(inst_ptr, const std::vector<QUBIT*>& operands);
 
     /*
      * This function is only called once per uop (or once total if the instruction
