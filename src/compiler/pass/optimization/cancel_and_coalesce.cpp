@@ -29,7 +29,7 @@ constexpr size_t DAG_INST_CAPACITY{8192};
 using dag_ptr = std::unique_ptr<DAG>;
 using inst_ptr = DAG::inst_ptr;
 using fpa_type = INSTRUCTION::fpa_type;
-using coalesce_output_type = std::array<inst_ptr, 2>;
+using coalesce_output_type = std::array<std::optional<INSTRUCTION>, 2>;
 using discrete_rotation_type = std::pair<INSTRUCTION::TYPE, INSTRUCTION::TYPE>;
 
 /*
@@ -138,9 +138,20 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
             }
             else if (_is_coalescable(inst->type, prev_inst->type))
             {
-                bool delete_prev = _coalesce(inst, prev_inst);
-                prev_inst->deletable = delete_prev;
-                out.s_gates_removed += delete_prev ? 1 : 0;
+                auto [i1, i2] = _coalesce(inst, prev_inst);
+
+                // replace data of `prev_inst` and `inst` completely:
+                inst->~INSTRUCTION();
+                new (inst) INSTRUCTION(std::move(*i1));
+                if (i2.has_value()) 
+                {
+                    prev_inst->~INSTRUCTION();
+                    new (prev_inst) INSTRUCTION(std::move(*i2));
+                } else 
+                {
+                    prev_inst->deletable = true;
+                }
+                out.s_gates_removed += !i2.has_value() ? 1 : 0;
             }
         }
     }
@@ -197,18 +208,15 @@ _coalesce(inst_ptr curr, inst_ptr prev)
         if (std::abs(d - std::round(d)) < ANALOG_ANGLE_TRUNC_TOL)
         {
             int8_t a = static_cast<int8_t>(std::round(d));
-            auto [t1, t2] = _reverse_discretization(s);
-            out[0] = new INSTRUCTION(t1, curr->q_begin(), curr->q_end());
-            if (t2 != INSTRUCTION::TYPE::NILL)
-                out[1] = new INSTRUCTION(t2, curr->q_begin(), curr->q_end());
+            auto [t1, t2] = _reverse_discretization(a, _is_z_basis(curr->type));
+            out[0].emplace(t1, curr->q_begin(), curr->q_end());
+            if (t2 != INSTRUCTION::TYPE::NIL)
+                out[1].emplace(t2, curr->q_begin(), curr->q_end());
         }
         else
         {
-            out[0] = new INSTRUCTION(curr->type, 
-                                    curr->q_begin(), 
-                                    curr->q_end(), 
-                                    s,
-                                    compiler::prog::rotation_manager_lookup(s));
+            auto urotseq = compiler::prog::rotation_manager_lookup(s);
+            out[0].emplace(curr->type, curr->q_begin(), curr->q_end(), s, urotseq.begin(), urotseq.end());
         }
     }
     else
@@ -218,10 +226,10 @@ _coalesce(inst_ptr curr, inst_ptr prev)
         int8_t s = (a+b)&7;  // mod 8
         assert(s != 0);  // should be canceled earlier
 
-        auto [t1, t2] = _reverse_discretization(s);
-        out[0] = new INSTRUCTION(t1, curr->q_begin(), curr->q_end());
+        auto [t1, t2] = _reverse_discretization(s, _is_z_basis(curr->type));
+        out[0].emplace(t1, curr->q_begin(), curr->q_end());
         if (t2 != INSTRUCTION::TYPE::NIL)
-            out[1] = new INSTRUCTION(t2, prev->q_begin(), prev->q_end());
+            out[1].emplace(t2, prev->q_begin(), prev->q_end());
     }
     return out;
 }
@@ -239,6 +247,7 @@ _is_z_basis(INSTRUCTION::TYPE t)
     case INSTRUCTION::TYPE::SDG:
     case INSTRUCTION::TYPE::T:
     case INSTRUCTION::TYPE::TDG:
+    case INSTRUCTION::TYPE::RZ:
         return true;
     default:
         return false;
