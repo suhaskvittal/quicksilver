@@ -3,17 +3,16 @@
     date:   19 August 2025
 */
 
+#include <bit>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 
-#include <strings.h>
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W> FPA_TYPE<W> 
+template <size_t W> constexpr FPA_TYPE<W>
 convert_float_to_fpa(double x, double tol)
 {
     // bound `x` to the range [0, 2*M_PI)
@@ -24,7 +23,7 @@ convert_float_to_fpa(double x, double tol)
 
     FPA_TYPE<W> out{};
     auto fpeq = [tol] (double x, double y) { return x > y-tol && x < y+tol; };
-    
+
     size_t idx{FPA_TYPE<W>::NUM_BITS-1};
     double m{M_PI};
     while (x > tol)
@@ -39,7 +38,7 @@ convert_float_to_fpa(double x, double tol)
     return out;
 }
 
-template <size_t W> double
+template <size_t W> constexpr double
 convert_fpa_to_float(const FPA_TYPE<W>& x)
 {
     double out{0.0};
@@ -63,7 +62,7 @@ namespace fpa
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W> void
+template <size_t W> constexpr void
 negate_inplace(FPA_TYPE<W>& x)
 {
     using word_type = typename FPA_TYPE<W>::word_type;
@@ -83,7 +82,7 @@ negate_inplace(FPA_TYPE<W>& x)
         return;
 
     auto [word_idx, bit_idx] = x.lsb();
-    
+
     // for the lsb word, we need to flip all bits after the lsb bit.
     if (bit_idx < FPA_TYPE<W>::BITS_PER_WORD-1)
     {
@@ -99,7 +98,7 @@ negate_inplace(FPA_TYPE<W>& x)
         x.set_word(i, ~x.test_word(i));
 }
 
-template <size_t W> void
+template <size_t W> constexpr void
 add_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
 {
     using word_type = typename FPA_TYPE<W>::word_type;
@@ -121,14 +120,14 @@ add_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
     }
 }
 
-template <size_t W> void
+template <size_t W> constexpr void
 sub_inplace(FPA_TYPE<W>& x, FPA_TYPE<W> y)
 {
     negate_inplace(y);
     add_inplace(x, y);
 }
 
-template <size_t W> void
+template <size_t W> constexpr void
 scalar_mul_inplace(FPA_TYPE<W>& x, int64_t y)
 {
     if (y < 0) // transfer the negative to `x` and multiply by `-y`
@@ -140,43 +139,42 @@ scalar_mul_inplace(FPA_TYPE<W>& x, int64_t y)
 
     // algorithm, mostly because I am too lazy to implement FFT:
     //  for each set bit in `y`, compute `x << i` and add it to `x`
-    //  can quickly do this with ffsll
     FPA_TYPE<W> x_base{x};
     while (y)
     {
-        size_t lsb = ffsll(*(long long*)&y)-1;
+        size_t lsb_bit = std::countr_zero(static_cast<uint64_t>(y));
         FPA_TYPE<W> tmp{x_base};
-        tmp.lshft(lsb);
+        tmp.lshft(lsb_bit);
         add_inplace(x, tmp);
-        y &= ~(1L << lsb);
+        y &= ~(int64_t{1} << lsb_bit);
     }
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W> FPA_TYPE<W>
+template <size_t W> constexpr FPA_TYPE<W>
 negate(FPA_TYPE<W> x)
 {
     negate_inplace(x);
     return x;
 }
 
-template <size_t W> FPA_TYPE<W>
+template <size_t W> constexpr FPA_TYPE<W>
 add(FPA_TYPE<W> x, FPA_TYPE<W> y)
 {
     add_inplace(x, y);
     return x;
 }
 
-template <size_t W> FPA_TYPE<W>
+template <size_t W> constexpr FPA_TYPE<W>
 sub(FPA_TYPE<W> x, FPA_TYPE<W> y)
 {
     sub_inplace(x, y);
     return x;
 }
 
-template <size_t W> FPA_TYPE<W>
+template <size_t W> constexpr FPA_TYPE<W>
 scalar_mul(FPA_TYPE<W> x, int64_t y)
 {
     FPA_TYPE<W> out{x};

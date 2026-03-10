@@ -62,7 +62,7 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
 size_t
 surface_code_distance_for_target_logical_error_rate(double e, double p)
 {
-    const double ROUNDING_TOL{0.3};  // `0.3` is arbitrary, feel free to change to your favorite float
+    constexpr double ROUNDING_TOL{0.3};  // `0.3` is arbitrary, feel free to change to your favorite float
 
     double d = 2.0 * ( (std::log(e) - std::log(0.1)) / std::log(100*p) ) - 1.0;
     // need to round intelligently while avoiding floating point issues.
@@ -110,8 +110,8 @@ void
 _verify_bivariate_bicycle_code_physical_error_rate(double p)
 {
     // change `ACCEPTABLE` if you add new values for a given physical error rate.
-    const double ACCEPTABLE[] = {1e-3};
-    const double TOL{1e-9};
+    constexpr double ACCEPTABLE[] = {1e-3};
+    constexpr double TOL{1e-9};
     
     bool none_acceptable = std::none_of(std::begin(ACCEPTABLE), std::end(ACCEPTABLE),
                                     [p, TOL] (double x) { return std::abs(p-x) < TOL; });

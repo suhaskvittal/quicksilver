@@ -110,14 +110,14 @@ public:
     /*
      * `type` corresponds to some basic instruction.
      * */
-    TYPE type;
+    const TYPE type;
 
     /*
      * `qubits` is a small-buffer-optimized array (inline for <=3 qubits, heap otherwise).
      *
      * The number of valid qubits is `qubit_count`, which is set from `qubits.size()`.
      * */
-    qubit_array qubits;
+    const qubit_array qubits;
 
     /*
      * `angle` and `urotseq` are only useful for RZ and RX gates.
@@ -126,11 +126,9 @@ public:
      * have high precision for angles near a power of two).
      *
      * `urotseq` is a sequence of Clifford+T gates that approximate
-     * RZ or RX of `angle`. `urotseq` is not const since it may 
-     * need to be changed during compilation (to support asynchrnous 
-     * synthesis).
+     * RZ or RX of `angle`.
      * */
-    fpa_type angle;
+    const fpa_type angle;
     urotseq_type urotseq;
 
     /*

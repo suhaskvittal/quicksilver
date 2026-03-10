@@ -53,7 +53,7 @@ fact_logical_qubit_count(std::string which)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-const double PHYS_ERROR{1e-3};
+constexpr double PHYS_ERROR{1e-3};
 
 inline double
 sc_logical_error_rate(size_t d)
