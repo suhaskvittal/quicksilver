@@ -113,15 +113,7 @@ is_toffoli_like_instruction(INSTRUCTION::TYPE t)
 }
 
 constexpr bool
-is_clifford_pauli_rotation(INSTRUCTION::TYPE t)
-{
-    return t == INSTRUCTION::TYPE::PAULI_ROTATION_PI
-            || t == INSTRUCTION::TYPE::PAULI_ROTATION_H_PI
-            || t == INSTRUCTION::TYPE::PAULI_ROTATION_H_PI_DAG;
-}
-
-constexpr bool
-is_non_clifford_puali_rotation(INSTRUCTION::TYPE t)
+is_pauli_rotation(INSTRUCTION::TYPE t)
 {
     return t == INSTRUCTION::TYPE::PAULI_ROTATION_Q_PI
             || t == INSTRUCTION::TYPE::PAULI_ROTATION_Q_PI_DAG;

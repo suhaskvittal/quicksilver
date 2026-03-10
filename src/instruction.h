@@ -86,23 +86,18 @@ public:
 
         /*
          * Pauli rotations are generic operations used with Pauli-Based
-         * Computation. They repurpose the `urotseq` field to
-         * store the rotation type for each argument (either X or Z).
-         *
-         * `*_PI` is a full PI rotation (so Z or X)
-         * `*_H_PI` is a half PI rotation (like S)
-         * `*_Q_PI` is a quarter PI (like T)
-         *
-         * the `*_DAG` versions of the rotations are conjugate transpose
-         * variants.
+         * Computation. The specific rotations for each qubit are stored
+         * in `pauli_rotation_axes`
          * */
-        PAULI_ROTATION_PI,
-        PAULI_ROTATION_H_PI,
-        PAULI_ROTATION_H_PI_DAG,
         PAULI_ROTATION_Q_PI,
         PAULI_ROTATION_Q_PI_DAG,
 
         NIL
+    };
+
+    enum class PAULI
+    {
+        I, X, Y, Z, nX, nY, nZ
     };
 
     using urotseq_type = std::vector<INSTRUCTION::TYPE>;
@@ -143,6 +138,11 @@ public:
      * By default, this is not initialized since it is a niche use case.
      * */
     std::deque<urotseq_type> corr_urotseq_array{};
+
+    /*
+     * Axes for each qubit of a `PAULI_ROTATION_*` instruction.
+     * */
+    std::vector<PAULI> pauli_rotation_axes{};
 
     /*
      * Same value as `get_inst_qubit_count(type)`
@@ -299,8 +299,7 @@ constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
 constexpr bool is_cx_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
 
-constexpr bool is_clifford_pauli_rotation(INSTRUCTION::TYPE);
-constexpr bool is_non_clifford_pauli_rotation(INSTRUCTION::TYPE);
+constexpr bool is_pauli_rotation(INSTRUCTION::TYPE);
 
 /*
  * This function is a constexpr function that returns
