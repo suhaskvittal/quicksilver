@@ -34,6 +34,13 @@ constexpr std::string_view BASIS_GATES[] =
     "store",
     "coupled_load_store",
 
+    // pbc instruction:
+    "pauli_rotation_pi",
+    "pauli_rotation_h_pi",
+    "pauli_rotation_h_pi_dag",
+    "pauli_rotation_q_pi",
+    "pauli_rotation_q_pi_dag",
+
     "nil"
 };
 
@@ -76,6 +83,24 @@ public:
         LOAD,
         STORE,
         COUPLED_LOAD_STORE,
+
+        /*
+         * Pauli rotations are generic operations used with Pauli-Based
+         * Computation. They repurpose the `urotseq` field to
+         * store the rotation type for each argument (either X or Z).
+         *
+         * `*_PI` is a full PI rotation (so Z or X)
+         * `*_H_PI` is a half PI rotation (like S)
+         * `*_Q_PI` is a quarter PI (like T)
+         *
+         * the `*_DAG` versions of the rotations are conjugate transpose
+         * variants.
+         * */
+        PAULI_ROTATION_PI,
+        PAULI_ROTATION_H_PI,
+        PAULI_ROTATION_H_PI_DAG,
+        PAULI_ROTATION_Q_PI,
+        PAULI_ROTATION_Q_PI_DAG,
 
         NIL
     };
@@ -273,6 +298,9 @@ constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
 constexpr bool is_cx_like_instruction(INSTRUCTION::TYPE);
 constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
+
+constexpr bool is_clifford_pauli_rotation(INSTRUCTION::TYPE);
+constexpr bool is_non_clifford_pauli_rotation(INSTRUCTION::TYPE);
 
 /*
  * This function is a constexpr function that returns
