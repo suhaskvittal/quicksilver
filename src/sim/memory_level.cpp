@@ -18,7 +18,13 @@ namespace sim
 namespace
 {
 
-using routing_ptr = std::unique_ptr<MEMORY_SUBSYSTEM::routing_base_type>;
+constexpr size_t MEMORY_CHANNELS{4};
+
+/*
+ * Computes the width of each memory channel (see `MULTI_CHANNEL_BUS`)
+ * given the number of storage blocks and `MEMORY_CHANNELS`.
+ * */
+constexpr size_t _memory_channel_width(size_t storage_count);
 
 template <class ITER>
 ITER _lookup_qubit(ITER begin, ITER end, QUBIT*);
@@ -26,17 +32,28 @@ ITER _lookup_qubit(ITER begin, ITER end, QUBIT*);
 template <class ITER>
 ITER _find_empty_storage(ITER begin, ITER end, const routing_ptr&, cycle_type current_cycle);
 
-
 } // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
-    :storages_(std::move(storages))
+    :storages_(std::move(storages)),
+    routing_{MEMORY_CHANNELS, _memory_channel_width(storages_.size())}
 {
-    using MBC = routing::MULTI_CHANNEL_BUS<STORAGE>;
-    routing_ = std::make_unique<MBC>(storages_, 2);
+    // initialize routing layout:
+    for (size_t i = 0; i < storages_.size(); i++)
+    {
+        size_t ii{i};
+
+        const int ch = i % MEMORY_CHANNELS;
+        i /= MEMORY_CHANNELS;
+        const int ro = i & 1;
+        i >>= 1;
+        const int co = i % routing_.channel_width;
+
+        routing_.set_location(storages_[i], ch, ro, co);
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -58,7 +75,26 @@ MEMORY_SUBSYSTEM::do_load(QUBIT* q, cycle_type c_current_cycle, double c_freq_kh
         std::cerr << _die{};
     }
 
-    if (routing_->can_route_to(*s_it, c_current_cycle))
+    auto* s = *s_it;
+
+    // there are two parts to the load routing procedure:
+    //  (1) d cycles are spent doing a ZZ/XX measurement with some ancilla surface code patch via the LPU/adapter
+    //  (2) d cycles are spent routing the ancilla patch out of the channel
+    const cycle_type latency = convert_cycles_betwen_frequencies(s->code_distance, s->freq_khz, c_freq_khz);
+    
+    // check if we can lock routing space for the first part of the procedure:
+    const bool r1_can_lock = routing_.test_local_resource(s, c_current_cycle, c_current_cycle+latency);
+    const bool r2_can_lock = routing_.test_resources_between(routing::MC_LEFT_ENTRY, 
+                                                                s, 
+                                                                c_current_cycle+latency,
+                                                                c_current_cycle+2*latency);
+    if (r1_can_lock && r2_can_lock)
+    {
+        auto result = s->do_load(q);
+        _convert_cycles_for_result(result, c_freq_khz);
+    }
+
+    if ()
         return handle_access_outcome((*s_it)->do_load(q), *s_it, c_current_cycle, c_freq_khz);
     return access_result_type{};
 }

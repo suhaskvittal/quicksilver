@@ -78,7 +78,7 @@ STORAGE::do_load(QUBIT* q)
     assert(q_it != contents_.end());
 
     auto result = do_memory_access(load_latency, ACCESS_TYPE::LOAD);
-    result.critical_latency = load_latency;
+    result.critical_latency = result.latency;
     if (result.success)
         contents_.erase(q_it);
     return result;
@@ -103,14 +103,11 @@ STORAGE::access_result_type
 STORAGE::do_coupled_load_store(QUBIT* ld, QUBIT* st)
 {
     // additional data movement overhead to move out loaded qubit and move in stored qubit (surface code routing)
-    const cycle_type ADDED_DATA_MOVEMENT_LATENCY = 2*code_distance;
-
     auto ld_it = contents_.find(ld);
     assert(ld_it != contents_.end() && contents_.count(st) == 0);
 
-    auto result = do_memory_access(load_latency + store_latency + ADDED_DATA_MOVEMENT_LATENCY, 
-                                    ACCESS_TYPE::COUPLED_LOAD_STORE);
-    result.critical_latency = load_latency;
+    auto result = do_memory_access(load_latency + store_latency, ACCESS_TYPE::COUPLED_LOAD_STORE);
+    result.critical_latency = total_latency - store_latency;
     if (result.success)
     {
         contents_.erase(ld_it);

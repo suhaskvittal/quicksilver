@@ -1,75 +1,149 @@
+/*
+ *  author: Suhas Vittal
+ *  date:   5 February 2026
+ * */
+
 #ifndef SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
 #define SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
 
 #include "sim/routing_model.h"
+
+#include <tuple>
+#include <unordered_map>
+#include <vector>
 
 namespace sim
 {
 namespace routing
 {
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 /*
- *            |----- BLOCK
- *            |----- BLOCK
- * CHANNEL 0  |----- BLOCK
- *            |----- BLOCK
- *            |----- BLOCK
- * ENTRY -----|
- *            |----- BLOCK
- *            |----- BLOCK
- * CHANNEL 1  |----- BLOCK
- *            |----- BLOCK
- *            |----- BLOCK
+ * `MULTI_CHANNEL_BUS` is a generalization of a routing structure
+ * one might often see in FTQCs with topological codes.
  *
- * Channels can be accessed concurrently (though beyond 2, the
- * layout will be different than the above).
+ * Each channel can be accessed concurrently.
+ *
+ * We want to have a "high-level" access mechanism. For example,
+ * if I have a pointer to a qubit, then I want to use that pointer
+ * to manipulate the routing space. This is generally hard to 
+ * implement, so we give this power to the user using a CRTP (see `IMPL`).
+ *
+ * `IMPL` should implement a function `translate()` that takes
+ * a type of interest and returns `id_type` (see below).
+ * The types that need to be supported by `IMPL` are those that
+ * are potentially passed into:
+ *  (1) `set_location()`
+ *  (2) `test_and_lock_local_resource()`
+ *  (3) `test_and_lock_resources_between()`
+ *  etc.
+ *
+ * Each "C" in the channel is a column, which are organized into
+ * rows. Each "entity" in the routing space is defined by a channel,
+ * row (0 or 1), and column index (0 to num_resources/2).
+ *
+ *                CCCCCCCCCCCCCCCCCCCCCCCCC
+ * Channel: entry---------------------------entry
+ *                CCCCCCCCCCCCCCCCCCCCCCCCC
+ * 
+ * Each channel can be accessed concurrently.
  * */
 
-template <class T>
-class MULTI_CHANNEL_BUS : public ROUTING_MODEL<T>
+constexpr int64_t MCB_LEFT_ENTRY{0};
+constexpr int64_t MCB_RIGHT_ENTRY{-1};
+
+template <class IMPL>
+class MULTI_CHANNEL_BUS
 {
 public:
+    using id_type = int64_t;
+    using channel_type = std::vector<RESOURCE>;
+    using coord_type = std::tuple<int, int, int>;
+
     const size_t num_channels;
-protected:
-    using ROUTING_MODEL<T>::entities_;
+    const size_t channel_width;
 private:
-    std::vector<cycle_type> cycle_available_;
+    std::unordered_map<id_type, coord_type> location_map_;
+    std::vector<channel_type> channels_;
 public:
-    MULTI_CHANNEL_BUS(std::vector<T*> entities, size_t _num_channels)
-        :ROUTING_MODEL<T>(entities),
-        num_channels(_num_channels),
-        cycle_available_(_num_channels, 0)
-    {}
+    MULTI_CHANNEL_BUS(size_t num_channels, size_t num_resources_per_channel);
 
-    bool
-    can_route_to(T* x, cycle_type current_cycle) const override
-    {
-        return cycle_available_[channel_idx(x)] <= current_cycle;
-    }
+    /*
+     * Sets the location of the given object in the routing space.
+     * */
+    template <class T> 
+    void set_location(T, int channel, int row, int column);
 
-    void
-    lock_route_to(T* x, cycle_type until_cycle) override
-    {
-        cycle_available_[channel_idx(x)] = until_cycle;
-    }
+    /*
+     * Checks the local resource of the given object.
+     * If the resource is available from cycle `from` to `to`,
+     * then the resource is locked and the function returns `true`.
+     * */
+    template <class T>
+    bool test_and_lock_local_resource(T, cycle_type from, cycle_type to);
 
-    cycle_type
-    ready_cycle(T* x) const
-    {
-        return cycle_available_[channel_idx(x)];
-    }
+    /*
+     * Checks if the routing resources between the two
+     * objects is lockable. If so, then it is locked from
+     * `from` to `to` and this function returns true.
+     * */
+    template <class T, class U>
+    bool test_and_lock_resources_between(T, U, cycle_type, cycle_type);
+
+    /*
+     * `swap_locations_of()` and `replace()` are useful for
+     * handling data movement of any kind.
+     *
+     * `swap_locations_of()` would be used after some kind of teleportation,
+     * so for example after a T gate teleportation, as the program qubit
+     * is teleported to a qubit of the last EPR pair.
+     *
+     * `replace()` would be useful following a memory access.
+     * */
+    template <class T, class U>
+    void swap_locations_of(T, U);
+
+    template <class T, class U>
+    void replace(T outgoing, U incoming);
+
+    template <class T>
+    const RESOURCE& get_local_resource_ref(T) const;
+
+    /*
+     * Calls `CALLBACK` for each routing resource between the two
+     * objects. `CALLBACK` is given a `const RESOURCE&`.
+     *
+     * If `CALLBACK` returns true, then the function exits
+     * early.
+     * */
+    template <class T, class U, class CALLBACK>
+    void for_each_resource_between(T, U, const CALLBACK&) const;
 private:
-    size_t
-    channel_idx(T* x) const
-    {
-        auto it = std::find(entities_.begin(), entities_.end(), x);
-        size_t idx = std::distance(entities_.begin(), it);
-        return idx % num_channels;
-    }
+    /*
+     * This function calls `IMPL::translate()`, but only if `T` is not
+     * some integral type.
+     * */
+    template <class T>
+    id_type translate(T) const; 
+
+    /*
+     * These functions
+     * */
+    template <class T>
+    auto& _get_local_resource_ref(this auto& self, T);
+
+    template <class T, class U, class CALLBACK>
+    void _for_each_resource_between(this auto& self, T, U, const CALLBACK&);
 };
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 } // namespace routing
 } // namespace sim
+
+#include "multi_channel_bus.tpp"
 
 #endif

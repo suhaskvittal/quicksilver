@@ -48,18 +48,13 @@ public:
 
     ~small_vector();
 
-    T*       data()       { return is_heap() ? heap_ : inline_; }
-    const T* data() const { return is_heap() ? heap_ : inline_; }
-
-    T& operator[](size_t i)       { return data()[i]; }
-    T  operator[](size_t i) const { return data()[i]; }
+    auto* data(this auto& self)              { return self.is_heap() ? self.heap_ : self.inline_; }
+    auto& operator[](this auto& self, size_t i) { return self.data()[i]; }
 
     size_t size() const { return size_; }
 
-    T*       begin()       { return data(); }
-    T*       end()         { return data() + size_; }
-    const T* begin() const { return data(); }
-    const T* end()   const { return data() + size_; }
+    auto* begin(this auto& self) { return self.data(); }
+    auto* end(this auto& self)   { return self.data() + self.size_; }
 private:
     bool is_heap() const { return size_ > N; }
 };
