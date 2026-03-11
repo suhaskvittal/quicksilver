@@ -137,8 +137,10 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation(inst_ptr inst,
             {
                 tp_remaining--;
                 s_t_gate_teleports++;
-                if (!GL_T_GATE_DO_AUTOCORRECT)
-                    out.latency += (GL_RNG() & 3) ? 2*code_distance : 0; // any possible correction incurs a 2-cycle latency
+                if (GL_T_GATE_DO_AUTOCORRECT)
+                    out.latency += code_distance;
+                else
+                    out.latency += 2*code_distance;
                 any_teleports = true;
             }
 
@@ -154,14 +156,13 @@ COMPUTE_BASE::do_rotation_gate_with_teleportation(inst_ptr inst,
     }
 
     if (any_teleports)
-    {
         s_t_gate_teleport_episodes++;
-        if (GL_T_GATE_DO_AUTOCORRECT)
-            out.latency += 2*code_distance;
-    }
 
     if (GL_ZERO_LATENCY_T_GATES)
         out.latency = 0;
+
+    // update `q` cycle available:
+    q->cycle_available = current_cycle() + out.latency;
 
     return out;
 }

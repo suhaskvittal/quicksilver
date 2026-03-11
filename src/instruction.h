@@ -225,7 +225,7 @@ public:
     template <class Q_IT_TYPE, class U_IT_TYPE>
     INSTRUCTION(TYPE, Q_IT_TYPE q_begin, Q_IT_TYPE q_end, fpa_type, U_IT_TYPE urotseq_begin, U_IT_TYPE urotseq_end);
 
-    INSTRUCTION(const INSTRUCTION&) =default;
+    INSTRUCTION(const INSTRUCTION&);
 
     ~INSTRUCTION();
 

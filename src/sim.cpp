@@ -130,6 +130,7 @@ print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subs
         print_stat_line(out, "RPC_SERVICE_CYCLES", mean_rpc_cycle_latency);
         print_stat_line(out, "RPC_IDLE_CYCLES", mean_rpc_idle_cycles);
         print_stat_line(out, "RPC_INVALIDATES", rotation_subsystem->s_invalidates);
+        print_stat_line(out, "RPC_ACTIVE_INVALIDATES", rotation_subsystem->s_active_invalidates);
     }
 
     for (auto* c : compute_subsystem->clients())

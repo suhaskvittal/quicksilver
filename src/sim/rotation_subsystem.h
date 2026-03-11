@@ -69,6 +69,7 @@ public:
     uint64_t s_rotation_service_cycles{0};
     uint64_t s_rotation_idle_cycles{0};
     uint64_t s_invalidates{0};
+    uint64_t s_active_invalidates{0};
 private:
     request_map_type request_map_;
 

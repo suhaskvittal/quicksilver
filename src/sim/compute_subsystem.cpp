@@ -398,8 +398,11 @@ COMPUTE_SUBSYSTEM::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_
     if (is_rotation_instruction(inst->type))
         s_total_rotations++;
 
-    if (is_rpc_enabled())
-        rotation_subsystem_->invalidate(inst);
+    if (is_rpc_enabled() && rotation_subsystem_->is_request_pending(inst))
+    {
+        std::cerr << "COMPUTE_SUBSYSTEM::retire_instruction: rotation instruction "
+                    << *inst << " is pending in RS at retirement" << _die{};
+    }
 
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);
@@ -431,7 +434,7 @@ COMPUTE_SUBSYSTEM::do_context_switch(CLIENT* in, CLIENT* out)
     const context_type& in_ctx = client_context_table_[in->id];
     std::vector<QUBIT*> out_active_qubits;
     out_active_qubits.reserve(local_memory_capacity / concurrent_clients);
-    std::copy_if(local_memory_->contents().begin(), local_memory_->contents().end(), out_active_qubits.begin(),
+    std::copy_if(local_memory_->contents().begin(), local_memory_->contents().end(), std::back_inserter(out_active_qubits),
                 [out_id=out->id] (QUBIT* q) { return q->client_id == out_id; });
 
     // generate memory accesses:
@@ -456,6 +459,8 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 {
     auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
 
+    std::vector<QUBIT*> operands(3);
+
     long success_count{0};
     for (auto* inst : front_layer)
     {
@@ -469,7 +474,6 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
 
         // translate the operands of the instruction into the actual program qubits
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-        std::vector<QUBIT*> operands(executed_inst->qubit_count);
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
@@ -493,9 +497,13 @@ COMPUTE_SUBSYSTEM::fetch_and_execute_instructions_from_client(CLIENT* c)
         
         // (rpc) if this is the first visit for this instruction, check the `rotation_subsystem_`
         // and do other actions:
-        if (is_rpc_enabled() && is_rotation_instruction(inst->type) && !inst->rpc_has_been_visited)
+        if (is_rpc_enabled() && is_rotation_instruction(inst->type))
+        {
             if (rpc_handle_instruction(c, inst, operands[0]))
                 continue;
+            inst->rpc_has_been_visited = true;
+            rotation_subsystem_->invalidate(inst);
+        }
             
         // RZ and RX gates are a special case since multiple uops of progress can be done
         if (is_rotation_instruction(inst->type) && GL_T_GATE_TELEPORTATION_MAX > 0)
@@ -626,6 +634,7 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     {
         assert(!inst->corr_urotseq_array.empty());
 
+        inst->reset_uops();
         inst->urotseq = inst->corr_urotseq_array.front();
         inst->corr_urotseq_array.pop_front();
 
@@ -635,9 +644,13 @@ COMPUTE_SUBSYSTEM::rpc_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else if (lookup_result == RPC_LOOKUP_RESULT::IN_PROGRESS)
     {
-        rotation_subsystem_->invalidate(inst);
-        rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
-        return false;
+        if (inst->uops_retired() < 0.25*inst->uop_count())
+        {
+            rotation_subsystem_->invalidate(inst);
+            rpc_find_and_attempt_allocate_for_future_rotation(c, inst);
+            inst->reset_uops();
+            return false;
+        }
     }
     else
     {
@@ -685,10 +698,11 @@ COMPUTE_SUBSYSTEM::rpc_lookup_rotation(inst_ptr inst, QUBIT* q)
 void
 COMPUTE_SUBSYSTEM::rpc_find_and_attempt_allocate_for_future_rotation(CLIENT* c, inst_ptr inst)
 {
-    constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{0};
-    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{16};
-    
-    inst->rpc_has_been_visited = true;
+    constexpr size_t RPC_DAG_LOOKAHEAD_START_LAYER{8};
+    constexpr size_t RPC_DAG_LOOKAHEAD_DEPTH{8};
+
+    if (inst->rpc_has_been_visited)
+        return;
 
     if (!is_rpc_enabled())
         return;

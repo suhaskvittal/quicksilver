@@ -255,7 +255,10 @@ ROTATION_SUBSYSTEM::invalidate(inst_ptr inst)
     // If has qubit, delete and hand off. If in pending_queue_,
     // it will be skipped/deleted when popped via pop_next_valid_pending_request().
     if (req->allocated_qubit != nullptr)
+    {
         delete_request(req);
+        s_active_invalidates++;
+    }
 }
 
 ////////////////////////////////////////////////////////////

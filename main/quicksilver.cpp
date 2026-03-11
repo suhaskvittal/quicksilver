@@ -145,7 +145,7 @@ main(int argc, char* argv[])
         .optional("", "--enable-t-autocorrect", 
                         "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
 
-        .optional("-rpc", "--rpc", "Enable rotation precomputation", conf.rpc_enabled, false)
+        .optional("-rpc", "--rpc", "Enable rotation precomputation", GL_USE_RPC_ISA, 0)
         .optional("", "--rpc-ttp-always", "Enable T teleportation always for rotation subsystem", sim::GL_RPC_ALWAYS_USE_TELEPORTATION, false)
         .optional("", "--rpc-capacity", "Amount of rotation precomputation storage", conf.rpc_capacity, 2)
         .optional("", "--rpc-watermark", "Watermark for rotation precomputation", conf.rpc_watermark, 0.5)
@@ -183,7 +183,7 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    GL_USE_RPC_ISA = 1;
+    conf.rpc_enabled = (GL_USE_RPC_ISA > 0);
 
     /* Parse trace string and do jit compilation if neeeded */
 

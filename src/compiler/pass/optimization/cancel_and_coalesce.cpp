@@ -39,6 +39,8 @@ using discrete_rotation_type = std::pair<INSTRUCTION::TYPE, INSTRUCTION::TYPE>;
 static thread_local std::vector<inst_ptr> LAST_INST;
 static thread_local std::vector<inst_ptr> PREV_FRONT_LAYER;
 
+static thread_local uint64_t INST_COUNT{0};
+
 /*
  * Subroutines
  * */
@@ -84,6 +86,9 @@ discrete_rotation_type _reverse_discretization(int8_t, bool use_z_basis);
 result_type
 cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& istrm)
 {
+    std::cout << "\tcancel_and_coalesce: ";
+    std::cout.flush();
+        
     return run(ostrm, istrm, _init, _loop, _cleanup, DAG_INST_CAPACITY);
 }
 
@@ -104,6 +109,8 @@ _init(IO_UTILITY& io)
 
     PREV_FRONT_LAYER.clear();
     PREV_FRONT_LAYER.reserve(io.num_qubits);
+
+    INST_COUNT = 0;
 }
 
 ////////////////////////////////////////////////////////////
@@ -121,7 +128,17 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
 
         // check that all operands of `inst` had the same previous instruction:
         inst_ptr prev_inst = LAST_INST[inst->qubits[0]];
-        if (prev_inst == nullptr || prev_inst->deletable) 
+        if (prev_inst == nullptr 
+                || prev_inst->deletable 
+                || prev_inst->qubit_count != inst->qubit_count)
+        {
+            continue;
+        }
+
+        const bool are_cancellable = _gates_are_inverses(inst->type, prev_inst->type)
+                                        || (inst->type == prev_inst->type && is_rotation_instruction(inst->type));
+        const bool are_coalescable = _is_coalescable(inst->type, prev_inst->type);
+        if (!are_cancellable && !are_coalescable)
             continue;
 
         bool all_match = std::all_of(inst->q_begin()+1, inst->q_end(),
@@ -136,17 +153,17 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
                 inst->deletable = true;
                 out.s_gates_removed += 2;
             }
-            else if (_is_coalescable(inst->type, prev_inst->type))
+            else
             {
                 auto [i1, i2] = _coalesce(inst, prev_inst);
 
                 // replace data of `prev_inst` and `inst` completely:
                 inst->~INSTRUCTION();
-                new (inst) INSTRUCTION(std::move(*i1));
+                new (inst) INSTRUCTION(*i1);
                 if (i2.has_value()) 
                 {
                     prev_inst->~INSTRUCTION();
-                    new (prev_inst) INSTRUCTION(std::move(*i2));
+                    new (prev_inst) INSTRUCTION(*i2);
                 } else 
                 {
                     prev_inst->deletable = true;
@@ -155,6 +172,14 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
             }
         }
     }
+
+    /* print progress */
+    constexpr uint64_t PRINT_PROGRESS{1'000'000};
+    uint64_t before_mod = INST_COUNT % PRINT_PROGRESS,
+             after_mod = (INST_COUNT+front_layer.size()) % PRINT_PROGRESS;
+    if (before_mod > after_mod)
+        (std::cout << ".").flush();
+    INST_COUNT += front_layer.size();
 
     // commit all non-deletable instructions in the previous layer
     for (auto* inst : PREV_FRONT_LAYER)
@@ -169,6 +194,7 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
     PREV_FRONT_LAYER = std::move(front_layer);
 
     out.progress += out.s_gates_removed - prev_gates_removed;
+
     return false;
 }
 

@@ -97,6 +97,26 @@ INSTRUCTION::INSTRUCTION(TYPE _type, std::initializer_list<qubit_type> _qubits)
            || (ptrdiff_t)_qubits.size() == (ptrdiff_t)get_inst_qubit_count(_type));
 }
 
+INSTRUCTION::INSTRUCTION(const INSTRUCTION& other)
+    :type(other.type),
+    qubits(other.qubits),
+    angle(other.angle),
+    urotseq(other.urotseq),
+    corr_urotseq_array(other.corr_urotseq_array),
+    qubit_count(other.qubit_count),
+    number(other.number),
+    cycle_done(other.cycle_done),
+    deletable(other.deletable),
+    first_ready_cycle(other.first_ready_cycle),
+    first_ready_cycle_for_current_uop(other.first_ready_cycle_for_current_uop),
+    first_cycle_with_all_load_results_available(other.first_cycle_with_all_load_results_available),
+    first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
+    original_unrolled_inst_count(other.original_unrolled_inst_count),
+    rpc_has_been_visited(other.rpc_has_been_visited),
+    current_uop_(other.current_uop_ ? new INSTRUCTION(*other.current_uop_) : nullptr),
+    uops_retired_(other.uops_retired_)
+{}
+
 INSTRUCTION::~INSTRUCTION()
 {
     if (current_uop_ != nullptr)
