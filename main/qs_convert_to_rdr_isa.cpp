@@ -24,12 +24,12 @@ main(int argc, char* argv[])
 {
     std::string input_file;
     std::string output_file;
-    int64_t     rpc_level;
+    int64_t     rdr_level;
 
     ARGPARSE()
         .required("input-file", "input binary file (non-RPC ISA)", input_file)
         .required("output-file", "output binary file (RPC ISA)", output_file)
-        .optional("-rpc", "--rotation-recomputation-isa", "RPC level (default 1)", rpc_level, 1)
+        .optional("-rdr", "--rotation-recomputation-isa", "RPC level (default 1)", rdr_level, 1)
         .parse(argc, argv);
 
     compiler::prog::rotation_manager_init();
@@ -47,7 +47,7 @@ main(int argc, char* argv[])
     while (true)
     {
         // read with RPC disabled so we don't try to read corr_urotseq data:
-        GL_USE_RPC_ISA = 0;
+        GL_USE_RDR_ISA = 0;
         INSTRUCTION* inst = read_instruction_from_stream(istrm);
         if (inst == nullptr)
             break;
@@ -55,7 +55,7 @@ main(int argc, char* argv[])
         // populate corrective sequences for rotation instructions:
         if (is_rotation_instruction(inst->type))
         {
-            for (int64_t i = 0; i < rpc_level; i++)
+            for (int64_t i = 0; i < rdr_level; i++)
             {
                 inst->corr_urotseq_array.push_back(
                     compiler::prog::rotation_manager_lookup(fpa::scalar_mul(inst->angle, 2*(i+1))));
@@ -63,7 +63,7 @@ main(int argc, char* argv[])
         }
 
         // write with RPC enabled so corrective sequences are serialized:
-        GL_USE_RPC_ISA = rpc_level;
+        GL_USE_RDR_ISA = rdr_level;
         write_instruction_to_stream(ostrm, inst);
 
         delete inst;
@@ -74,7 +74,7 @@ main(int argc, char* argv[])
     generic_strm_close(ostrm);
 
     print_stat_line(std::cout, "INSTRUCTIONS_CONVERTED", inst_count);
-    print_stat_line(std::cout, "RPC_LEVEL", rpc_level);
+    print_stat_line(std::cout, "RDR_LEVEL", rdr_level);
 
     compiler::prog::rotation_manager_end();
     return 0;

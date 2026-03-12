@@ -46,24 +46,41 @@ public:
     {
         using routing::MULTI_CHANNEL_BUS<routing_type>::id_type;
 
-        COMPUTE_SUBSYSTEM* owner;
+        COMPUTE_SUBSYSTEM* c;
 
         routing_type(COMPUTE_SUBSYSTEM*);
         id_type translate(QUBIT*) const;
     };
 
+    /*
+     * Array type for tracking instruction frequency
+     * */
+    using inst_usage_array = std::array<uint64_t, static_cast<size_t>(INSTRUCTION::TYPE::NIL)>;
+
     const size_t code_distance;
     const size_t local_memory_capacity;
 
     /*
+     * Dedicated ancilla are any ancilla that are used for some policy,
+     * such as ancilla space dedicated for auto-correction.
+     *
+     * This is mainly used so that we know where to route.
+     * */
+    const size_t dedicated_ancilla_count;
+
+    /*
      * Statistics:
      * */
+
+    inst_usage_array s_inst_executed_by_type{};
 private:
     local_storage_type local_memory_;
     production_level_type t_factories_;
     memory_subsystem_type memory_subsystem_;
 
     routing_type routing_;
+
+    local_storage_type dedicated_ancilla_;
 
     /*
      * `memory_level_map_` is used to accelerate lookups into the
@@ -77,6 +94,7 @@ public:
                         size_t local_memory_capacity,
                         production_level_type t_factories,
                         memory_subsystem_type memory_subsystem);
+    ~COMPUTE_SUBSYSTEM();
 
     void initialize_qubits(std::vector<QUBIT*> program_qubits);
 
@@ -95,6 +113,7 @@ public:
     const local_storage_type& local_memory() const;
     const production_level_type& t_factories() const;
     const memory_subsystem_type& memory_subsystem() const;
+    const local_storage_type& dedicated_ancilla() const;
 protected:
     long operate() override { return 1; }
 private:

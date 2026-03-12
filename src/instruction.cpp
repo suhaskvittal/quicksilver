@@ -112,7 +112,7 @@ INSTRUCTION::INSTRUCTION(const INSTRUCTION& other)
     first_cycle_with_all_load_results_available(other.first_cycle_with_all_load_results_available),
     first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
-    rpc_has_been_visited(other.rpc_has_been_visited),
+    rdr_has_been_visited(other.rdr_has_been_visited),
     current_uop_(other.current_uop_ ? new INSTRUCTION(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)
 {}
@@ -312,7 +312,7 @@ read_instruction_from_stream(generic_strm_type& istrm)
     INSTRUCTION* inst = new INSTRUCTION{type, q_begin, q_end, angle, urotseq.begin(), urotseq.end()};
 
     // if there any corrective urotseq, handle now:
-    if (GL_USE_RPC_ISA && is_rotation_instruction(type))
+    if (GL_USE_RDR_ISA && is_rotation_instruction(type))
     {
         for (size_t i = 0; i < enc.corr_urotseq_count; i++)
         {
@@ -344,7 +344,7 @@ write_instruction_to_stream(generic_strm_type& ostrm, const INSTRUCTION* inst)
     _write_urotseq_to_encoded_data(enc.urotseq_size, enc.urotseq, inst->urotseq);
 
     // corrective urotseq:
-    if (GL_USE_RPC_ISA)
+    if (GL_USE_RDR_ISA)
     {
         enc.corr_urotseq_count = inst->corr_urotseq_array.size();
         for (size_t i = 0; i < inst->corr_urotseq_array.size(); i++)
@@ -412,7 +412,7 @@ _fill_or_consume_serialized_instruction(io_encoding& enc, generic_strm_type& str
         _fill_or_consume_urotseq(strm, &enc.urotseq_size, enc.urotseq, io_fn);
 
         // corrective rotation sequences:
-        if (GL_USE_RPC_ISA)
+        if (GL_USE_RDR_ISA)
         {
             io_fn(strm, &enc.corr_urotseq_count, sizeof(enc.corr_urotseq_count));
             assert(enc.corr_urotseq_count <= io_encoding::MAX_CORR_UROTSEQ);

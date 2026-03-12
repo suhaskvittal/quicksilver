@@ -119,6 +119,7 @@ set(SIM_FILES
     src/sim/client.cpp
     src/sim/compute_subsystem.cpp
     src/sim/driver.cpp
+    src/sim/driver/rotation_directed_runahead.cpp
     src/sim/memory/bivariate_bicycle.cpp
     src/sim/memory_level.cpp
     src/sim/operable.cpp
@@ -224,15 +225,15 @@ target_compile_definitions(qs_optimizer PRIVATE -DROTATION_SYNTHESIS_LUT_FOLDER_
 ###################################################
 ###################################################
 
-# RPC ISA conversion (qs_convert_to_rpc_isa)
+# RPC ISA conversion (qs_convert_to_rdr_isa)
 
-add_executable(qs_convert_to_rpc_isa main/qs_convert_to_rpc_isa.cpp
+add_executable(qs_convert_to_rdr_isa main/qs_convert_to_rdr_isa.cpp
                                       src/compiler/program/rotation_manager.cpp)
-target_include_directories(qs_convert_to_rpc_isa PRIVATE "src")
-target_compile_options(qs_convert_to_rpc_isa PRIVATE ${COMPILE_OPTIONS})
-target_compile_definitions(qs_convert_to_rpc_isa PRIVATE
+target_include_directories(qs_convert_to_rdr_isa PRIVATE "src")
+target_compile_options(qs_convert_to_rdr_isa PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_convert_to_rdr_isa PRIVATE
     -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
-target_link_libraries(qs_convert_to_rpc_isa PRIVATE qs_common)
+target_link_libraries(qs_convert_to_rdr_isa PRIVATE qs_common)
 
 ###################################################
 ###################################################

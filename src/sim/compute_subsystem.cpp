@@ -4,6 +4,7 @@
  * */
 
 #include "sim/compute_subsystem.h"
+#include "sim.h"
 
 namespace sim
 {
@@ -14,6 +15,8 @@ namespace sim
 namespace
 {
 
+size_t _dedicated_ancilla_count();
+
 size_t _num_routing_channels(COMPUTE_SUBSYSTEM*);
 size_t _channel_width(COMPUTE_SUBSYSTEM*);
 
@@ -22,16 +25,28 @@ size_t _channel_width(COMPUTE_SUBSYSTEM*);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::routing_type::routing_type(COMPUTE_SUBSYSTEM* cs)
-    :MULTI_CHANNEL_BUS(_num_routing_channels(cs), _channel_width(cs)),
-    owner(cs)
+COMPUTE_SUBSYSTEM::routing_type::routing_type(COMPUTE_SUBSYSTEM* _c)
+    :MULTI_CHANNEL_BUS(_num_routing_channels(_c), _channel_width(_c)),
+    c(_c)
 {}
 
 COMPUTE_SUBSYSTEM::routing_type::id_type
 COMPUTE_SUBSYSTEM::routing_type::translate(QUBIT* q) const
 {
-    auto begin = owner->local_memory().begin(),
-         end = owner->local_memory().end();
+    // we translate the storage so that the dedicated ancilla
+    // have priority access to magic state production (closer to 0).
+    local_storage_type::const_iterator begin, end;
+    if (q->client_id == RDR_CLIENT_ID)
+    {
+        begin = c->dedicated_ancilla().begin();
+        end = c->dedicated_ancilla().end();
+    }
+    else 
+    {
+         begin = c->local_memory().begin();
+         end = c->local_memory().end();
+    }
+
     auto q_it = std::find(begin, end, q);
     assert(q_it != end);
     return std::distance(begin, q_it);
@@ -48,13 +63,15 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     :OPERABLE("compute_subsystem", freq_khz),
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
+    dedicated_ancilla_count(_dedicated_ancilla_count()),
     local_memory_(local_memory_capacity),
     t_factories_(t_factories),
     memory_subsystem_(memory_subsystem),
-    routing_(this)
+    routing_(this),
+    dedicated_ancilla_(dedicated_ancilla_count)
 {
     // define routing space
-    for (size_t i = 0; i < local_memory_capacity; i++)
+    for (size_t i = 0; i < local_memory_capacity + dedicated_ancilla_count; i++)
     {
         size_t ii{i};
         const int ch = ii % routing_.num_channels;
@@ -66,6 +83,27 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
 
         routing_.set_location(i, ch, ro, co);
     }
+
+    // we can initialize the dedicated qubits now:
+    if (GL_RDR_ENABLED)
+    {
+        assert(dedicated_ancilla_count == GL_RDR_CAPACITY);
+        for (int i = 0; i < GL_RDR_CAPACITY; i++)
+        {
+            QUBIT* q = new QUBIT{.qubit_id=i, .client_id=RDR_CLIENT_ID};
+            dedicated_ancilla_[i] = q;
+        }
+    }
+    else
+    {
+        assert(dedicated_ancilla_count == 0);
+    }
+}
+
+COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
+{
+    for (auto* q : dedicated_ancilla_)
+        delete q;
 }
 
 ////////////////////////////////////////////////////////////
@@ -96,8 +134,6 @@ COMPUTE_SUBSYSTEM::initialize_qubits(std::vector<QUBIT*> program_qubits)
         begin_idx = end_idx;
         level++;
     }
-
-
 }
 
 ////////////////////////////////////////////////////////////
@@ -154,6 +190,8 @@ COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
             q->cycle_available = current_cycle() + result.latency;
             q->last_operation_was_memory_access = is_memory_access(inst->type);
         }
+
+        s_inst_executed_by_type[static_cast<int>(inst->type)]++;
     }
 
     return result;
@@ -188,6 +226,12 @@ const COMPUTE_SUBSYSTEM::memory_subsystem_type&
 COMPUTE_SUBSYSTEM::memory_subsystem() const
 {
     return memory_subsystem_;
+}
+
+const COMPUTE_SUBSYSTEM::local_storage_type&
+COMPUTE_SUBSYSTEM::dedicated_ancilla() const
+{
+    return dedicated_ancilla_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -233,9 +277,7 @@ COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
     const size_t reaction_time{code_distance};
 
     const cycle_type t_start = current_cycle(),
-                     t_end = current_cycle() + code_distance,
-                     s_start = current_cycle() + code_distance + reaction_time,
-                     s_end = current_cycle() + 2*code_distance + reaction_time;
+                     t_end = current_cycle() + code_distance;
 
     // two parts: (1) ZZ measurement with magic state, and (2) S correction
 
@@ -248,22 +290,13 @@ COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
     // depending on whether S correction is needed, we will need space for routing.
     // check if routing space can be consumed -- we need to allocate for the worst case
     bool ok = routing_.test_resources_between(q, routing::MCB_LEFT_ENTRY, t_start, t_end);
-    ok &= routing_.test_local_resource(q, s_start, s_end);
 
     if (!ok)
         return execute_result_type{};
 
-    // ZZ measurement resolves, now we know for sure if the S correction is needed
-    const bool s_correction_needed = (GL_RNG() & 1) > 0;
-
     (*f_it)->consume(1);
     routing_.lock_resources_between(q, routing::MCB_LEFT_ENTRY, t_start, t_end);
-    if (s_correction_needed)
-        routing_.lock_local_resource(q, s_start, s_end);
-
-    cycle_type latency = code_distance + reaction_time;
-    if (s_correction_needed)
-        latency += code_distance;
+    cycle_type latency = code_distance + reaction_time + 1;
     return execute_result_type{.progress=1, .latency=latency};
 }
 
@@ -337,7 +370,16 @@ _num_routing_channels(COMPUTE_SUBSYSTEM* c)
 size_t
 _channel_width(COMPUTE_SUBSYSTEM* c)
 {
-    return c->local_memory_capacity / 2;
+    return (c->dedicated_ancilla_count + c->local_memory_capacity) >> 1;
+}
+
+size_t
+_dedicated_ancilla_count()
+{
+    if (GL_RDR_ENABLED)
+        return GL_RDR_CAPACITY;
+    else
+        return 0;
 }
 
 } // anon

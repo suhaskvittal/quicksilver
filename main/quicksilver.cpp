@@ -134,13 +134,14 @@ main(int argc, char* argv[])
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
 
-        .optional("-ttpl", "--t-teleport-limit", 
-                        "Max number of T gate teleportations after initial T gate", 
-                        sim::GL_T_GATE_TELEPORTATION_MAX, 0)
         .optional("", "--enable-t-autocorrect", 
                         "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
 
-        .optional("-rpc", "--rpc", "Enable rotation precomputation", GL_USE_RPC_ISA, 0)
+        .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
+        .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
+        .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
+        .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 8)
+        .optional("", "--rdr-inst-delta-limit", "Instruction delta limit for runahead", sim::GL_RDR_INST_DELTA_LIMIT, 500)
 
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
@@ -159,6 +160,12 @@ main(int argc, char* argv[])
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
 
         .parse(argc, argv);
+
+    if (GL_USE_RDR_ISA > 0)
+    {
+        sim::GL_RDR_ENABLED = true;
+        std::cout << "RDR = enabled\n";
+    }
 
     /* Parse trace string and do jit compilation if neeeded */
 

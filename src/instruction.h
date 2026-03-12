@@ -184,14 +184,7 @@ public:
 
     uint64_t original_unrolled_inst_count{};
 
-    /*
-     * `rpc_*` variables correspond to variables used for
-     * rotation precomputation. 
-     *
-     * `rpc_has_been_visited` is used to track whether this
-     * is the first time a given instruction has been seen.
-     * */
-    bool rpc_has_been_visited{false};
+    bool rdr_has_been_visited{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

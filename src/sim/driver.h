@@ -9,6 +9,7 @@
 #include "globals.h"
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
+#include "sim/driver/rotation_directed_runahead.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 #include "sim/stall_monitor.h"
@@ -37,10 +38,7 @@ public:
         cycle_type          cycle_saved{};
     };
 
-    /*
-     * Array type for tracking instruction frequency
-     * */
-    using inst_usage_array = std::array<uint64_t, static_cast<size_t>(INSTRUCTION::TYPE::NIL)>;
+    enum class RDR_LOOKUP_RESULT { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
 
     /*
      * Stall monitor:
@@ -61,8 +59,6 @@ public:
      * Statistics:
      * */
     uint64_t s_context_switches{0};
-
-    inst_usage_array s_inst_executed_by_type{};
 private:
     std::vector<CLIENT*> clients_;
 
@@ -92,6 +88,11 @@ private:
     COMPUTE_SUBSYSTEM* compute_subsystem_;
     std::vector<PRODUCER_BASE*> t_factories_;
     std::vector<MEMORY_LEVEL*> memory_subsystem_;
+
+    /*
+     * Rotation directed runahead logic (RDR):
+     * */
+    driver::ROTATION_DIRECTED_RUNAHEAD* rdr_{nullptr};
 
     /*
      * `stall_monitor_` manages statistics related to stalls
@@ -170,6 +171,14 @@ private:
      * in the current cycle.
      * */
     bool is_instruction_ready(inst_ptr, const std::vector<QUBIT*>& operands) const;
+
+    /*
+     * RDR implementation -------------------------------------------------------------
+     * */
+
+    bool              rdr_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
+    RDR_LOOKUP_RESULT rdr_lookup_instruction(inst_ptr, QUBIT*);
+    void              rdr_do_runahead(CLIENT*, inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////

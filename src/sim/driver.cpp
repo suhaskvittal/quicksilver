@@ -75,12 +75,17 @@ DRIVER::DRIVER(std::vector<std::string> client_trace_files,
     for (auto* c : clients_)
         std::copy(c->qubits().begin(), c->qubits().end(), std::back_inserter(program_qubits));
     compute_subsystem_->initialize_qubits(program_qubits);
+
+    if (GL_RDR_ENABLED)
+        rdr_ = new driver::ROTATION_DIRECTED_RUNAHEAD(compute_subsystem_);
 }
 
 DRIVER::~DRIVER()
 {
     for (auto* c : clients_)
         delete c;
+    if (GL_RDR_ENABLED)
+        delete rdr_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -254,6 +259,15 @@ DRIVER::operate()
     }
     last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
 
+    if (GL_RDR_ENABLED)
+    {
+        size_t magic_states_avail = std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0},
+                                                        std::plus<size_t>{},
+                                                        [] (const auto* f) { return f->buffer_occupancy(); });
+        if (magic_states_avail > 1)
+            progress += rdr_->execute();
+    }
+
     if (progress == 0)
         cycles_without_progress++;
     else
@@ -345,7 +359,6 @@ DRIVER::do_context_switch(CLIENT* in, CLIENT* out)
 void
 DRIVER::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_latency)
 {
-    s_inst_executed_by_type[static_cast<int>(inst->type)]++;
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);
 }
@@ -380,6 +393,15 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
         // check if the operands are ready:
         if (!is_instruction_ready(inst, operands))
             continue;
+
+        // if this is a rotation gate, then first 
+        if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
+        {
+            if (rdr_handle_instruction(c, inst, operands[0])) 
+                continue;
+            inst->rdr_has_been_visited = true;
+            rdr_->invalidate_request(inst);
+        }
 
         auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
         success_count += result.progress;
@@ -471,6 +493,114 @@ DRIVER::is_instruction_ready(inst_ptr inst, const std::vector<QUBIT*>& operands)
 
     return all_available;
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+DRIVER::rdr_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
+{
+    auto lookup_result = rdr_lookup_instruction(inst, q);
+    if (lookup_result == RDR_LOOKUP_RESULT::RETIRE)
+    {
+        retire_instruction(c, inst, 2*compute_subsystem_->code_distance);
+        return true;
+    }
+    else if (lookup_result == RDR_LOOKUP_RESULT::NEEDS_CORRECTION)
+    {
+        assert(!inst->corr_urotseq_array.empty());
+
+        inst->reset_uops();
+        inst->urotseq = inst->corr_urotseq_array.front();
+        inst->corr_urotseq_array.pop_front();
+
+        rdr_do_runahead(c, inst);
+        return false;
+    }
+    else if (lookup_result == RDR_LOOKUP_RESULT::IN_PROGRESS)
+    {
+        if (inst->uops_retired() < 0.25*inst->uop_count())
+        {
+            rdr_->invalidate_request(inst);
+            rdr_do_runahead(c, inst);
+            inst->reset_uops();
+            return false;
+        }
+        else
+        {
+            return true;
+        }
+    }
+    else
+    {
+        rdr_do_runahead(c, inst);
+        return false;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+DRIVER::RDR_LOOKUP_RESULT
+DRIVER::rdr_lookup_instruction(inst_ptr inst, QUBIT* q)
+{
+    assert(is_rotation_instruction(inst->type));
+
+    auto* e = rdr_->find_request_and_only_return_if_complete(inst);
+    if (e != nullptr)
+    {
+        // try and perform the gate required:
+        bool both_available = (q->cycle_available <= current_cycle())
+                                && (e->pinned_qubit->cycle_available <= current_cycle());
+        if (both_available)
+        {
+            q->cycle_available = current_cycle() + compute_subsystem_->code_distance;
+            e->pinned_qubit->cycle_available = current_cycle() + compute_subsystem_->code_distance;
+            rdr_->delete_request(inst);
+
+            bool success = (GL_RNG() & 1) > 0;
+            return success ? RDR_LOOKUP_RESULT::RETIRE : RDR_LOOKUP_RESULT::NEEDS_CORRECTION;
+        }
+        else
+        {
+            return RDR_LOOKUP_RESULT::IN_PROGRESS;
+        }
+    }
+    else if (rdr_->is_request_pending(inst))
+    {
+        return RDR_LOOKUP_RESULT::IN_PROGRESS; 
+    }
+    else
+    {
+        return RDR_LOOKUP_RESULT::NOT_FOUND;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+DRIVER::rdr_do_runahead(CLIENT* c, inst_ptr inst)
+{
+    if (inst->rdr_has_been_visited)
+        return;
+
+    assert(is_rotation_instruction(inst->type));
+    auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
+                                        [inst, this] (inst_ptr x) 
+                                        { 
+                                            return x != inst 
+                                                    && is_rotation_instruction(x->type)
+                                                    && !rdr_->is_request_pending(x) 
+                                                    && (x->number - inst->number) < GL_RDR_INST_DELTA_LIMIT;
+                                        }, 
+                                        inst, 
+                                        GL_RDR_START_LAYER,
+                                        GL_RDR_START_LAYER + GL_RDR_LOOKAHEAD_DEPTH);
+    if (dependent_inst != nullptr)
+        rdr_->submit_request(dependent_inst, layer, inst);
+}
+
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

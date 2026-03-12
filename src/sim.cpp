@@ -28,15 +28,15 @@ int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{1'000'000};
 double GL_PHYSICAL_ERROR_RATE{1e-3};
 
 bool GL_T_GATE_DO_AUTOCORRECT{false};
-int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool GL_RPC_ALWAYS_USE_TELEPORTATION{false};
-bool GL_RPC_ALWAYS_RUNAHEAD{false};
-int64_t GL_RPC_INST_DELTA_LIMIT{500};
-int64_t GL_RPC_DEGREE{4};
+bool GL_RDR_ENABLED{false};
+int64_t GL_RDR_CAPACITY{2};
+int64_t GL_RDR_START_LAYER{2};
+int64_t GL_RDR_LOOKAHEAD_DEPTH{8};
+int64_t GL_RDR_INST_DELTA_LIMIT{500};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
@@ -87,13 +87,17 @@ print_sim_stats(std::ostream& out, DRIVER* d)
 {
     using STALL_TYPE = DRIVER::STALL_TYPE;
 
+    uint64_t cx_gates{0};
     uint64_t t_gates{0};
+    for (auto t : {INSTRUCTION::TYPE::CX, INSTRUCTION::TYPE::CZ})
+        cx_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
     for (auto t : {INSTRUCTION::TYPE::T, INSTRUCTION::TYPE::TX, INSTRUCTION::TYPE::TDG, INSTRUCTION::TYPE::TXDG})
-        t_gates += d->s_inst_executed_by_type[static_cast<int>(t)];
-    double t_consumption_rate_per_s = mean(t_gates, d->current_cycle() / (1e3*d->freq_khz));
+        t_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
 
+    double t_consumption_rate_per_s = mean(t_gates, d->current_cycle() / (1e3*d->freq_khz));
     print_stat_line(out, "TOTAL_SIMULATION_CYCLES", d->current_cycle());
 
+    print_stat_line(out, "CX_GATES_EXECUTED", cx_gates);
     print_stat_line(out, "T_GATES_EXECUTED", t_gates);
     print_stat_line(out, "T_CONSUMPTION_RATE_PER_S", t_consumption_rate_per_s);
 
