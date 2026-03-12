@@ -16,6 +16,8 @@ namespace routing
 namespace
 {
 
+using range_type = RESOURCE::range_type;
+
 template <class ITER>
 bool _check_for_intersection(range_type, ITER begin, ITER end);
 
@@ -60,13 +62,13 @@ RESOURCE::lock_for_time_interval(cycle_type a, cycle_type b)
 }
 
 bool
-RESOURCE::is_lockable(cycle_type a, cycle_type b)
+RESOURCE::is_lockable(cycle_type a, cycle_type b) const
 {
-    return !_check_for_instruction(range_type{a,b}, usage_.begin(), usage_.end());
+    return !_check_for_intersection(range_type{a,b}, usage_.begin(), usage_.end());
 }
 
 cycle_type
-next_ready_cycle(cycle_type current_cycle, cycle_type t) const
+RESOURCE::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
 {
     cycle_type c{current_cycle};
     for (size_t i = 0; i < usage_.size(); i++)
@@ -89,10 +91,12 @@ namespace
 template <class ITER> bool
 _check_for_intersection(range_type r, ITER begin, ITER end)
 {
+    r.second--;
     return std::any_of(begin, end,
                 [a=r.first, b=r.second] (const auto& s)
                 {
-                    const auto& [x,y] = s;
+                    auto [x,y] = s;
+                    y--;
                     const bool r_contains_s = (a <= x && b >= y),
                                s_contains_r = (a >= x && b <= y),
                                partial = (a >= x && a <= y) || (b >= x && b <= y);

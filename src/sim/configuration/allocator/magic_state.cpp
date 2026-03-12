@@ -60,7 +60,7 @@ PRODUCER_BASE*
 _alloc(FACTORY_SPECIFICATION s)
 {
     PRODUCER_BASE* f;
-        const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+        const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     if (s.is_cultivation)
     {
         f = new producer::T_CULTIVATION(freq_khz,
@@ -106,7 +106,7 @@ _bandwidth(FACTORY_SPECIFICATION s, double)
 {
     double bw;
 
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     if (s.is_cultivation)
     {
         double mean_tries_until_success = 1.0/s.probability_of_success;
@@ -131,7 +131,7 @@ _consumption_rate(FACTORY_SPECIFICATION s, double)
 {
     assert(!s.is_cultivation);
 
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     double states_consumed = static_cast<double>(s.input_count + s.rotations);
     double step_count = static_cast<double>(s.rotations+1);
     return (1e3 * freq_khz * states_consumed) / (s.dm * step_count);

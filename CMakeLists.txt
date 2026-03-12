@@ -117,17 +117,17 @@ set(SIM_FILES
     src/sim/configuration/predefined_ed_protocols.cpp
     src/sim/configuration/resource_estimation.cpp
     src/sim/client.cpp
-    src/sim/compute_base.cpp
     src/sim/compute_subsystem.cpp
-    src/sim/memory/remote.cpp
-    src/sim/memory_subsystem.cpp
+    src/sim/driver.cpp
+    src/sim/memory/bivariate_bicycle.cpp
+    src/sim/memory_level.cpp
     src/sim/operable.cpp
     src/sim/production.cpp
     src/sim/production/epr.cpp
     src/sim/production/magic_state.cpp
-    src/sim/rotation_subsystem.cpp
+    src/sim/routing.cpp
+#   src/sim/rotation_subsystem.cpp
     src/sim/stats.cpp
-    src/sim/storage.cpp
     src/sim.cpp)
 
 ###################################################

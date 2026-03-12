@@ -67,7 +67,7 @@ main(int argc, char* argv[])
         sim::configuration::FACTORY_SPECIFICATION l1_spec
         {
             .is_cultivation=true,
-            .syndrome_extraction_round_time_ns=1200,
+            .cycle_time_ns=1200,
             .buffer_capacity=1,
             .output_error_rate=1e-6,
             .escape_distance=13,
@@ -78,7 +78,7 @@ main(int argc, char* argv[])
         sim::configuration::FACTORY_SPECIFICATION l2_spec
         {
             .is_cultivation=false,
-            .syndrome_extraction_round_time_ns=1200,
+            .cycle_time_ns=1200,
             .buffer_capacity=2,
             .output_error_rate=1e-12,
             .dx=25,
@@ -117,7 +117,7 @@ main(int argc, char* argv[])
         }
 
         for (auto& s : specs)
-            s.syndrome_extraction_round_time_ns = 1'200'000;
+            s.cycle_time_ns = 1'200'000;
         alloc = sim::configuration::allocate_entanglement_distillation_units(physical_qubit_budget, specs);
     }
     else

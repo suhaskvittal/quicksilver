@@ -1,13 +1,11 @@
 /*
  *  author: Suhas Vittal
- *  date:   12 January 2026
+ *  date:   11 March 2026
  * */
 
-#include "sim/memory_subsystem.h"
-#include "sim/routing_model/multi_channel_bus.h"
+#include "sim/memory_level.h"
 
-#include <algorithm>
-#include <cassert>
+#include <iostream>
 
 namespace sim
 {
@@ -15,217 +13,104 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-namespace
+MEMORY_LEVEL::MEMORY_LEVEL(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d)
+    :OPERABLE(name, freq_khz),
+    storage_physical_qubit_count(n),
+    storage_logical_qubit_count(k),
+    storage_code_distance(d),
+    num_blocks(static_cast<size_t>( std::ceil(mean(qubit_count, k)) )),
+    total_capacity(num_blocks * k)
 {
-
-constexpr size_t MEMORY_CHANNELS{4};
-
-/*
- * Computes the width of each memory channel (see `MULTI_CHANNEL_BUS`)
- * given the number of storage blocks and `MEMORY_CHANNELS`.
- * */
-constexpr size_t _memory_channel_width(size_t storage_count);
-
-template <class ITER>
-ITER _lookup_qubit(ITER begin, ITER end, QUBIT*);
-
-template <class ITER>
-ITER _find_empty_storage(ITER begin, ITER end, const routing_ptr&, cycle_type current_cycle);
-
-} // anon
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-MEMORY_SUBSYSTEM::MEMORY_SUBSYSTEM(std::vector<STORAGE*>&& storages)
-    :storages_(std::move(storages)),
-    routing_{MEMORY_CHANNELS, _memory_channel_width(storages_.size())}
-{
-    // initialize routing layout:
-    for (size_t i = 0; i < storages_.size(); i++)
-    {
-        size_t ii{i};
-
-        const int ch = i % MEMORY_CHANNELS;
-        i /= MEMORY_CHANNELS;
-        const int ro = i & 1;
-        i >>= 1;
-        const int co = i % routing_.channel_width;
-
-        routing_.set_location(storages_[i], ch, ro, co);
-    }
+    size_t num_blocks = std::ceil(mean(qubit_count, k));
+    blocks_.resize(num_blocks);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_load(QUBIT* q, cycle_type c_current_cycle, double c_freq_khz)
+MEMORY_ACCESS_RESULT
+MEMORY_LEVEL::do_load(QUBIT* q)
 {
-    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), q);
-    if (s_it == storages_.end())
+    for (size_t i = 0; i < blocks_.size(); i++)
     {
-        std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *q << " not found";
-        for (auto* s : storages_)
+        auto& s = blocks_[i];
+        auto q_it = s.find(q);
+        if (q_it != s.end())
         {
-            std::cerr << "\n\t" << s->name << " :";
-            for (auto* x : s->contents())
-                std::cerr << " " << *x;
+            auto result = load_impl(i, s, q);
+            if (result.success)
+                s.erase(q_it);
+            return result;
         }
-        std::cerr << _die{};
     }
 
-    auto* s = *s_it;
-
-    // there are two parts to the load routing procedure:
-    //  (1) d cycles are spent doing a ZZ/XX measurement with some ancilla surface code patch via the LPU/adapter
-    //  (2) d cycles are spent routing the ancilla patch out of the channel
-    const cycle_type latency = convert_cycles_betwen_frequencies(s->code_distance, s->freq_khz, c_freq_khz);
-    
-    // check if we can lock routing space for the first part of the procedure:
-    const bool r1_can_lock = routing_.test_local_resource(s, c_current_cycle, c_current_cycle+latency);
-    const bool r2_can_lock = routing_.test_resources_between(routing::MC_LEFT_ENTRY, 
-                                                                s, 
-                                                                c_current_cycle+latency,
-                                                                c_current_cycle+2*latency);
-    if (r1_can_lock && r2_can_lock)
-    {
-        auto result = s->do_load(q);
-        _convert_cycles_for_result(result, c_freq_khz);
-    }
-
-    if ()
-        return handle_access_outcome((*s_it)->do_load(q), *s_it, c_current_cycle, c_freq_khz);
-    return access_result_type{};
+    std::cerr << "MEMORY_LEVEL::do_load: could not find qubit " << *q
+                << ", debug info:\n";
+    dump_storage_info(std::cerr);
+    exit(1);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_store(QUBIT* q, cycle_type c_current_cycle, double c_freq_khz)
+MEMORY_ACCESS_RESULT
+MEMORY_LEVEL::do_store(QUBIT* q)
 {
-    auto s_it = _find_empty_storage(storages_.begin(), storages_.end(), routing_, c_current_cycle);
-    if (s_it != storages_.end())
-        return handle_access_outcome((*s_it)->do_store(q), *s_it, c_current_cycle, c_freq_khz);
-    return access_result_type{};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::do_coupled_load_store(QUBIT* ld, QUBIT* st, cycle_type c_current_cycle, double c_freq_khz)
-{
-    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), ld);
-    if (s_it == storages_.end())
-    {
-        std::cerr << "MEMORY_SUBSYSTEM::do_memory_access: qubit " << *ld << " not found";
-        for (auto* s : storages_)
-        {
-            std::cerr << "\n\t" << s->name << " :";
-            for (auto* x : s->contents())
-                std::cerr << " " << *x;
-        }
-        std::cerr << _die{};
-    }
-
-    // coupled  access only succeeds if both load and store can occur
-    if (!routing_->can_route_to(*s_it, c_current_cycle))
-        return access_result_type{};
-    return handle_access_outcome((*s_it)->do_coupled_load_store(ld, st), *s_it, c_current_cycle, c_freq_khz);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-QUBIT*
-MEMORY_SUBSYSTEM::retrieve_qubit(client_id_type c_id, qubit_type q_id) const
-{
-    for (const auto* s : storages_)
-    {
-        const auto& contents = s->contents();
-        auto q_it = std::find_if(contents.begin(), contents.end(),
-                            [c_id, q_id] (const auto* q) { return q->client_id == c_id && q->qubit_id == q_id; });
-        if (q_it != contents.end())
-            return *q_it;
-    }
-    return nullptr;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-cycle_type
-MEMORY_SUBSYSTEM::get_next_ready_cycle_for_load(QUBIT* q, double c_freq_khz) const
-{
-    auto s_it = _lookup_qubit(storages_.begin(), storages_.end(), q);
-    assert(s_it != storages_.end());
-
-    // `routing_free_cycle` is already a compute cycle, no need to convert
-    cycle_type routing_free_cycle = routing_->ready_cycle(*s_it);
-
-    // `storage_free_cycle` needs to be converted
-    cycle_type storage_free_cycle = (*s_it)->next_free_adapter_cycle();
-    storage_free_cycle = convert_cycles_between_frequencies(storage_free_cycle, (*s_it)->freq_khz, c_freq_khz);
-
-    cycle_type out = std::max(routing_free_cycle, storage_free_cycle);
-    return out;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-const std::vector<STORAGE*>&
-MEMORY_SUBSYSTEM::storages() const
-{
-    return storages_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-MEMORY_SUBSYSTEM::access_result_type
-MEMORY_SUBSYSTEM::handle_access_outcome(access_result_type result, 
-                                        STORAGE* s, 
-                                        cycle_type c_current_cycle, 
-                                        double c_freq_khz)
-{
+    auto s_it = std::find_if(blocks_.begin(), blocks_.end(),
+                            [k=storage_logical_qubit_count] (const auto& s) { return s.size() < k; });
+    if (s_it == blocks_.end())
+        std::cerr << "MEMORY_LEVEL::do_store: could not find empty location for store to qubit " << *q << _die{};
+    size_t idx = std::distance(blocks_.begin(), s_it);
+    auto result = store_impl(idx, *s_it, q);
     if (result.success)
-    {
-        result.latency = convert_cycles_between_frequencies(result.latency, result.storage_freq_khz, c_freq_khz);
-        result.critical_latency = convert_cycles_between_frequencies(result.critical_latency, result.storage_freq_khz, c_freq_khz);
-
-        cycle_type routing_cycles = convert_cycles_between_frequencies(2, result.storage_freq_khz, c_freq_khz);
-        routing_->lock_route_to(s, c_current_cycle+routing_cycles);
-    }
+        s_it->insert(q);
     return result;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-namespace
+MEMORY_ACCESS_RESULT
+MEMORY_LEVEL::do_coupled_load_store(QUBIT* ld, QUBIT* st)
 {
+    for (size_t i = 0; i < blocks_.size(); i++)
+    {
+        auto& s = blocks_[i];
+        auto q_it = s.find(ld);
+        if (q_it != s.end())
+        {
+            auto result = coupled_load_store_impl(i, s, ld, st);
+            if (result.success)
+            {
+                s.erase(q_it);
+                s.insert(st);
+            }
+            return result;
+        }
+    }
 
-template <class ITER> ITER
-_lookup_qubit(ITER begin, ITER end, QUBIT* q)
-{
-    return std::find_if(begin, end, [q] (STORAGE* s) { return s->contains(q); });
+    std::cerr << "MEMORY_LEVEL::do_coupled_load_store: could not find qubit " << *ld
+                << ", debug info:\n";
+    dump_storage_info(std::cerr);
+    exit(1);
 }
 
-template <class ITER> ITER
-_find_empty_storage(ITER begin, ITER end, const routing_ptr& r, cycle_type current_cycle)
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+MEMORY_LEVEL::dump_storage_info(std::ostream& out) const
 {
-    return std::find_if(begin, end, 
-            [&r, current_cycle] (STORAGE* s)
-            { 
-                return s->contents().size() < s->logical_qubit_count && r->can_route_to(s, current_cycle);
-            });
+    out << name << "----------------------------";
+    for (size_t i = 0; i < blocks_.size(); i++)
+    {
+        const auto& s = blocks_[i];
+        out << "\ns" << i << " :";
+        for (auto* q : s)
+            out << " " << *q;
+    }
+    out << "\n";
 }
-
-
-}  // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

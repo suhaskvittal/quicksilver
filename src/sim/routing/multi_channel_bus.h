@@ -6,7 +6,7 @@
 #ifndef SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
 #define SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
 
-#include "sim/routing_model.h"
+#include "sim/routing.h"
 
 #include <tuple>
 #include <unordered_map>
@@ -51,8 +51,8 @@ namespace routing
  * Each channel can be accessed concurrently.
  * */
 
-constexpr int64_t MCB_LEFT_ENTRY{0};
-constexpr int64_t MCB_RIGHT_ENTRY{-1};
+constexpr int64_t MCB_LEFT_ENTRY{-1};
+constexpr int64_t MCB_RIGHT_ENTRY{-2};
 
 template <class IMPL>
 class MULTI_CHANNEL_BUS
@@ -77,20 +77,23 @@ public:
     void set_location(T, int channel, int row, int column);
 
     /*
-     * Checks the local resource of the given object.
-     * If the resource is available from cycle `from` to `to`,
-     * then the resource is locked and the function returns `true`.
+     * Returns true if the requested resources are available.
      * */
     template <class T>
-    bool test_and_lock_local_resource(T, cycle_type from, cycle_type to);
+    bool test_local_resource(T, cycle_type from, cycle_type to) const;
+
+    template <class T, class U>
+    bool test_resources_between(T, U, cycle_type from, cycle_type to) const;
 
     /*
-     * Checks if the routing resources between the two
-     * objects is lockable. If so, then it is locked from
-     * `from` to `to` and this function returns true.
+     * Attempts to lock the given reosurce. If the resource is not lockable,
+     * an error is thrown.
      * */
+    template <class T>
+    void lock_local_resource(T, cycle_type from, cycle_type to);
+
     template <class T, class U>
-    bool test_and_lock_resources_between(T, U, cycle_type, cycle_type);
+    void lock_resources_between(T, U, cycle_type, cycle_type);
 
     /*
      * `swap_locations_of()` and `replace()` are useful for

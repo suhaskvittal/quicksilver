@@ -19,6 +19,7 @@
 namespace sim
 {
 
+class DRIVER;
 class COMPUTE_SUBSYSTEM;
 class CLIENT;
 class PRODUCER_BASE;
@@ -107,7 +108,7 @@ double walltime_s();
  * Stat printing utilities:
  * */
 
-void print_compute_subsystem_stats(std::ostream&, COMPUTE_SUBSYSTEM*);
+void print_sim_stats(std::ostream&, DRIVER*);
 void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<PRODUCER_BASE*>);
 
 ////////////////////////////////////////////////////////////
