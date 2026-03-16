@@ -59,6 +59,7 @@ public:
      * Statistics:
      * */
     uint64_t s_context_switches{0};
+    uint64_t s_rotation_instructions{0};
 private:
     std::vector<CLIENT*> clients_;
 
@@ -120,8 +121,8 @@ public:
 
     COMPUTE_SUBSYSTEM* compute_subsystem() const;
     const std::vector<CLIENT*>& clients() const;
-
     const stall_monitor_type& stall_monitor() const;
+    driver::ROTATION_DIRECTED_RUNAHEAD* rdr() const;
 protected:
     long operate() override;
 private:

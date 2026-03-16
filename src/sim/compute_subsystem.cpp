@@ -16,9 +16,10 @@ namespace
 {
 
 size_t _dedicated_ancilla_count();
-
 size_t _num_routing_channels(COMPUTE_SUBSYSTEM*);
 size_t _channel_width(COMPUTE_SUBSYSTEM*);
+
+size_t _get_idx_in_array(QUBIT*, const std::vector<QUBIT*>&);
 
 } // anon
 
@@ -35,21 +36,10 @@ COMPUTE_SUBSYSTEM::routing_type::translate(QUBIT* q) const
 {
     // we translate the storage so that the dedicated ancilla
     // have priority access to magic state production (closer to 0).
-    local_storage_type::const_iterator begin, end;
     if (q->client_id == RDR_CLIENT_ID)
-    {
-        begin = c->dedicated_ancilla().begin();
-        end = c->dedicated_ancilla().end();
-    }
-    else 
-    {
-         begin = c->local_memory().begin();
-         end = c->local_memory().end();
-    }
-
-    auto q_it = std::find(begin, end, q);
-    assert(q_it != end);
-    return std::distance(begin, q_it);
+        return _get_idx_in_array(q, c->dedicated_ancilla());
+    else
+        return c->dedicated_ancilla_count + _get_idx_in_array(q, c->local_memory());
 }
 
 ////////////////////////////////////////////////////////////
@@ -364,7 +354,7 @@ namespace
 size_t
 _num_routing_channels(COMPUTE_SUBSYSTEM* c)
 {
-    return 1;
+    return 128;
 }
 
 size_t
@@ -380,6 +370,14 @@ _dedicated_ancilla_count()
         return GL_RDR_CAPACITY;
     else
         return 0;
+}
+
+size_t
+_get_idx_in_array(QUBIT* q, const std::vector<QUBIT*>& arr)
+{
+    auto it = std::find(arr.begin(), arr.end(), q);
+    assert(it != arr.end());
+    return std::distance(arr.begin(), it);
 }
 
 } // anon

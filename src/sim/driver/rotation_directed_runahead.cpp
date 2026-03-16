@@ -1,6 +1,4 @@
-/*
- *  author: Suhas Vittal
- *  date:   12 March 2026
+/* author: Suhas Vittal date:   12 March 2026
  * */
 
 #include "sim/driver/rotation_directed_runahead.h"
@@ -28,6 +26,7 @@ bool
 ROTATION_DIRECTED_RUNAHEAD::request_priority_comparator::operator()(const request_type* a, const request_type* b) const
 {
     return a->dag_layer > b->dag_layer;
+//  return a->inst->number > b->inst->number;
 }
 
 ////////////////////////////////////////////////////////////
@@ -47,10 +46,19 @@ ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs)
 long
 ROTATION_DIRECTED_RUNAHEAD::execute()
 {
-    if (free_qubits_.size() >= GL_RDR_CAPACITY)
-        return 1;
-
     long progress{0};
+
+    // allocate free qubits:
+    while (free_qubits_.size() > 0)
+    {
+        auto* e = pop_next_valid_pending_request();
+        if (e == nullptr)
+            break;
+        e->pinned_qubit = free_qubits_.back();
+        e->cycle_start = compute_subsystem_->current_cycle();
+        s_requests++;
+        free_qubits_.pop_back();
+    }
 
     // select between the active requests
     std::vector<request_type*> active_requests;
@@ -58,40 +66,37 @@ ROTATION_DIRECTED_RUNAHEAD::execute()
     for (const auto& [inst, e] : request_table_)
         if (e->pinned_qubit != nullptr)
             active_requests.push_back(e);
+    std::sort(active_requests.begin(), active_requests.end(),
+            [] (const auto* a, const auto* b) { return a->dag_layer < b->dag_layer; });
 
-    // decide between the active requests:
-    request_type* best_request{nullptr};
     for (auto* e : active_requests)
     {
         if (e->done)
             continue;
+        inst_ptr inst = e->inst;
+        inst_ptr uop = inst->current_uop();
+        auto result = compute_subsystem_->execute_instruction(uop, {e->pinned_qubit});
+        progress += result.progress;
+        if (result.progress == 0)
+            break;
+        if (result.progress > 0 && inst->retire_current_uop())
+        {
+            inst->reset_uops();
+            e->done = true;
+            e->cycle_done = compute_subsystem_->current_cycle();
+            s_requests_completed++;
 
-        if (best_request == nullptr)
-        {
-            best_request = e;
-        }
-        else
-        {
-            auto* q = e->pinned_qubit;
-            bool is_available = (q->cycle_available < compute_subsystem_->current_cycle());
-            if (is_available && e->dag_layer < best_request->dag_layer)
-                best_request = e;
+            if (GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER)
+            {
+                free_qubits_.push_back(e->pinned_qubit);
+                e->pinned_qubit = nullptr;
+                completion_buffer_.insert(inst);
+            }
         }
     }
 
-    if (best_request == nullptr)
-        return 1;
-
-    // execute the next gate for this request:
-    inst_ptr inst = best_request->inst;
-    inst_ptr uop = inst->current_uop();
-    auto result = compute_subsystem_->execute_instruction(uop, {best_request->pinned_qubit});
-    progress += result.progress;
-    if (result.progress > 0 && inst->retire_current_uop())
-    {
-        inst->reset_uops();
-        best_request->done = true;
-    }
+    s_completion_buffer_occupancy_sum += completion_buffer_.size();
+    s_completion_buffer_occupancy_ticks++;
 
     return progress;
 }
@@ -111,16 +116,7 @@ ROTATION_DIRECTED_RUNAHEAD::submit_request(inst_ptr inst, size_t dag_layer, inst
                                     .dag_layer=dag_layer,
                                     .triggering_inst=INSTRUCTION(*_triggering_inst)
                                 };
-    if (!free_qubits_.empty())
-    {
-        QUBIT* q = free_qubits_.back();
-        free_qubits_.pop_back();
-        e->pinned_qubit = q;
-    }
-    else
-    {
-        pending_queue_.push(e);
-    }
+    pending_queue_.push(e);
     request_table_[inst] = e;
     return true;
 }
@@ -144,6 +140,7 @@ ROTATION_DIRECTED_RUNAHEAD::delete_request(inst_ptr inst)
     auto it = request_table_.find(inst);
     delete_request(it->second);
     request_table_.erase(it);
+    completion_buffer_.erase(inst);
 }
 
 ////////////////////////////////////////////////////////////
@@ -161,7 +158,8 @@ ROTATION_DIRECTED_RUNAHEAD::is_request_pending(inst_ptr inst) const
 size_t
 ROTATION_DIRECTED_RUNAHEAD::get_request_progress(inst_ptr inst) const
 {
-    return inst->uops_retired();
+    auto* e = request_table_.at(inst);
+    return e->done ? inst->uop_count() : inst->uops_retired();
 }
 
 ////////////////////////////////////////////////////////////
@@ -190,7 +188,18 @@ ROTATION_DIRECTED_RUNAHEAD::invalidate_request(inst_ptr inst)
     e->invalidated = true;
     request_table_.erase(it);
     if (e->pinned_qubit != nullptr)
+    {
+        s_requests_invalidated++;
         delete_request(e);
+    }
+    else
+    {
+        auto q_it = completion_buffer_.find(inst);
+        if (q_it != completion_buffer_.end())
+            completion_buffer_.erase(q_it);
+        else
+            s_invalidated_in_queue++;
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -199,12 +208,9 @@ ROTATION_DIRECTED_RUNAHEAD::invalidate_request(inst_ptr inst)
 void
 ROTATION_DIRECTED_RUNAHEAD::delete_request(request_type* e)
 {
-    auto* q = e->pinned_qubit;
-    request_type* f = pop_next_valid_pending_request();
-    if (f == nullptr)
-        free_qubits_.push_back(q);
-    else
-        f->pinned_qubit = q;
+    if (e->pinned_qubit != nullptr)
+        free_qubits_.push_back(e->pinned_qubit);
+    delete e;
 }
 
 ////////////////////////////////////////////////////////////

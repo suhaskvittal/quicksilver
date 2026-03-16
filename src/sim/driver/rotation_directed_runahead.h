@@ -43,7 +43,7 @@ public:
          * */
         INSTRUCTION triggering_inst;
 
-        cycle_type cycle_installed{std::numeric_limits<cycle_type>::max()};
+        cycle_type cycle_start{std::numeric_limits<cycle_type>::max()};
         cycle_type cycle_done;
     };
 
@@ -62,8 +62,21 @@ public:
     using pending_queue_type = std::priority_queue<request_type*,
                                                     std::vector<request_type*>,
                                                     request_priority_comparator>;
+
+    /*
+     * Statistics:
+     * */
+
+    uint64_t s_invalidated_in_queue{0};
+    uint64_t s_requests{0};
+    uint64_t s_requests_completed{0};
+    uint64_t s_requests_invalidated{0};
+
+    uint64_t s_completion_buffer_occupancy_sum{0};
+    uint64_t s_completion_buffer_occupancy_ticks{0};
 private:
     request_table_type request_table_;
+    std::unordered_set<inst_ptr> completion_buffer_;
 
     std::vector<QUBIT*> free_qubits_;
 

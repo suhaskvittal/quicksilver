@@ -37,6 +37,8 @@ int64_t GL_RDR_CAPACITY{2};
 int64_t GL_RDR_START_LAYER{2};
 int64_t GL_RDR_LOOKAHEAD_DEPTH{8};
 int64_t GL_RDR_INST_DELTA_LIMIT{500};
+int64_t GL_RDR_DEGREE{4};
+bool GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER{false};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
@@ -105,6 +107,19 @@ print_sim_stats(std::ostream& out, DRIVER* d)
     print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::MAGIC_STATE));
     print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::EPR));
     print_stat_line(out, "TOTAL_STALLS", d->stall_monitor().cycles_with_stalls());
+
+    if (GL_RDR_ENABLED)
+    {
+        print_stat_line(out, "TOTAL_ROTATION_INSTRUCTIONS", d->s_rotation_instructions);
+        print_stat_line(out, "RDR_REQUESTS", d->rdr()->s_requests);
+        print_stat_line(out, "RDR_REQUESTS_COMPLETED", d->rdr()->s_requests_completed);
+        print_stat_line(out, "RDR_REQUESTS_INVALIDATED", d->rdr()->s_requests_invalidated);
+        print_stat_line(out, "RDR_INVALIDATED_IN_QUEUE", d->rdr()->s_invalidated_in_queue);
+
+        double completion_buffer_mean_occupancy = mean(d->rdr()->s_completion_buffer_occupancy_sum,
+                                                       d->rdr()->s_completion_buffer_occupancy_ticks);
+        print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occupancy);
+    }
 
     for (auto* c : d->clients())
         _print_client_stats(out, d, c);

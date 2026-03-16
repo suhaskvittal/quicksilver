@@ -207,6 +207,12 @@ DRIVER::stall_monitor() const
     return stall_monitor_;
 }
 
+driver::ROTATION_DIRECTED_RUNAHEAD*
+DRIVER::rdr() const
+{
+    return rdr_;
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -359,6 +365,9 @@ DRIVER::do_context_switch(CLIENT* in, CLIENT* out)
 void
 DRIVER::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_latency)
 {
+    if (is_rotation_instruction(inst->type))
+        s_rotation_instructions++;
+
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);
 }
@@ -519,7 +528,7 @@ DRIVER::rdr_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else if (lookup_result == RDR_LOOKUP_RESULT::IN_PROGRESS)
     {
-        if (inst->uops_retired() < 0.25*inst->uop_count())
+        if (rdr_->get_request_progress(inst) < 0.25*inst->uop_count())
         {
             rdr_->invalidate_request(inst);
             rdr_do_runahead(c, inst);
@@ -551,11 +560,13 @@ DRIVER::rdr_lookup_instruction(inst_ptr inst, QUBIT* q)
     {
         // try and perform the gate required:
         bool both_available = (q->cycle_available <= current_cycle())
-                                && (e->pinned_qubit->cycle_available <= current_cycle());
+                                && (e->pinned_qubit == nullptr
+                                    || e->pinned_qubit->cycle_available <= current_cycle());
         if (both_available)
         {
-            q->cycle_available = current_cycle() + compute_subsystem_->code_distance;
-            e->pinned_qubit->cycle_available = current_cycle() + compute_subsystem_->code_distance;
+            q->cycle_available = current_cycle() + 2*compute_subsystem_->code_distance;
+            if (e->pinned_qubit != nullptr)
+                e->pinned_qubit->cycle_available = current_cycle() + compute_subsystem_->code_distance;
             rdr_->delete_request(inst);
 
             bool success = (GL_RNG() & 1) > 0;
@@ -586,19 +597,33 @@ DRIVER::rdr_do_runahead(CLIENT* c, inst_ptr inst)
         return;
 
     assert(is_rotation_instruction(inst->type));
-    auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
-                                        [inst, this] (inst_ptr x) 
-                                        { 
-                                            return x != inst 
-                                                    && is_rotation_instruction(x->type)
-                                                    && !rdr_->is_request_pending(x) 
-                                                    && (x->number - inst->number) < GL_RDR_INST_DELTA_LIMIT;
-                                        }, 
-                                        inst, 
-                                        GL_RDR_START_LAYER,
-                                        GL_RDR_START_LAYER + GL_RDR_LOOKAHEAD_DEPTH);
-    if (dependent_inst != nullptr)
-        rdr_->submit_request(dependent_inst, layer, inst);
+
+    size_t dag_layer{GL_RDR_START_LAYER};
+    for (size_t i = 0; i < GL_RDR_DEGREE; i++)
+    {
+        auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
+                                            [inst, this] (inst_ptr x) 
+                                            { 
+                                                return x != inst 
+                                                        && is_rotation_instruction(x->type)
+                                                        && !rdr_->is_request_pending(x) 
+                                                        && (x->number - inst->number) < GL_RDR_INST_DELTA_LIMIT;
+                                            }, 
+                                            inst, 
+                                            dag_layer,
+                                            dag_layer + GL_RDR_LOOKAHEAD_DEPTH);
+        
+
+        if (dependent_inst != nullptr)
+        {
+            rdr_->submit_request(dependent_inst, layer, inst);
+            dag_layer = layer;
+        }
+        else
+        {
+            break;
+        }
+    }
 }
 
 

@@ -142,6 +142,10 @@ main(int argc, char* argv[])
         .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
         .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 8)
         .optional("", "--rdr-inst-delta-limit", "Instruction delta limit for runahead", sim::GL_RDR_INST_DELTA_LIMIT, 500)
+        .optional("", "--rdr-degree", "Degree of runahead (number of instructions)", sim::GL_RDR_DEGREE, 2)
+        .optional("", "--rdr-enable-perfect-completion-buffer",
+                      "Enable perfect completion buffer for RDR",
+                      sim::GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER, false)
 
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
@@ -206,12 +210,16 @@ main(int argc, char* argv[])
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
     main_memory_qubits -= compute_local_memory_capacity;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
-    sim::MEMORY_LEVEL* bb_memory = new sim::BB_MEMORY(m_freq_khz, 
-                                                        main_memory_qubits, 
-                                                        memory_block_physical_qubits, 
-                                                        memory_block_capacity, 
-                                                        memory_code_distance);
-    std::vector<sim::MEMORY_LEVEL*> memory_subsystem{bb_memory};
+    std::vector<sim::MEMORY_LEVEL*> memory_subsystem;
+    if (main_memory_qubits > 0)
+    {
+        sim::MEMORY_LEVEL* bb_memory = new sim::BB_MEMORY(m_freq_khz, 
+                                                            main_memory_qubits, 
+                                                            memory_block_physical_qubits, 
+                                                            memory_block_capacity, 
+                                                            memory_code_distance);
+        memory_subsystem.push_back(bb_memory);
+    }
 
     /* initialize compute subsystem */
 
