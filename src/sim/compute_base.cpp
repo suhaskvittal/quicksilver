@@ -121,7 +121,10 @@ COMPUTE_BASE::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
 COMPUTE_BASE::execute_result_type
 COMPUTE_BASE::do_h_or_s_gate(inst_ptr inst, QUBIT* q)
 {
-    return execute_result_type{.progress=1, .latency=2*code_distance};
+    if (inst->type == INSTRUCTION::TYPE::H)
+        return execute_result_type{.progress=1, .latency=2*code_distance};
+    else
+        return execute_result_type{.progress=1, .latency=code_distance};
 }
 
 ////////////////////////////////////////////////////////////
@@ -152,7 +155,7 @@ COMPUTE_BASE::do_t_like_gate(inst_ptr inst, QUBIT* q)
     else if (GL_T_GATE_DO_AUTOCORRECT)
         latency = 2*code_distance;
     else
-        latency = (GL_RNG() & 1) ? 4*code_distance : 2*code_distance;
+        latency = (GL_RNG() & 1) ? 3*code_distance : 2*code_distance;
     s_t_gates++;
     return execute_result_type{.progress=1, .latency=latency};
 }

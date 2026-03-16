@@ -17,8 +17,8 @@ print_stat_line(std::ostream& out, std::string_view name, T value)
     out << "\n";
 }
 
-template <class T, class U> double 
-mean(T x, U y) 
-{ 
-    return static_cast<double>(x) / static_cast<double>(y); 
+template <class T, class U> constexpr double
+mean(T x, U y)
+{
+    return static_cast<double>(x) / static_cast<double>(y);
 }

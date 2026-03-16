@@ -6,6 +6,7 @@
 #include "sim.h"
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
+#include "sim/driver.h"
 #include "sim/production.h"
 #include "sim/stats.h"
 
@@ -27,15 +28,17 @@ int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS{1'000'000};
 double GL_PHYSICAL_ERROR_RATE{1e-3};
 
 bool GL_T_GATE_DO_AUTOCORRECT{false};
-int64_t GL_T_GATE_TELEPORTATION_MAX{0};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool GL_RPC_ALWAYS_USE_TELEPORTATION{false};
-bool GL_RPC_ALWAYS_RUNAHEAD{false};
-int64_t GL_RPC_INST_DELTA_LIMIT{500};
-int64_t GL_RPC_DEGREE{4};
+bool GL_RDR_ENABLED{false};
+int64_t GL_RDR_CAPACITY{2};
+int64_t GL_RDR_START_LAYER{2};
+int64_t GL_RDR_LOOKAHEAD_DEPTH{8};
+int64_t GL_RDR_INST_DELTA_LIMIT{500};
+int64_t GL_RDR_DEGREE{4};
+bool GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER{false};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
@@ -49,7 +52,7 @@ namespace
 /*
  * Utility function for printing stats for each client.
  * */
-void _print_client_stats(std::ostream&, COMPUTE_SUBSYSTEM*, CLIENT*);
+void _print_client_stats(std::ostream&, DRIVER*, CLIENT*);
 
 } // anon
 
@@ -82,58 +85,44 @@ walltime_s()
 ////////////////////////////////////////////////////////////
 
 void
-print_compute_subsystem_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem)
+print_sim_stats(std::ostream& out, DRIVER* d)
 {
-    using STALL_TYPE = COMPUTE_SUBSYSTEM::STALL_TYPE;
+    using STALL_TYPE = DRIVER::STALL_TYPE;
 
-    const auto* rotation_subsystem = compute_subsystem->rotation_subsystem();
+    uint64_t cx_gates{0};
+    uint64_t t_gates{0};
+    for (auto t : {INSTRUCTION::TYPE::CX, INSTRUCTION::TYPE::CZ})
+        cx_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
+    for (auto t : {INSTRUCTION::TYPE::T, INSTRUCTION::TYPE::TX, INSTRUCTION::TYPE::TDG, INSTRUCTION::TYPE::TXDG})
+        t_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
 
-    uint64_t total_t_consumption{compute_subsystem->s_t_gates};
-    uint64_t total_t_teleports{compute_subsystem->s_t_gate_teleports};
-    uint64_t total_t_gate_episodes{compute_subsystem->s_t_gate_teleport_episodes};
+    double t_consumption_rate_per_s = mean(t_gates, d->current_cycle() / (1e3*d->freq_khz));
+    print_stat_line(out, "TOTAL_SIMULATION_CYCLES", d->current_cycle());
 
-    if (rotation_subsystem != nullptr)
-    {
-        total_t_consumption += rotation_subsystem->s_t_gates;
-        total_t_teleports += rotation_subsystem->s_t_gate_teleports;
-        total_t_gate_episodes += rotation_subsystem->s_t_gate_teleport_episodes;
-    }
-
-    double t_consumption_rate = mean(total_t_consumption, compute_subsystem->current_cycle());
-    double t_consumption_rate_per_s = mean(total_t_consumption, compute_subsystem->current_cycle() / (1e3*compute_subsystem->freq_khz));
-    double t_teleports_per_episode = mean(total_t_teleports, total_t_gate_episodes);
-
-    print_stat_line(out, "COMPUTE_FREQ_KHZ", compute_subsystem->freq_khz);
-    print_stat_line(out, "TOTAL_SIMULATION_CYCLES", compute_subsystem->current_cycle());
-
-    print_stat_line(out, "T_GATES_EXECUTED", total_t_consumption);
-    print_stat_line(out, "T_GATE_TELEPORTATIONS", total_t_teleports);
-    print_stat_line(out, "T_GATE_TELEPORTATIONS_PER_EPISODE", t_teleports_per_episode);
-    print_stat_line(out, "T_CONSUMPTION_RATE_PER_CYCLE", t_consumption_rate);
+    print_stat_line(out, "CX_GATES_EXECUTED", cx_gates);
+    print_stat_line(out, "T_GATES_EXECUTED", t_gates);
     print_stat_line(out, "T_CONSUMPTION_RATE_PER_S", t_consumption_rate_per_s);
 
-    print_stat_line(out, "TOTAL_ROTATIONS", compute_subsystem->s_total_rotations);
-    print_stat_line(out, "RPC_TOTAL", compute_subsystem->s_total_rpc);
-    print_stat_line(out, "RPC_SUCCESSFUL", compute_subsystem->s_successful_rpc);
+    print_stat_line(out, "ISOLATED_MEMORY_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::MEMORY));
+    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::MAGIC_STATE));
+    print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::EPR));
+    print_stat_line(out, "TOTAL_STALLS", d->stall_monitor().cycles_with_stalls());
 
-    print_stat_line(out, "ISOLATED_MEMORY_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::MEMORY));
-    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::MAGIC_STATE));
-    print_stat_line(out, "ISOLATED_EPR_STALLS", compute_subsystem->stall_monitor().isolated_stalls_for(STALL_TYPE::EPR));
-    print_stat_line(out, "TOTAL_STALLS", compute_subsystem->stall_monitor().cycles_with_stalls());
-
-    if (rotation_subsystem != nullptr)
+    if (GL_RDR_ENABLED)
     {
-        double mean_rpc_cycle_latency = mean(rotation_subsystem->s_rotation_service_cycles, 
-                                            rotation_subsystem->s_rotations_completed),
-               mean_rpc_idle_cycles = mean(rotation_subsystem->s_rotation_idle_cycles,
-                                            rotation_subsystem->s_rotations_completed);
-        print_stat_line(out, "RPC_SERVICE_CYCLES", mean_rpc_cycle_latency);
-        print_stat_line(out, "RPC_IDLE_CYCLES", mean_rpc_idle_cycles);
-        print_stat_line(out, "RPC_INVALIDATES", rotation_subsystem->s_invalidates);
+        print_stat_line(out, "TOTAL_ROTATION_INSTRUCTIONS", d->s_rotation_instructions);
+        print_stat_line(out, "RDR_REQUESTS", d->rdr()->s_requests);
+        print_stat_line(out, "RDR_REQUESTS_COMPLETED", d->rdr()->s_requests_completed);
+        print_stat_line(out, "RDR_REQUESTS_INVALIDATED", d->rdr()->s_requests_invalidated);
+        print_stat_line(out, "RDR_INVALIDATED_IN_QUEUE", d->rdr()->s_invalidated_in_queue);
+
+        double completion_buffer_mean_occupancy = mean(d->rdr()->s_completion_buffer_occupancy_sum,
+                                                       d->rdr()->s_completion_buffer_occupancy_ticks);
+        print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occupancy);
     }
 
-    for (auto* c : compute_subsystem->clients())
-        _print_client_stats(out, compute_subsystem, c);
+    for (auto* c : d->clients())
+        _print_client_stats(out, d, c);
 }
 
 ////////////////////////////////////////////////////////////
@@ -179,11 +168,11 @@ namespace
 ////////////////////////////////////////////////////////////
 
 void
-_print_client_stats(std::ostream& out, COMPUTE_SUBSYSTEM* compute_subsystem, CLIENT* c)
+_print_client_stats(std::ostream& out, DRIVER* d, CLIENT* c)
 {
     double ipc = stats::ipc(c->s_unrolled_inst_done, c->s_cycle_complete);
-    double ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, compute_subsystem->code_distance);
-    double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, compute_subsystem->freq_khz);
+    double ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, d->compute_subsystem()->code_distance);
+    double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, d->freq_khz);
 
     double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
     double mean_memory_access_latency = mean(c->s_memory_access_latency, c->s_memory_accesses);

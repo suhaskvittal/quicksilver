@@ -47,7 +47,7 @@ namespace
 PRODUCER_BASE*
 _alloc(ED_SPECIFICATION s)
 {
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     return new producer::ENT_DISTILLATION(freq_khz,
                                             s.output_error_rate,
@@ -89,7 +89,7 @@ _bandwidth(ED_SPECIFICATION s, double input_error_rate)
     if (input_error_rate < 0.0)
         input_error_rate = 10*GL_PHYSICAL_ERROR_RATE;
 
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
     
@@ -107,7 +107,7 @@ _bandwidth(ED_SPECIFICATION s, double input_error_rate)
 double
 _consumption_rate(ED_SPECIFICATION s, double input_error_rate)
 {
-    const double freq_khz = compute_freq_khz(s.syndrome_extraction_round_time_ns);
+    const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     double rounds = static_cast<double>(dm * (s.input_count-s.output_count));
     

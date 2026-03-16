@@ -20,7 +20,7 @@ struct FACTORY_SPECIFICATION
 {
     bool is_cultivation{false};
 
-    uint64_t syndrome_extraction_round_time_ns{1200};
+    uint64_t cycle_time_ns{1200};
     size_t   buffer_capacity;
     double   output_error_rate;
 
@@ -59,7 +59,7 @@ struct ED_SPECIFICATION /* entanglement distillation */
     /*
      * Syndrome extraction latency should be for the slower substrate.
      * */
-    uint64_t syndrome_extraction_round_time_ns{1200};
+    uint64_t cycle_time_ns{1200};
 
     /*
      * `is_last_level` is needed for resource estimates

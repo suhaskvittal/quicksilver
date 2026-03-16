@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
 
     ARGPARSE()
         .required("input-file", "Binary trace file to analyze", input_file)
-        .optional("-rpc", "", "Use RPC ISA", GL_USE_RPC_ISA, 0)
+        .optional("-rdr", "", "Use RDR ISA", GL_USE_RDR_ISA, 0)
         .optional("-pp", "--print-progress", "Progress print-out frequency", print_progress, 100'000)
         .parse(argc, argv);
 

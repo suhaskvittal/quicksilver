@@ -106,10 +106,7 @@ private:
      * order.
      * */
     template <class CALLBACK>
-    void generic_operate_on_nodes_in_layer_order(const CALLBACK&, size_t min_layer, size_t max_layer);
-
-    template <class CALLBACK>
-    void generic_operate_on_nodes_in_layer_order_c(const CALLBACK&, size_t min_layer, size_t max_layer) const;
+    void _generic_operate_on_nodes_in_layer_order(this auto&, const CALLBACK&, size_t min_layer, size_t max_layer);
 };
 
 ////////////////////////////////////////////////////////////

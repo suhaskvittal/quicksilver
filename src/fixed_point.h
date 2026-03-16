@@ -34,44 +34,43 @@ public:
     constexpr FIXED_POINT(std::array<WORD_TYPE, NUM_WORDS> x) :backing_array_(x) {}
     
     // this is useful for converting between fixed point widths quickly
-    template <size_t _W> FIXED_POINT(FIXED_POINT<_W>);
+    template <size_t _W> constexpr FIXED_POINT(FIXED_POINT<_W>);
 
-    // This cannot be constexpr because it requires std::copy
-    template <class ITER_TYPE> FIXED_POINT(ITER_TYPE begin, ITER_TYPE end);
+    template <class ITER_TYPE> constexpr FIXED_POINT(ITER_TYPE begin, ITER_TYPE end);
 
     // bit-level operations:
-    void set(size_t idx, bool);
-    bool test(size_t idx) const;
+    constexpr void set(size_t idx, bool);
+    constexpr bool test(size_t idx) const;
 
     // word-level operations:
-    void set_word(size_t idx, WORD_TYPE);
-    word_type test_word(size_t idx) const;
+    constexpr void set_word(size_t idx, WORD_TYPE);
+    constexpr word_type test_word(size_t idx) const;
 
     // bulk word-level operations:
-    template <class XFORM_TYPE> void transform(const XFORM_TYPE&, size_t from=0, size_t to=NUM_WORDS);
+    template <class XFORM_TYPE> constexpr void transform(const XFORM_TYPE&, size_t from=0, size_t to=NUM_WORDS);
 
     // bit shift operations:
-    void lshft(int);
-    void rshft(int);
-    
+    constexpr void lshft(int);
+    constexpr void rshft(int);
+
     // word shift operations:
-    void lshft_w(int);
-    void rshft_w(int);
+    constexpr void lshft_w(int);
+    constexpr void rshft_w(int);
 
     // other useful operations:
-    size_t popcount() const;
-    int        join_word_and_bit_idx(index_pair) const;
-    index_pair get_word_and_bit_idx(size_t idx) const;
-    index_pair msb() const;   // returns {-1, -1} if all bits are 0
-    index_pair lsb() const;   // returns {-1, -1} if all bits are 0
+    constexpr size_t popcount() const;
+    constexpr int        join_word_and_bit_idx(index_pair) const;
+    constexpr index_pair get_word_and_bit_idx(size_t idx) const;
+    constexpr index_pair msb() const;   // returns {-1, -1} if all bits are 0
+    constexpr index_pair lsb() const;   // returns {-1, -1} if all bits are 0
 
     std::string to_hex_string() const;
 
-    bool operator==(const FIXED_POINT&) const;
-    bool operator!=(const FIXED_POINT&) const;
+    constexpr bool operator==(const FIXED_POINT&) const;
+    constexpr bool operator!=(const FIXED_POINT&) const;
 
-    std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
-    const std::array<word_type, NUM_WORDS>& get_words_ref() { return backing_array_; }
+    constexpr std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
+    constexpr const std::array<word_type, NUM_WORDS>& get_words_ref() { return backing_array_; }
 };
 
 ////////////////////////////////////////////////////////////

@@ -24,7 +24,7 @@ using cycle_type =     uint64_t;
 
 /*
  * Modifies the instruction representation for RPC (Rotation Pre-Computation)
- * The value of `GL_USE_RPC_ISA` indicates the level.
+ * The value of `GL_USE_RDR_ISA` indicates the level.
  *
  * Level 0 = do not use
  *       1 = only add 2*phi to the instruction representation
@@ -37,7 +37,7 @@ using cycle_type =     uint64_t;
  * If the level is set to 0 (default), then corrective rotations
  * are not used.
  * */
-extern int64_t GL_USE_RPC_ISA;
+extern int64_t GL_USE_RDR_ISA;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -79,8 +79,11 @@ std::ostream& operator<<(std::ostream&, _die);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class T> void print_stat_line(std::ostream&, std::string_view, T);
-template <class T, class U> double mean(T, U);
+template <class T> 
+void print_stat_line(std::ostream&, std::string_view, T);
+
+template <class T, class U>
+constexpr double mean(T, U);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

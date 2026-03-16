@@ -7,7 +7,6 @@
 #define SIM_STORAGE_h
 
 #include "globals.h"
-#include "sim/operable.h"
 
 #include <unordered_set>
 
@@ -16,6 +15,19 @@ namespace sim
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+class STORAGE
+{
+public:
+    using backing_buffer_type = std::unordered_set<QUBIT*>;
+
+    const size_t physical_qubit_count;
+    const size_t logical_qubit_count;
+    const size_t code_distance;
+private:
+    backing_buffer_type contents_;
+
+};
 
 class STORAGE : public OPERABLE
 {

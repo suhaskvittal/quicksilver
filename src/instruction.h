@@ -105,14 +105,14 @@ public:
     /*
      * `type` corresponds to some basic instruction.
      * */
-    TYPE type;
+    const TYPE type;
 
     /*
      * `qubits` is a small-buffer-optimized array (inline for <=3 qubits, heap otherwise).
      *
      * The number of valid qubits is `qubit_count`, which is set from `qubits.size()`.
      * */
-    qubit_array qubits;
+    const qubit_array qubits;
 
     /*
      * `angle` and `urotseq` are only useful for RZ and RX gates.
@@ -121,11 +121,9 @@ public:
      * have high precision for angles near a power of two).
      *
      * `urotseq` is a sequence of Clifford+T gates that approximate
-     * RZ or RX of `angle`. `urotseq` is not const since it may 
-     * need to be changed during compilation (to support asynchrnous 
-     * synthesis).
+     * RZ or RX of `angle`.
      * */
-    fpa_type angle;
+    const fpa_type angle;
     urotseq_type urotseq;
 
     /*
@@ -186,14 +184,7 @@ public:
 
     uint64_t original_unrolled_inst_count{};
 
-    /*
-     * `rpc_*` variables correspond to variables used for
-     * rotation precomputation. 
-     *
-     * `rpc_has_been_visited` is used to track whether this
-     * is the first time a given instruction has been seen.
-     * */
-    bool rpc_has_been_visited{false};
+    bool rdr_has_been_visited{false};
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute
@@ -227,7 +218,7 @@ public:
     template <class Q_IT_TYPE, class U_IT_TYPE>
     INSTRUCTION(TYPE, Q_IT_TYPE q_begin, Q_IT_TYPE q_end, fpa_type, U_IT_TYPE urotseq_begin, U_IT_TYPE urotseq_end);
 
-    INSTRUCTION(const INSTRUCTION&) =default;
+    INSTRUCTION(const INSTRUCTION&);
 
     ~INSTRUCTION();
 

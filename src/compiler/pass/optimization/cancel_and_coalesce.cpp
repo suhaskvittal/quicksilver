@@ -28,6 +28,9 @@ constexpr size_t DAG_INST_CAPACITY{8192};
 
 using dag_ptr = std::unique_ptr<DAG>;
 using inst_ptr = DAG::inst_ptr;
+using fpa_type = INSTRUCTION::fpa_type;
+using coalesce_output_type = std::array<std::optional<INSTRUCTION>, 2>;
+using discrete_rotation_type = std::pair<INSTRUCTION::TYPE, INSTRUCTION::TYPE>;
 
 /*
  * `LAST_INST` is the last instruction for a given qubit.
@@ -35,6 +38,8 @@ using inst_ptr = DAG::inst_ptr;
  * */
 static thread_local std::vector<inst_ptr> LAST_INST;
 static thread_local std::vector<inst_ptr> PREV_FRONT_LAYER;
+
+static thread_local uint64_t INST_COUNT{0};
 
 /*
  * Subroutines
@@ -47,11 +52,11 @@ void _cleanup(IO_UTILITY&);
  * Merge the two instructions. The first instruction's data is modified,
  * and the second should be deleted.
  *
- * Most of the time will return true, indicating that `prev` should be deleted.
- * However, in the discrete coalescing, this function may return false, indicating
- * that `prev` should not be destroyed.
+ * The output of this function is a 2D-array. The first entry will always
+ * have a instruction, which indicates the new instruction after transformation
+ * The second entry may not be null, which occurs for discrete rotations.
  * */
-bool _coalesce(inst_ptr, inst_ptr prev);
+coalesce_output_type _coalesce(inst_ptr, inst_ptr prev);
 
 /*
  * Helper functions:
@@ -68,6 +73,11 @@ bool _fpa_is_near_zero(const INSTRUCTION::fpa_type&);
  * */
 int8_t _discretize(INSTRUCTION::TYPE);
 
+/*
+ * Computes the instruction types for a given discrete value (0 thru 7).
+ * */
+discrete_rotation_type _reverse_discretization(int8_t, bool use_z_basis);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -76,6 +86,9 @@ int8_t _discretize(INSTRUCTION::TYPE);
 result_type
 cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& istrm)
 {
+    std::cout << "\tcancel_and_coalesce: ";
+    std::cout.flush();
+        
     return run(ostrm, istrm, _init, _loop, _cleanup, DAG_INST_CAPACITY);
 }
 
@@ -96,6 +109,8 @@ _init(IO_UTILITY& io)
 
     PREV_FRONT_LAYER.clear();
     PREV_FRONT_LAYER.reserve(io.num_qubits);
+
+    INST_COUNT = 0;
 }
 
 ////////////////////////////////////////////////////////////
@@ -113,7 +128,17 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
 
         // check that all operands of `inst` had the same previous instruction:
         inst_ptr prev_inst = LAST_INST[inst->qubits[0]];
-        if (prev_inst == nullptr || prev_inst->deletable) 
+        if (prev_inst == nullptr 
+                || prev_inst->deletable 
+                || prev_inst->qubit_count != inst->qubit_count)
+        {
+            continue;
+        }
+
+        const bool are_cancellable = _gates_are_inverses(inst->type, prev_inst->type)
+                                        || (inst->type == prev_inst->type && is_rotation_instruction(inst->type));
+        const bool are_coalescable = _is_coalescable(inst->type, prev_inst->type);
+        if (!are_cancellable && !are_coalescable)
             continue;
 
         bool all_match = std::all_of(inst->q_begin()+1, inst->q_end(),
@@ -128,14 +153,33 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
                 inst->deletable = true;
                 out.s_gates_removed += 2;
             }
-            else if (_is_coalescable(inst->type, prev_inst->type))
+            else
             {
-                bool delete_prev = _coalesce(inst, prev_inst);
-                prev_inst->deletable = delete_prev;
-                out.s_gates_removed += delete_prev ? 1 : 0;
+                auto [i1, i2] = _coalesce(inst, prev_inst);
+
+                // replace data of `prev_inst` and `inst` completely:
+                inst->~INSTRUCTION();
+                new (inst) INSTRUCTION(*i1);
+                if (i2.has_value()) 
+                {
+                    prev_inst->~INSTRUCTION();
+                    new (prev_inst) INSTRUCTION(*i2);
+                } else 
+                {
+                    prev_inst->deletable = true;
+                }
+                out.s_gates_removed += !i2.has_value() ? 1 : 0;
             }
         }
     }
+
+    /* print progress */
+    constexpr uint64_t PRINT_PROGRESS{1'000'000};
+    uint64_t before_mod = INST_COUNT % PRINT_PROGRESS,
+             after_mod = (INST_COUNT+front_layer.size()) % PRINT_PROGRESS;
+    if (before_mod > after_mod)
+        (std::cout << ".").flush();
+    INST_COUNT += front_layer.size();
 
     // commit all non-deletable instructions in the previous layer
     for (auto* inst : PREV_FRONT_LAYER)
@@ -150,6 +194,7 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
     PREV_FRONT_LAYER = std::move(front_layer);
 
     out.progress += out.s_gates_removed - prev_gates_removed;
+
     return false;
 }
 
@@ -167,10 +212,14 @@ _cleanup(IO_UTILITY& io)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+coalesce_output_type
 _coalesce(inst_ptr curr, inst_ptr prev)
 {
+    constexpr double ANALOG_ANGLE_TRUNC_TOL{1e-12};
+
     assert(_is_coalescable(curr->type, prev->type));
+
+    coalesce_output_type out{};
 
     // first check if `curr` and `prev` are rotations
     if (is_rotation_instruction(curr->type))
@@ -180,9 +229,21 @@ _coalesce(inst_ptr curr, inst_ptr prev)
         // would've been caught earlier.
         assert(!_fpa_is_near_zero(s));
 
-        curr->angle = s;
-        curr->urotseq = compiler::prog::rotation_manager_lookup(s);
-        return true;
+        // check if `s` corresponds to some discrete angle:
+        double d = M_PI / convert_fpa_to_float(s);  // i.e., pi/4 --> 4
+        if (std::abs(d - std::round(d)) < ANALOG_ANGLE_TRUNC_TOL)
+        {
+            int8_t a = static_cast<int8_t>(std::round(d));
+            auto [t1, t2] = _reverse_discretization(a, _is_z_basis(curr->type));
+            out[0].emplace(t1, curr->q_begin(), curr->q_end());
+            if (t2 != INSTRUCTION::TYPE::NIL)
+                out[1].emplace(t2, curr->q_begin(), curr->q_end());
+        }
+        else
+        {
+            auto urotseq = compiler::prog::rotation_manager_lookup(s);
+            out[0].emplace(curr->type, curr->q_begin(), curr->q_end(), s, urotseq.begin(), urotseq.end());
+        }
     }
     else
     {
@@ -191,25 +252,12 @@ _coalesce(inst_ptr curr, inst_ptr prev)
         int8_t s = (a+b)&7;  // mod 8
         assert(s != 0);  // should be canceled earlier
 
-        const bool is_z = _is_z_basis(curr->type);
-        if (s == 1)
-            curr->type = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
-        else if (s == 2)
-            curr->type = is_z ? INSTRUCTION::TYPE::S : INSTRUCTION::TYPE::SX;
-        else if (s >= 3 && s <= 5)
-            curr->type = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
-        else if (s == 6)
-            curr->type = is_z ? INSTRUCTION::TYPE::SDG : INSTRUCTION::TYPE::SXDG;
-        else if (s == 7)
-            curr->type = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
-
-        // in some cases, `prev->type` must be set
-        if (s == 3)
-            prev->type = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
-        else if (s == 5)
-            prev->type = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
-        return (s != 3) && (s != 5);
+        auto [t1, t2] = _reverse_discretization(s, _is_z_basis(curr->type));
+        out[0].emplace(t1, curr->q_begin(), curr->q_end());
+        if (t2 != INSTRUCTION::TYPE::NIL)
+            out[1].emplace(t2, prev->q_begin(), prev->q_end());
     }
+    return out;
 }
 
 ////////////////////////////////////////////////////////////
@@ -225,6 +273,7 @@ _is_z_basis(INSTRUCTION::TYPE t)
     case INSTRUCTION::TYPE::SDG:
     case INSTRUCTION::TYPE::T:
     case INSTRUCTION::TYPE::TDG:
+    case INSTRUCTION::TYPE::RZ:
         return true;
     default:
         return false;
@@ -371,6 +420,33 @@ _discretize(INSTRUCTION::TYPE t)
 
     std::cerr << "_discretize: received invalid instruction \"" << BASIS_GATES[static_cast<int>(t)]
                 << " for discretization" << _die{};
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+discrete_rotation_type
+_reverse_discretization(int8_t s, bool is_z)
+{
+    INSTRUCTION::TYPE t1{INSTRUCTION::TYPE::NIL}, t2{INSTRUCTION::TYPE::NIL};
+    if (s == 1)
+        t1 = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
+    else if (s == 2)
+        t1 = is_z ? INSTRUCTION::TYPE::S : INSTRUCTION::TYPE::SX;
+    else if (s >= 3 && s <= 5)
+        t1 = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
+    else if (s == 6)
+        t1 = is_z ? INSTRUCTION::TYPE::SDG : INSTRUCTION::TYPE::SXDG;
+    else if (s == 7)
+        t1 = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
+
+    // in some cases, `prev->type` must be set
+    if (s == 3)
+        t2 = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
+    else if (s == 5)
+        t2 = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
+    assert(t1 != INSTRUCTION::TYPE::NIL);
+    return std::make_pair(t1,t2);
 }
 
 ////////////////////////////////////////////////////////////

@@ -5,6 +5,7 @@
 
 #include "argparse.h"
 #include "compiler/pass/optimization.h"
+#include "compiler/program/rotation_manager.h"
 #include "generic_io.h"
 #include "instruction.h"
 
@@ -49,13 +50,15 @@ main(int argc, char* argv[])
     generic_strm_type istrm;
     // initially, `istrm` will point to the input file.
     generic_strm_open(istrm, input_file, "r");
+
+    compiler::prog::rotation_manager_init();
     
     result_type total{};
     result_type out;
     size_t iter_idx{0};
     do
     {
-        (std::cout << "iteration " << iter_idx << " : ").flush();
+        std::cout << "iteration " << iter_idx << "\n";
 
         // start timing this iteration:
         auto iter_start = std::chrono::high_resolution_clock::now();
@@ -67,7 +70,7 @@ main(int argc, char* argv[])
         // end of iteration -- return time it took to complete
         auto iter_end =  std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(iter_end - iter_start);
-        std::cout << "\tt = " << duration.count() << "ms, gates removed = " << out.s_gates_removed << "\n";
+        std::cout << "\n\t\tt = " << duration.count() << "ms, gates removed = " << out.s_gates_removed << "\n";
 
         total += out;
         iter_idx++;
@@ -88,6 +91,8 @@ main(int argc, char* argv[])
 
     print_stat_line(std::cout, "GATES_KILLED", total.s_gates_removed);
 
+    compiler::prog::rotation_manager_end();
+
     return 0;
 }
 
@@ -100,8 +105,6 @@ namespace
 template <class P> void
 run_pass(generic_strm_type& istrm, const P& p, result_type& running_result)
 {
-    (std::cout << ".").flush();
-
     // create tmp file and call pass `p`
     generic_strm_type tmp_strm = tmpfile();
     running_result += p(tmp_strm, istrm);
