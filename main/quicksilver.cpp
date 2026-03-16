@@ -134,8 +134,8 @@ main(int argc, char* argv[])
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
 
-        .optional("", "--enable-t-autocorrect", 
-                        "Use auto correction when applying T gates", sim::GL_T_GATE_DO_AUTOCORRECT, false)
+        .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
+        .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
 
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)

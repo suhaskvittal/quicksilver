@@ -58,9 +58,15 @@ extern double GL_PHYSICAL_ERROR_RATE;
 ////////////////////////////////////////////////////////////
 
 /*
- * Assume auto-correction is used for T gates.
+ * Reaction time in terms of compute cycles.
  * */
-extern bool GL_T_GATE_DO_AUTOCORRECT;
+extern int64_t GL_REACTION_TIME;
+
+/*
+ * Reaction-limited T teleportation
+ *  degree = max number of T gates to do in parallel
+ * */
+extern int64_t GL_RLTP_DEGREE;
 
 /*
  * RDR parameters:

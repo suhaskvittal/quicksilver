@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20.3)
-project(oq2 VERSION 1.0.0 LANGUAGES CXX)
+project(quicksilver VERSION 1.0.0 LANGUAGES CXX)
 
 # initialize compile options
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")

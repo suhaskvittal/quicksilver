@@ -32,6 +32,9 @@ bool GL_T_GATE_DO_AUTOCORRECT{false};
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+int64_t GL_REACTION_TIME{10};
+int64_t GL_RLTP_DEGREE{0};
+
 bool GL_RDR_ENABLED{false};
 int64_t GL_RDR_CAPACITY{2};
 int64_t GL_RDR_START_LAYER{2};

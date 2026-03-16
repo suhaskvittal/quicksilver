@@ -106,6 +106,14 @@ public:
     execute_result_type execute_instruction(inst_ptr, std::vector<QUBIT*>);
 
     /*
+     * Implementation of a rotation gate's uops using reaction-limited
+     * T teleportation. This is tailored to rotation gates, and thus this
+     * function will consume an arbitrary number of uops (given resources
+     * are available).
+     * */
+    execute_result_type do_rotation_via_rltp(inst_ptr, QUBIT*, size_t limit);
+
+    /*
      * Returns true if the qubit is in `local_memory_`
      * */
     bool is_qubit_in_local_memory(const QUBIT*) const;

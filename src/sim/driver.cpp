@@ -400,10 +400,11 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
         update_instruction_stats_on_fetch(inst, operands);
 
         // check if the operands are ready:
-        if (!is_instruction_ready(inst, operands))
+        if (!is_instruction_ready(executed_inst, operands))
             continue;
 
-        // if this is a rotation gate, then first 
+        /* RDR logic: first check if the rotation's magic state is already available    *
+         * if so, then try and apply the magic state                                    */
         if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
         {
             if (rdr_handle_instruction(c, inst, operands[0])) 
@@ -412,13 +413,27 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
             rdr_->invalidate_request(inst);
         }
 
-        auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
-        success_count += result.progress;
-        if (result.progress)
+        if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
         {
-            update_instruction_stats_before_retire(inst);
-            if (inst->uop_count() == 0 || inst->retire_current_uop())
-                retire_instruction(c, inst, result.latency);
+            // reaction-limited T teleportation:
+            auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
+            if (result.progress)
+            {
+                update_instruction_stats_before_retire(inst);
+                if (inst->uops_retired() == inst->uop_count())
+                    retire_instruction(c, inst, result.latency);
+            }
+        }
+        else
+        {
+            auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
+            success_count += result.progress;
+            if (result.progress)
+            {
+                update_instruction_stats_before_retire(inst);
+                if (inst->uop_count() == 0 || inst->retire_current_uop())
+                    retire_instruction(c, inst, result.latency);
+            }
         }
     }
 
@@ -477,6 +492,11 @@ DRIVER::update_instruction_stats_before_retire(inst_ptr inst)
     stall_monitor_.add_stall_range(STALL_TYPE::MEMORY, s, x, false);
     if (is_t_like_instruction(inst->type))
         stall_monitor_.add_stall_range(STALL_TYPE::MAGIC_STATE, s, y, false);
+
+    // reset any stats:
+    inst->first_ready_cycle_for_current_uop.reset();
+    inst->first_cycle_with_all_load_results_available.reset();
+    inst->first_cycle_with_available_resource_state.reset();
 }
 
 ////////////////////////////////////////////////////////////

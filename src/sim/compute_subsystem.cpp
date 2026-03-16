@@ -15,11 +15,26 @@ namespace sim
 namespace
 {
 
+using execute_result_type = COMPUTE_SUBSYSTEM::execute_result_type;
+using routing_type = COMPUTE_SUBSYSTEM::routing_type;
+using r_id_type = routing_type::id_type;
+
 size_t _dedicated_ancilla_count();
 size_t _num_routing_channels(COMPUTE_SUBSYSTEM*);
 size_t _channel_width(COMPUTE_SUBSYSTEM*);
 
 size_t _get_idx_in_array(QUBIT*, const std::vector<QUBIT*>&);
+
+/*
+ * Calls `test_resources_between()` for both of `routing::MCB_LEFT_ENTRY` and
+ * `routing::MCB_RIGHT_ENTRY`, and returns the first one that can be locked. 
+ * Return std::nullopt if neither are available.
+ * */
+template <class SRC_TYPE>
+std::optional<r_id_type> _test_endpoints_and_return_first_lockable(routing_type&,
+                                                                    SRC_TYPE src,
+                                                                    cycle_type from,
+                                                                    cycle_type to);
 
 } // anon
 
@@ -129,7 +144,7 @@ COMPUTE_SUBSYSTEM::initialize_qubits(std::vector<QUBIT*> program_qubits)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
 {
     if (is_software_instruction(inst->type))
@@ -190,6 +205,69 @@ COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+execute_result_type
+COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remaining)
+{
+    assert(is_rotation_instruction(inst->type));
+    assert(inst->uops_retired() < inst->uop_count());
+
+    // can only do this if the current uop is a non-clifford gate
+    const bool first_uop_is_a_non_clifford = is_t_like_instruction(inst->current_uop()->type);
+    auto result = execute_instruction(inst->current_uop(), {q});
+    if (result.progress && inst->retire_current_uop())
+        return result;
+    // also return if the first uop was not a non-Clifford
+    if (!first_uop_is_a_non_clifford)
+        return result;
+
+    // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
+    // from the program qubit to the EPR qubit.
+    // 
+    // This involves moving out of this channel (so we need to route to `MCB_LEFT_ENTRY`
+    // or `MCB_RIGHT_ENTRY`). Assume that this routing problem is solved properly in practice,
+    // and choose whichever is free
+    cycle_type tp_start = current_cycle() + code_distance,
+               tp_end = current_cycle() + 3*code_distance;
+    auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
+    if (!channel_out.has_value())
+        return result;
+
+    routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
+    // update the result latency, which is currently `code_distance + GL_REACTION_TIME + 1`.
+    // The latter part (`GL_REACTION_TIME+1`) overlaps with the ZZ and XX measurements required
+    // to teleport the program qubit
+    result.latency = 3*code_distance; 
+    while (inst->uops_retired() < inst->uop_count() && remaining > 0)
+    {
+        auto* uop = inst->current_uop();
+        // operation occurs on an ancilla: assume operation always succeeds
+        if (is_t_like_instruction(uop->type))
+        {
+            auto f_it = std::find_if(t_factories_.begin(), t_factories_.end(),
+                                    [] (const auto* f) { return f->buffer_occupancy() > 0; });
+            if (f_it == t_factories_.end())
+                break;
+            (*f_it)->consume(1);
+            result.latency += GL_REACTION_TIME;
+            remaining--;
+        }
+        result.progress++;
+        
+        // update stats:
+        s_inst_executed_by_type[static_cast<int>(uop->type)]++;
+
+        // retire uop:
+        inst->retire_current_uop();
+    }
+
+    q->cycle_available = current_cycle()+result.latency;
+    q->last_operation_was_memory_access = false;
+    return result;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 bool
 COMPUTE_SUBSYSTEM::is_qubit_in_local_memory(const QUBIT* q) const
 {
@@ -227,13 +305,13 @@ COMPUTE_SUBSYSTEM::dedicated_ancilla() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::do_h_gate(inst_ptr inst, QUBIT* q)
 {
     return execute_result_type{.progress=1, .latency=1};  // can be done transversally (up-to a 45deg rotation)
 }
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::do_s_like_gate(inst_ptr inst, QUBIT* q)
 {
     if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
@@ -244,7 +322,7 @@ COMPUTE_SUBSYSTEM::do_s_like_gate(inst_ptr inst, QUBIT* q)
     return execute_result_type{};
 }
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::do_cx_like_gate(inst_ptr inst, QUBIT* c, QUBIT* t)
 {
     if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
@@ -258,14 +336,12 @@ COMPUTE_SUBSYSTEM::do_cx_like_gate(inst_ptr inst, QUBIT* c, QUBIT* t)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
 {
     // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
     // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
     // takes 1us)
-    const size_t reaction_time{code_distance};
-
     const cycle_type t_start = current_cycle(),
                      t_end = current_cycle() + code_distance;
 
@@ -277,23 +353,21 @@ COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
     if (f_it == t_factories_.end())
         return execute_result_type{};
 
-    // depending on whether S correction is needed, we will need space for routing.
-    // check if routing space can be consumed -- we need to allocate for the worst case
-    bool ok = routing_.test_resources_between(q, routing::MCB_LEFT_ENTRY, t_start, t_end);
-
-    if (!ok)
+    // get routing space -- on success, we can execute the T gate
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
+    if (!dst.has_value())
         return execute_result_type{};
 
     (*f_it)->consume(1);
-    routing_.lock_resources_between(q, routing::MCB_LEFT_ENTRY, t_start, t_end);
-    cycle_type latency = code_distance + reaction_time + 1;
+    routing_.lock_resources_between(q, *dst, t_start, t_end);
+    cycle_type latency = code_distance + GL_REACTION_TIME + 1;
     return execute_result_type{.progress=1, .latency=latency};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::execute_result_type
+execute_result_type
 COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
 {
     if (inst->type == INSTRUCTION::TYPE::LOAD || inst->type == INSTRUCTION::TYPE::STORE)
@@ -309,11 +383,10 @@ COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
 
     // consume routing space on the compute subsystem side:
     // d cycles to move out `st` and d cycles for transfering `ld` into its place.
-    bool ok = routing_.test_resources_between(st, 
-                                                routing::MCB_RIGHT_ENTRY, 
-                                                current_cycle(), 
-                                                current_cycle()+2*code_distance);
-    if (!ok)
+    cycle_type mv_start = current_cycle(),
+               mv_end = current_cycle() + 2*code_distance;
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, st, mv_start, mv_end);
+    if (!dst.has_value())
         return execute_result_type{};
 
     // find memory location that contains this memory:
@@ -323,7 +396,7 @@ COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
         return execute_result_type{};
 
     // update data structures
-    routing_.lock_resources_between(st, routing::MCB_RIGHT_ENTRY, current_cycle(), current_cycle()+2*code_distance);
+    routing_.lock_resources_between(st, *dst, mv_start, mv_end);
     memory_level_map_[st] = memory_level_map_[ld];
     memory_level_map_[ld] = -1;
     
@@ -351,16 +424,23 @@ COMPUTE_SUBSYSTEM::count_available_magic_states() const
 namespace
 {
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 size_t
 _num_routing_channels(COMPUTE_SUBSYSTEM* c)
 {
-    return 128;
+    return 1;
 }
 
 size_t
 _channel_width(COMPUTE_SUBSYSTEM* c)
 {
-    return (c->dedicated_ancilla_count + c->local_memory_capacity) >> 1;
+    size_t q_count = c->dedicated_ancilla_count + c->local_memory_capacity;
+    if (q_count & 1)
+        q_count++;
+    size_t w = q_count >> 1;
+    return w;
 }
 
 size_t
@@ -379,6 +459,21 @@ _get_idx_in_array(QUBIT* q, const std::vector<QUBIT*>& arr)
     assert(it != arr.end());
     return std::distance(arr.begin(), it);
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class T> std::optional<r_id_type>
+_test_endpoints_and_return_first_lockable(routing_type& r, T src, cycle_type from, cycle_type to)
+{
+    for (r_id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
+        if (r.test_resources_between(src, dst, from, to))
+            return std::make_optional(dst);
+    return std::nullopt;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 } // anon
 
