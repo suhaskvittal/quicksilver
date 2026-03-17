@@ -3,8 +3,8 @@
  *  date:   12 March 2026
  * */
 
-#ifndef SIM_DRIVER_ROTATION_DIRECTED_RUNAHEAD_h
-#define SIM_DRIVER_ROTATION_DIRECTED_RUNAHEAD_h
+#ifndef SIM_DRIVER_RDR_h
+#define SIM_DRIVER_RDR_h
 
 #include "instruction.h"
 #include "sim/compute_subsystem.h"
@@ -75,6 +75,13 @@ public:
     uint64_t s_completion_buffer_occupancy_sum{0};
     uint64_t s_completion_buffer_occupancy_ticks{0};
 private:
+    /*
+     * Stores the number of rotation dependencies for
+     * each rotation. Once the count hits 0, then we
+     * know that the rotation is the "next" rotation.
+     * */
+    std::unordered_map<inst_ptr, size_t> predecessor_table_;
+
     request_table_type request_table_;
     std::unordered_set<inst_ptr> completion_buffer_;
 
@@ -142,4 +149,4 @@ private:
 } // namespace sim
 
 
-#endif // SIM_DRIVER_ROTATION_DIRECTED_RUNAHEAD_h
+#endif // SIM_DRIVER_RDR_h
