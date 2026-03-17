@@ -9,7 +9,7 @@
 #include "globals.h"
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
-#include "sim/driver/rotation_directed_runahead.h"
+#include "sim/driver/rdr.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 #include "sim/stall_monitor.h"
