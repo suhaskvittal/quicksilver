@@ -90,7 +90,8 @@ public:
     std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
 
     /*
-     * Executes the given callback for `min_layer` to `max_layer`
+     * Executes the given callback for `min_layer` to `max_layer`. The callback
+     * is given the instruction (first argument) and the layer number (second argument).
      * */
     template <class CALLBACK>
     void for_each_instruction_in_layer_order(const CALLBACK&, size_t min_layer, size_t max_layer) const;

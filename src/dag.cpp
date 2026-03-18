@@ -122,7 +122,7 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
 
     // finally, if `inst` is also in `back_instructions_`, then we need to clear the entry
     std::for_each(inst->q_begin(), inst->q_end(),
-            [this] (qubit_type q)
+            [this, &head_node] (qubit_type q)
             {
                 if (back_instructions_[q] == head_node)
                     back_instructions_[q] = nullptr;

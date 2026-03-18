@@ -27,7 +27,7 @@ template <class CALLBACK> void
 DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer) const
 {
     return _generic_operate_on_nodes_in_layer_order(
-                        [&callback] (node_type* x) { callback(x->inst); }, 
+                        [&callback] (node_type* x, size_t layer) { callback(x->inst, layer); }, 
                         min_layer, 
                         max_layer);
 }
@@ -94,7 +94,10 @@ DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, si
 ////////////////////////////////////////////////////////////
 
 template <class CALLBACK> void
-DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, const CALLBACK& callback, size_t min_layer, size_t max_layer)
+DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, 
+                                                const CALLBACK& callback, 
+                                                size_t min_layer, 
+                                                size_t max_layer)
 {
     // update iteration generation so we know when to reset predecessor
     self.iteration_generation_++;
@@ -114,7 +117,7 @@ DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, const CALLBACK& c
         for (auto* x : current_layer)
         {
             if (layer_count >= min_layer)
-                callback(x);
+                callback(x, layer_count);
 
             for (node_type* y : x->dependent)
             {

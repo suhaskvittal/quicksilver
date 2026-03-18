@@ -177,9 +177,7 @@ private:
 
     enum class RDR_LOOKUP_RESULT { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
 
-    bool              rdr_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
-    RDR_LOOKUP_RESULT rdr_lookup_instruction(inst_ptr, QUBIT*);
-    void              rdr_do_runahead(CLIENT*, inst_ptr);
+    bool rdr_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
 };
 
 ////////////////////////////////////////////////////////////

@@ -184,6 +184,9 @@ public:
 
     uint64_t original_unrolled_inst_count{};
 
+    /* Rotation-Directed Runahead state variables */
+
+    bool rdr_is_pending{false};
     bool rdr_has_been_visited{false};
 private:
     /*

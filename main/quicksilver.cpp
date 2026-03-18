@@ -93,6 +93,8 @@ FIDELITY_RESULT compute_application_fidelity(uint64_t scale_to_instructions, sim
 int
 main(int argc, char* argv[])
 {
+    sim::GL_RNG.seed(0);
+
     std::string trace_string;
     int64_t     inst_sim;
 
