@@ -16,6 +16,7 @@ DAG::DAG(size_t _qubit_count)
     back_instructions_(_qubit_count, nullptr)
 {
     front_layer_.reserve(qubit_count);
+    node_lookup_table_.reserve(32);
 }
 
 DAG::~DAG()
@@ -47,10 +48,12 @@ DAG::~DAG()
 ////////////////////////////////////////////////////////////
 
 void
-DAG::add_instruction(inst_ptr inst)
+DAG::add_instruction(inst_ptr inst, bool memoize)
 {
     node_type* x = new node_type{inst};
 
+    // identify dependent instructions in `back_instructions_` and also
+    // assign the requisite indices of `back_instructions_`
     std::unordered_set<node_type*> visited;
     for (auto it = inst->q_begin(); it != inst->q_end(); it++)
     {
@@ -68,9 +71,15 @@ DAG::add_instruction(inst_ptr inst)
         back_instructions_[q] = x;
     }
 
+    // handle the edge case where there are no predecessors 
+    // in `back_instructions_` (so add to `front_layer_`)
     if (x->pred_count == 0)
         front_layer_[inst] = x;
     inst_count_++;
+
+    // memoize if necessary
+    if (memoize)
+        node_lookup_table_[inst] = x;
 }
 
 ////////////////////////////////////////////////////////////
@@ -106,10 +115,18 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
             front_layer_[dep->inst] = dep;
     }
 
+    // delete `head_node` from `node_lookup_table_` if it exists there
+    auto lut_it = node_lookup_table_.find(inst);
+    if (lut_it != node_lookup_table_.end())
+        node_lookup_table_.erase(lut_it);
+
     // finally, if `inst` is also in `back_instructions_`, then we need to clear the entry
-    for (auto it = inst->q_begin(); it != inst->q_end(); it++)
-        if (back_instructions_[*it] == head_node)
-            back_instructions_[*it] = nullptr;
+    std::for_each(inst->q_begin(), inst->q_end(),
+            [this] (qubit_type q)
+            {
+                if (back_instructions_[q] == head_node)
+                    back_instructions_[q] = nullptr;
+            });
 
     delete head_node;
     inst_count_--;

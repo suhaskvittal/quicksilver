@@ -15,29 +15,109 @@ namespace driver
 namespace
 {
 
-using request_type = ROTATION_DIRECTED_RUNAHEAD::request_type;
+using inst_ptr = ROTATION_DIRECTED_RUNAHEAD::inst_ptr;
+
+/*
+ * Updates the estimated time to a rotation (second parameter). If
+ * the given instruction is a rotation and the cost of the rotation
+ * is within the current time to rotation for a qubit, then this
+ * function returns true.
+ * */
+bool _update_time_to_rotation(const inst_ptr, std::vector<int>&);
 
 } // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
-ROTATION_DIRECTED_RUNAHEAD::request_priority_comparator::operator()(const request_type* a, const request_type* b) const
+ROTATION_DIRECTED_RUNAHEAD::dag_data::dag_data(const CLIENT* c)
+    :dag(c->dag().get()),
+    dependencies(c->num_qubits, {}),
+    times(c->num_qubits, 0)
+{}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<inst_ptr>
+ROTATION_DIRECTED_RUNAHEAD::dag_data::do_initial_traversal()
 {
-    return a->dag_layer > b->dag_layer;
-//  return a->inst->number > b->inst->number;
+    constexpr size_t MAX_LAYER{1024};
+
+    std::vector<inst_ptr> generated_requests;
+
+    std::vector<int> time_to_first_rotation(dag->qubit_count, 0);
+    std::vector<bool> done(dag->qubit_count, false);
+
+    dag->for_each_instruction_in_layer_order(
+            [this, &generated_requests, &time_to_first_rotation, &done] (auto* inst)
+            {
+                if (update_time_to_rotation(inst, time_to_first_rotation) && !done[inst->qubits[0]])
+                {
+                    generated_requests.push_back(inst);
+                    done[inst->qubits[0]] = true;
+                }
+            }, 
+            0,
+            MAX_LAYER);
+    return generated_requests;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs)
+inst_ptr
+ROTATION_DIRECTED_RUNAHEAD::dag_data::traverse_on_interrupt(inst_ptr src)
+{
+    // We want to find an instruction that has a decent amount of time to actually compute, since
+    // `src` is at the head of the DAG.
+    //
+    // A nice factor is that we only need to care about the current dependency path when determining which
+    // instruction to select. Here's why:
+    //  (1) If this is the slowest (longest time to rotation), then we are ok.
+    //  (2) If this is the fastest (shortest time to rotation), then we are beginning the rotation early
+    //      anyway, so there is a bit of a head start.
+    std::vector<int> time_to_rotation(dag->qubit_count, 0);
+    auto [inst, __unused_layer] = dag->find_earliest_dependent_instruction_from_memoized_instruction_such_that(
+                                            [&time_to_rotation] (inst_ptr x)
+                                            {
+                                                if (update_time_to_rotation(inst, time_to_rotation))
+                                                    return true;
+                                            }, 
+                                            GL_RDR_START_LAYER, 
+                                            GL_RDR_LOOKAHEAD_DEPTH);
+    return inst->rdr_has_been_visited ? nullptr : inst;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+inst_ptr
+ROTATION_DIRECTED_RUNAHEAD::dag_data::traverse_to_successor(inst_ptr src)
+{
+    auto [inst, __unused_layer] = dag->find_earliest_dependent_instruction_from_memoized_instruction_such_that(
+                                            [] (inst_ptr x)
+                                            {
+                                                return is_rotation_instruction(x->type);
+                                            }, 
+                                            GL_RDR_START_LAYER, 
+                                            GL_RDR_LOOKAHEAD_DEPTH);
+    return inst->rdr_has_been_visited ? nullptr : inst;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs, std::vector<CLIENT*> clients)
     :compute_subsystem_(cs)
 {
-    // get the qubit pointers from the compute subsystem
-    std::copy_if(cs->dedicated_ancilla().begin(), cs->dedicated_ancilla().end(), std::back_inserter(free_qubits_),
-            [] (const auto* q) { return q->client_id == RDR_CLIENT_ID; });
+    for (auto* c : clients)
+    {
+        dag_info_.push_back(dag_data{c});
+
+        // for each DAG, do the initial traversal:
+        c->warmup_dag(8192);
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -232,6 +312,44 @@ ROTATION_DIRECTED_RUNAHEAD::pop_next_valid_pending_request()
     }
     return nullptr;
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+bool
+_update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation)
+{
+    int cost;
+    if (is_rotation_instruction(inst->type))
+        cost = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return is_t_like_instruction(t); });
+    else if (is_toffoli_like_instruction(inst->type))
+        cost = 13;
+    else if (is_cx_like_instruction(inst->type))
+        cost = 1;
+    else if (is_t_like_instruction(inst->type))
+        cost = 1;
+    else
+        cost = 0;
+
+    bool good_rotation = is_rotation_instruction(inst->type)
+                            && cost < time_to_rotation[inst->qubits[0]];
+
+    int base_time{0};
+    // get max time to first rotation for all arguments
+    std::for_each(inst->q_begin(), inst->q_end(),
+            [&base_time, &time_to_first_rotation] (auto q)
+            {
+                base_time = std::max(base_time, time_to_rotation[q]);
+            });
+    time_to_rotation[q] = base_time + cost;
+
+    return good_rotation;
+}
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

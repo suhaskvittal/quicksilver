@@ -16,6 +16,9 @@ extern bool GL_ELIDE_CLIFFORDS;
 namespace
 {
 
+using inst_ptr = CLIENT::inst_ptr;
+
+bool _memoize_pred(const inst_ptr);
 void _clean_urotseq(INSTRUCTION::urotseq_type&);
 
 } // anon
@@ -41,6 +44,23 @@ CLIENT::~CLIENT()
 
     for (auto* q : qubits_)
         delete q;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+CLIENT::warmup_dag(size_t s)
+{
+    while (dag_->inst_count() < s && !eof())
+    {
+        inst_ptr inst = read_instruction_from_trace();
+        // immediately elide software instructions here
+        if (is_software_instruction(inst->type))
+            delete inst;
+        else
+            dag_->add_instruction(inst, _memoize_pred(inst));
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -79,6 +99,9 @@ kill_instruction:
     delete inst;
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 bool
 CLIENT::eof() const
 {
@@ -109,7 +132,7 @@ CLIENT::open_file_and_read_qubit_count()
     return static_cast<size_t>(n);
 }
 
-CLIENT::inst_ptr
+inst_ptr
 CLIENT::read_instruction_from_trace()
 {
     inst_ptr inst = read_instruction_from_stream(tristrm_);
@@ -144,6 +167,12 @@ CLIENT::read_instruction_from_trace()
 
 namespace
 {
+
+bool
+_memoize_pred(const inst_ptr inst)
+{
+    return is_rotation_instruction(inst->type);
+}
 
 void
 _clean_urotseq(INSTRUCTION::urotseq_type& u)

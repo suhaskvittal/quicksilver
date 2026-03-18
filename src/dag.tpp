@@ -3,6 +3,7 @@
  *  date:   5 January 2026
  * */
 
+#include <cassert>
 #include <unordered_set>
 
 ////////////////////////////////////////////////////////////
@@ -41,7 +42,31 @@ DAG::find_earliest_dependent_instruction_such_that(const PRED& pred,
                                                     size_t min_layer,
                                                     size_t max_layer) const
 {
-    node_type* source_node = front_layer_.at(source);
+    auto f_it = front_layer_.find(source);
+    assert(f_it != front_layer_.end());
+    return find_earliest_dependent_helper(pred, f_it->second, min_layer, max_layer);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
+DAG::find_earliest_dependent_instruction_from_memoized_instruction_such_that(const PRED& pred, 
+                                                                                inst_ptr source, 
+                                                                                size_t min_layer,
+                                                                                size_t max_layer) const
+{
+    auto lut_it = node_lookup_table_.find(source);
+    assert(lut_it != node_lookup_table_.end());
+    return find_earliest_dependent_helper(pred, lut_it->second, min_layer, max_layer);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
+DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, size_t min_layer, size_t max_layer) const
+{
     std::vector<node_type*> curr_layer(source_node->dependent);
 
     // use an `std::unordered_set` to avoid duplicates when setting `curr_layer`

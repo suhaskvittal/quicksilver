@@ -60,6 +60,12 @@ public:
     ~CLIENT();
 
     /*
+     * Warms up the dag by filling it with instructions
+     * until it reaches the given size.
+     * */
+    void warmup_dag(size_t);
+
+    /*
      * This gets all instructions in `dag_`'s front layer
      * that meet the predicate.
      *
@@ -95,16 +101,7 @@ template <class PRED> std::vector<CLIENT::inst_ptr>
 CLIENT::get_ready_instructions(const PRED& pred)
 {
     constexpr size_t DAG_WATERMARK = 16384;
-    // fill up the DAG if it is below some count:
-    while (dag_->inst_count() < DAG_WATERMARK && !eof())
-    {
-        inst_ptr inst = read_instruction_from_trace();
-        // immediately elide software instructions here
-        if (is_software_instruction(inst->type))
-            delete inst;
-        else
-            dag_->add_instruction(inst);
-    }
+    warmup_dag(DAG_WATERMARK);
     return dag_->get_front_layer_if(pred);
 }
 

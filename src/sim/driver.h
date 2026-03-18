@@ -38,8 +38,6 @@ public:
         cycle_type          cycle_saved{};
     };
 
-    enum class RDR_LOOKUP_RESULT { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
-
     /*
      * Stall monitor:
      *  `STALL_TYPE` contains the stalls tracked by the compute subsystem. Feel free
@@ -176,6 +174,8 @@ private:
     /*
      * RDR implementation -------------------------------------------------------------
      * */
+
+    enum class RDR_LOOKUP_RESULT { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
 
     bool              rdr_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
     RDR_LOOKUP_RESULT rdr_lookup_instruction(inst_ptr, QUBIT*);
