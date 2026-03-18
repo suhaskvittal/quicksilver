@@ -6,6 +6,7 @@
 #include "sim/driver.h"
 #include "sim/stats.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace sim
@@ -379,6 +380,8 @@ long
 DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
 {
     auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
+    std::sort(front_layer.begin(), front_layer.end(),
+            [] (const auto* a, const auto* b) { return a->number < b->number; });
     std::vector<QUBIT*> operands(3);
     long success_count{0};
     for (auto* inst : front_layer)

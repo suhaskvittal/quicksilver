@@ -4,6 +4,7 @@
  * */
 
 #include <cassert>
+#include <set>
 #include <unordered_set>
 
 ////////////////////////////////////////////////////////////
@@ -69,9 +70,9 @@ DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, si
 {
     std::vector<node_type*> curr_layer(source_node->dependent);
 
-    // use an `std::unordered_set` to avoid duplicates when setting `curr_layer`
-    std::unordered_set<node_type*> next_layer_set;
-    next_layer_set.reserve(curr_layer.size());
+    // use a sorted set to avoid duplicates and ensure deterministic iteration order
+    auto node_cmp = [] (const node_type* a, const node_type* b) { return a->inst->number < b->inst->number; };
+    std::set<node_type*, decltype(node_cmp)> next_layer_set(node_cmp);
 
     size_t layer_count{0};
     while (layer_count < max_layer)
