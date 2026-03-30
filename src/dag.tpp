@@ -4,6 +4,7 @@
  * */
 
 #include <cassert>
+#include <set>
 #include <unordered_set>
 
 ////////////////////////////////////////////////////////////
@@ -27,7 +28,7 @@ template <class CALLBACK> void
 DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer) const
 {
     return _generic_operate_on_nodes_in_layer_order(
-                        [&callback] (node_type* x) { callback(x->inst); }, 
+                        [&callback] (node_type* x, size_t layer) { callback(x->inst, layer); }, 
                         min_layer, 
                         max_layer);
 }
@@ -69,9 +70,9 @@ DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, si
 {
     std::vector<node_type*> curr_layer(source_node->dependent);
 
-    // use an `std::unordered_set` to avoid duplicates when setting `curr_layer`
-    std::unordered_set<node_type*> next_layer_set;
-    next_layer_set.reserve(curr_layer.size());
+    // use a sorted set to avoid duplicates and ensure deterministic iteration order
+    auto node_cmp = [] (const node_type* a, const node_type* b) { return a->inst->number < b->inst->number; };
+    std::set<node_type*, decltype(node_cmp)> next_layer_set(node_cmp);
 
     size_t layer_count{0};
     while (layer_count < max_layer)
@@ -94,7 +95,10 @@ DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, si
 ////////////////////////////////////////////////////////////
 
 template <class CALLBACK> void
-DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, const CALLBACK& callback, size_t min_layer, size_t max_layer)
+DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, 
+                                                const CALLBACK& callback, 
+                                                size_t min_layer, 
+                                                size_t max_layer)
 {
     // update iteration generation so we know when to reset predecessor
     self.iteration_generation_++;
@@ -114,7 +118,7 @@ DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, const CALLBACK& c
         for (auto* x : current_layer)
         {
             if (layer_count >= min_layer)
-                callback(x);
+                callback(x, layer_count);
 
             for (node_type* y : x->dependent)
             {

@@ -6,6 +6,7 @@
 #include "sim/driver.h"
 #include "sim/stats.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace sim
@@ -271,7 +272,7 @@ DRIVER::operate()
                                                         std::plus<size_t>{},
                                                         [] (const auto* f) { return f->buffer_occupancy(); });
         if (magic_states_avail > 1)
-            progress += rdr_->execute();
+            progress += rdr_->operate();
     }
 
     if (progress == 0)
@@ -379,6 +380,8 @@ long
 DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
 {
     auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
+    std::sort(front_layer.begin(), front_layer.end(),
+            [] (const auto* a, const auto* b) { return a->number < b->number; });
     std::vector<QUBIT*> operands(3);
     long success_count{0};
     for (auto* inst : front_layer)
@@ -410,7 +413,6 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
             if (rdr_handle_instruction(c, inst, operands[0])) 
                 continue;
             inst->rdr_has_been_visited = true;
-            rdr_->invalidate_request(inst);
         }
 
         if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
@@ -529,123 +531,38 @@ DRIVER::is_instruction_ready(inst_ptr inst, const std::vector<QUBIT*>& operands)
 bool
 DRIVER::rdr_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
 {
-    auto lookup_result = rdr_lookup_instruction(inst, q);
-    if (lookup_result == RDR_LOOKUP_RESULT::RETIRE)
-    {
-        retire_instruction(c, inst, 2*compute_subsystem_->code_distance);
-        return true;
-    }
-    else if (lookup_result == RDR_LOOKUP_RESULT::NEEDS_CORRECTION)
-    {
-        assert(!inst->corr_urotseq_array.empty());
-
-        inst->reset_uops();
-        inst->urotseq = inst->corr_urotseq_array.front();
-        inst->corr_urotseq_array.pop_front();
-
-        rdr_do_runahead(c, inst);
-        return false;
-    }
-    else if (lookup_result == RDR_LOOKUP_RESULT::IN_PROGRESS)
-    {
-        if (rdr_->get_request_progress(inst) < 0.25*inst->uop_count())
-        {
-            rdr_->invalidate_request(inst);
-            rdr_do_runahead(c, inst);
-            inst->reset_uops();
-            return false;
-        }
-        else
-        {
-            return true;
-        }
-    }
-    else
-    {
-        rdr_do_runahead(c, inst);
-        return false;
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-DRIVER::RDR_LOOKUP_RESULT
-DRIVER::rdr_lookup_instruction(inst_ptr inst, QUBIT* q)
-{
-    assert(is_rotation_instruction(inst->type));
-
-    auto* e = rdr_->find_request_and_only_return_if_complete(inst);
-    if (e != nullptr)
-    {
-        // try and perform the gate required:
-        bool both_available = (q->cycle_available <= current_cycle())
-                                && (e->pinned_qubit == nullptr
-                                    || e->pinned_qubit->cycle_available <= current_cycle());
-        if (both_available)
-        {
-            q->cycle_available = current_cycle() + 2*compute_subsystem_->code_distance;
-            if (e->pinned_qubit != nullptr)
-                e->pinned_qubit->cycle_available = current_cycle() + compute_subsystem_->code_distance;
-            rdr_->delete_request(inst);
-
-            bool success = (GL_RNG() & 1) > 0;
-            return success ? RDR_LOOKUP_RESULT::RETIRE : RDR_LOOKUP_RESULT::NEEDS_CORRECTION;
-        }
-        else
-        {
-            return RDR_LOOKUP_RESULT::IN_PROGRESS;
-        }
-    }
-    else if (rdr_->is_request_pending(inst))
-    {
-        return RDR_LOOKUP_RESULT::IN_PROGRESS; 
-    }
-    else
-    {
-        return RDR_LOOKUP_RESULT::NOT_FOUND;
-    }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-DRIVER::rdr_do_runahead(CLIENT* c, inst_ptr inst)
-{
     if (inst->rdr_has_been_visited)
-        return;
+        return false;
 
-    assert(is_rotation_instruction(inst->type));
-
-    size_t dag_layer{GL_RDR_START_LAYER};
-    for (size_t i = 0; i < GL_RDR_DEGREE; i++)
+    if (!inst->rdr_is_pending)
     {
-        auto [dependent_inst, layer] = c->dag()->find_earliest_dependent_instruction_such_that(
-                                            [inst, this] (inst_ptr x) 
-                                            { 
-                                                return x != inst 
-                                                        && is_rotation_instruction(x->type)
-                                                        && !rdr_->is_request_pending(x) 
-                                                        && (x->number - inst->number) < GL_RDR_INST_DELTA_LIMIT;
-                                            }, 
-                                            inst, 
-                                            dag_layer,
-                                            dag_layer + GL_RDR_LOOKAHEAD_DEPTH);
-        
-
-        if (dependent_inst != nullptr)
+        rdr_->do_runahead(c, inst);
+        return false;
+    }
+    else if (rdr_->is_done(inst))
+    {
+        bool needs_correction = rdr_->apply_magic_state(inst, q);
+        if (needs_correction)
         {
-            rdr_->submit_request(dependent_inst, layer, inst);
-            dag_layer = layer;
+            inst->reset_uops();
+            inst->urotseq = inst->corr_urotseq_array.front();
+            inst->corr_urotseq_array.pop_front();
+            rdr_->do_runahead(c, inst);
         }
         else
         {
-            break;
+            retire_instruction(c, inst, q->cycle_available - current_cycle());
         }
+        return !needs_correction;
+    }
+    else
+    {
+        bool inv = rdr_->interrupt_and_invalidate_if_necessary(inst);
+        if (inv)
+            rdr_->do_runahead(c, inst);
+        return !inv;
     }
 }
-
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

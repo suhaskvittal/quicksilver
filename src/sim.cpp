@@ -114,14 +114,17 @@ print_sim_stats(std::ostream& out, DRIVER* d)
     if (GL_RDR_ENABLED)
     {
         print_stat_line(out, "TOTAL_ROTATION_INSTRUCTIONS", d->s_rotation_instructions);
-        print_stat_line(out, "RDR_REQUESTS", d->rdr()->s_requests);
+        print_stat_line(out, "RDR_REQUESTS_SUBMITTED", d->rdr()->s_requests_submitted);
+        print_stat_line(out, "RDR_REQUESTS_INV_BEFORE_ISSUE", d->rdr()->s_requests_invalidated_before_issue);
+        print_stat_line(out, "RDR_REQUESTS_STARTED", d->rdr()->s_requests_started);
         print_stat_line(out, "RDR_REQUESTS_COMPLETED", d->rdr()->s_requests_completed);
+        print_stat_line(out, "RDR_REQUESTS_INTERRUPTED", d->rdr()->s_requests_interrupted);
         print_stat_line(out, "RDR_REQUESTS_INVALIDATED", d->rdr()->s_requests_invalidated);
-        print_stat_line(out, "RDR_INVALIDATED_IN_QUEUE", d->rdr()->s_invalidated_in_queue);
+        print_stat_line(out, "RDR_REQUESTS_USED", d->rdr()->s_requests_used);
 
-        double completion_buffer_mean_occupancy = mean(d->rdr()->s_completion_buffer_occupancy_sum,
-                                                       d->rdr()->s_completion_buffer_occupancy_ticks);
-        print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occupancy);
+        double completion_buffer_mean_occu = mean(d->rdr()->s_completion_buffer_occu_sum,
+                                                   d->rdr()->s_completion_buffer_occu_ticks);
+        print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occu);
     }
 
     for (auto* c : d->clients())
