@@ -10,7 +10,7 @@
 #include <fstream>
 #include <string>
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "compiler/program/oq2/lexer_wrapper.h"
 #include "compiler/program/rotation_manager.h"
 #include "parser.tab.h"

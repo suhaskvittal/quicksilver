@@ -3,7 +3,7 @@
  *  date:   7 March 2026
  * */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "compiler/pass/optimization.h"
 #include "compiler/program/rotation_manager.h"
 #include "generic_io.h"

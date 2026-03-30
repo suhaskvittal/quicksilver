@@ -3,7 +3,7 @@
  *  date:   5 January 2026
  * */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "generic_io.h"
 #include "compiler/pass/memory_scheduler.h"
 #include "compiler/pass/memory_scheduler/impl.h"

@@ -17,7 +17,7 @@
 #include "compiler/pass/memory_scheduler.h"
 #include "compiler/pass/memory_scheduler/impl.h"
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 
 #include <sys/stat.h>
 

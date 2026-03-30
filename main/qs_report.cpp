@@ -3,7 +3,7 @@
     date:   4 March 2026
 */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "generic_io.h"
 #include "globals.h"
 #include "instruction.h"

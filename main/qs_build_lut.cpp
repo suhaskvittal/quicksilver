@@ -3,7 +3,7 @@
  *  date:   11 February 2026
  * */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "compiler/program/rotation_synthesis.h"
 #include "fixed_point/angle.h"
 #include "generic_io.h"

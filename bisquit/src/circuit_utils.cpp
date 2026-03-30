@@ -1,0 +1,95 @@
+/*
+ *  author: Suhas Vittal
+ *  date:   29 March 2026
+ * */
+
+#include "circuit_utils.h"
+
+#include <iostream>
+#include <sstream>
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+std::string _join(const std::vector<std::string>&);
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+GATE::GATE(std::string_view _name)
+    :name(_name)
+{
+    args.reserve(1);
+    operands.reserve(3);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+GATE& GATE::arg(double x) { args.push_back(std::to_string(x)); return *this; }
+GATE& GATE::arg(int x) { args.push_back(std::to_string(x)); return *this; }
+GATE& GATE::arg(std::string_view x) { args.push_back(std::string{x}); return *this; }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+GATE& GATE::operand(std::string_view r) { operands.push_back(r); return *this; }
+
+GATE&
+GATE::operand(std::string_view r, std::vector<int> indices)
+{
+    for (int i : indices)
+        operands.push_back(std::string{r} + "[" + std::to_string(i) + "]");
+    return *this;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::string
+GATE::to_string() const
+{
+    std::stringstream ss;
+    ss << *this;
+    return ss.str();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::ostream&
+operator<<(std::ostream& out, GATE& g)
+{
+    out << g.name;
+    if (g.args.size() > 0)
+        out << "(" << _join(g.args) << ")";
+    if (g.operands.size() > 0)
+        out << " " << _join(g.operands);
+    out << ";\n";
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+std::string
+_join(const std::vector<std::string>& arr)
+{
+    std::stringstream ss;
+    ss << arr[0];
+    for (size_t i = 1; i < arr.size(); i++)
+        ss << ", " << arr[i];
+    return ss.str();
+}
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////

@@ -6,7 +6,7 @@
  *  Run this after all compiler passes.
  * */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "compiler/program/rotation_manager.h"
 #include "fixed_point/angle.h"
 #include "generic_io.h"

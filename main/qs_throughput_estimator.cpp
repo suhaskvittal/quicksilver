@@ -3,7 +3,7 @@
  *  date:   15 January 2026
  * */
 
-#include "argparse.h"
+#include "argparse/argparse.h"
 #include "globals.h"
 #include "sim.h"
 #include "sim/configuration/allocator/impl.h"

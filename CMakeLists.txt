@@ -94,7 +94,6 @@ add_flex_bison_dependency(OQ2Lexer OQ2Parser)
 message(STATUS "BISON_OQ2Parser_OUTPUTS: ${BISON_OQ2Parser_OUTPUTS}")
 
 set(COMMON_FILES
-    src/argparse.cpp
     src/dag.cpp
     src/generic_io.cpp
     src/globals.cpp
@@ -137,7 +136,7 @@ set(SIM_FILES
 # Library for common files (`qs_common`)
 
 add_library(qs_common SHARED ${COMMON_FILES})
-target_include_directories(qs_common PUBLIC "src")
+target_include_directories(qs_common PUBLIC "src" "deps")
 target_compile_options(qs_common PUBLIC ${COMPILE_OPTIONS})
 target_link_libraries(qs_common PUBLIC ZLIB::ZLIB LibLZMA::LibLZMA)
 
@@ -268,6 +267,13 @@ add_executable(quicksilver main/quicksilver.cpp
 target_include_directories(quicksilver PRIVATE "src")
 target_compile_options(quicksilver PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(quicksilver PRIVATE qs_simulator)
+
+###################################################
+###################################################
+
+if (COMPILE_BISQUIT)
+    add_subdirectory(bisquit)
+endif()
 
 ###################################################
 ###################################################
