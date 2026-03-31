@@ -4,6 +4,7 @@
 '''
 
 from hamlib_snippets import *
+from common import *
 
 #################################################################
 #################################################################
@@ -22,7 +23,7 @@ def _trotterization_write_pauli_string_ops(term: list[tuple[str,int]],
 
     # do basis transformation:
     fwd_basis_xform, bck_basis_xform, cx_slide = '', '', ''
-    _, lq = t[-1]
+    _, lq = term[-1]
     for (p,q) in term:
         if p == 'I':
             continue
@@ -35,7 +36,7 @@ def _trotterization_write_pauli_string_ops(term: list[tuple[str,int]],
             bck_basis_xform += str(GATE('sx').operand(main_register, q)) \
                                 + str(GATE('h').operand(main_register, q))
         if q != lq:
-            cx_slide += str(GATE('cx').operand(main_register, [q, lq]))
+            cx_slide += str(GATE('cx').operand(main_register, q, lq))
     
     out = fwd_basis_xform
     out += cx_slide
@@ -95,6 +96,7 @@ def _qubitization_build_prepare_ry_tree(input_file: str, hamlib_key: str, num_qu
         Prepares a tree containing angles needed for the PREPARE oracle in qubitization.
     '''
 
+    term_count = 2**num_qubits
     levels = num_qubits
     tree = [[(0,0) for _ in range(2**i)] for i in range(levels)] # each entry is numerator, denominator
 
@@ -103,13 +105,19 @@ def _qubitization_build_prepare_ry_tree(input_file: str, hamlib_key: str, num_qu
     for (labels, coeff, _) in read_pauli_strings_hdf5(input_file, hamlib_key):
         # update each level of the tree:
         for i in range(levels):
-            j = term_number % (2**i)  # idx into the current level of the tree is modulo `2**i`
+            j = (term_number * (2**i)) // (term_count)
             n, d = tree[i][j]
-            # n is only updated if `j < 2**(i-1)` -- first half of the terms
-            if j < 2**(i-1):
-                n += coeff
+            # `j` places `term_number` into a bucket. Now, if `term_number` is in the left half
+            # of that bucket, update `n`
+            bucket_width = term_count / (2**i)
+            bucket_min = j * bucket_width
+            bucket_max = bucket_min + bucket_width
+            if term_number < (bucket_min+bucket_max)//2:
+                n += abs(coeff)
             # d is always updated
-            d += coeff
+            d += abs(coeff)
+            tree[i][j] = (n,d)
+        term_number += 1
 
     # finally, replace each entry in the tree, currently a tuple `(n,d)`, 
     # which an angle `A` such that `cos(A/2)**2 = n/d`
@@ -117,8 +125,13 @@ def _qubitization_build_prepare_ry_tree(input_file: str, hamlib_key: str, num_qu
     for i in range(levels):
         for j in range(len(tree[i])):
             n, d = tree[i][j]
-            A = math.arccos(math.sqrt(n/d))
+            if n == 0 or d == 0:
+                A = 0
+            else:
+                A = math.acos(math.sqrt(n/d))
             tree[i][j] = A
+            if i == levels-1 and  A > 0:
+                print(i,j,n,d,A)
     return tree
 
 def _qubitization_ry_prepare_unary_iteration_helper(contents: list[float], 
@@ -139,30 +152,30 @@ def _qubitization_ry_prepare_unary_iteration_helper(contents: list[float],
         `ctrl`: previous control qubit
     '''
     out = ''
-    if left_idx == right_idx:
+    if left_idx == right_idx-1:
         x = contents[left_idx]
-        out += str(GATE('cry')..arg(x).operand(ctrl).operand(phase_register, d+1))
+        out += str(GATE('cry').arg(x).operand(ctrl).operand(phase_register, d+1))
     else:
-        middle_idx = (right_idx + left_idx)/2
-        out += str(GATE('x').operand(phase_register, d+1))
-                + str(GATE('ccx').operand(ctrl).operand(phase_register, d+1).operand(ancilla, d))
+        middle_idx = (right_idx + left_idx)//2
+        out += str(GATE('x').operand(phase_register, d+1)) \
+                + str(GATE('ccx').operand(ctrl).operand(phase_register, d+1).operand(ancilla, d)) \
                 + str(GATE('x').operand(phase_register, d+1))
         out += _qubitization_ry_prepare_unary_iteration_helper(contents,
                                                                left_idx,
                                                                middle_idx,
                                                                d+1, 
-                                                               f'{ancilla}[{d}]'
+                                                               f'{ancilla}[{d}]',
                                                                phase_register,
                                                                ancilla)
-        out += str(GATE('cx').operand(ctrl).operand(ancilla, level))
+        out += str(GATE('cx').operand(ctrl).operand(ancilla, d))
         out += _qubitization_ry_prepare_unary_iteration_helper(contents,
-                                                               left_idx,
                                                                middle_idx,
+                                                               right_idx,
                                                                d+1, 
-                                                               f'{ancilla}[{d}]'
+                                                               f'{ancilla}[{d}]',
                                                                phase_register,
                                                                ancilla)
-        out += str(GATE('mx').operand(ancilla, level))
+        out += str(GATE('mx').operand(ancilla, d))
     return out
 
 def _qubitization_ry_prepare_unary_iteration(tree: list[list], level: int, phase_register: str, ancilla: str) -> str:
@@ -178,14 +191,14 @@ def _qubitization_ry_prepare_unary_iteration(tree: list[list], level: int, phase
     out = str(GATE('x').operand(phase_register, 0))
     out += _qubitization_ry_prepare_unary_iteration_helper(tree[level],
                                                             0,  # left
-                                                            len(tree[level])/2, # right
+                                                            len(tree[level])//2, # right
                                                             0,
                                                             f'{phase_register}[0]',
                                                             phase_register,
                                                             ancilla)
     out += str(GATE('x').operand(phase_register, 0))
     out += _qubitization_ry_prepare_unary_iteration_helper(tree[level],
-                                                            len(tree[level])/2,  # left
+                                                            len(tree[level])//2,  # left
                                                             len(tree[level]),
                                                             0,
                                                             f'{phase_register}[0]',
@@ -215,6 +228,7 @@ def _qubitization_ry_prepare(input_file: str,
     # third level onward will need unary iteration to avoid high T count
     for i in range(2, num_phase_qubits):  # `i` is the level
         out += _qubitization_ry_prepare_unary_iteration(ry_tree, i, phase_register, ancilla_register)
+    return out
 
 def _qubitization_select_unary_iteration_helper(gen_pauli_term,
                                                 d: int,
@@ -231,17 +245,20 @@ def _qubitization_select_unary_iteration_helper(gen_pauli_term,
     out = ''
     if d == num_phase_qubits:
         # then perform the controlled operations (only need single control due to unary iteration).
-        labels, _, _ = next(gen_pauli_term)
+        term_data = next(gen_pauli_term, None)
+        if term_data is None:
+            return out
+        labels, _, _ = term_data
         for (p,q) in labels:
             if p == 'X':
-                out += GATE('cx').operand(ctrl).operand(system_register, q)
+                out += str(GATE('cx').operand(ctrl).operand(system_register, q))
             elif p == 'Y':
-                out += GATE('cy').operand(ctrl).operand(system_register, q)
+                out += str(GATE('cy').operand(ctrl).operand(system_register, q))
             elif p == 'Z':
-                out += GATE('cz').operand(ctrl).operand(system_register, q)
+                out += str(GATE('cz').operand(ctrl).operand(system_register, q))
     else:
-        out += GATE('x').operand(phase_register, d)
-                + GATE('ccx').operand(ctrl).operand(phase_register, d).operand(ancilla, d)
+        out += str(GATE('x').operand(phase_register, d)) \
+                + str(GATE('ccx').operand(ctrl).operand(phase_register, d).operand(ancilla, d))
         out += _qubitization_select_unary_iteration_helper(gen_pauli_term,
                                                            d+1,
                                                            num_phase_qubits,
@@ -249,7 +266,7 @@ def _qubitization_select_unary_iteration_helper(gen_pauli_term,
                                                            phase_register,
                                                            ancilla,
                                                            f'{ancilla}[{d}]')
-        out += GATE('cx').operand(ctrl).operand(ancilla, d)
+        out += str(GATE('cx').operand(ctrl).operand(ancilla, d))
         out += _qubitization_select_unary_iteration_helper(gen_pauli_term,
                                                            d+1,
                                                            num_phase_qubits,
@@ -257,7 +274,7 @@ def _qubitization_select_unary_iteration_helper(gen_pauli_term,
                                                            phase_register,
                                                            ancilla,
                                                            f'{ancilla}[{d}]')
-        out += GATE('mx').operand(ancilla, d)
+        out += str(GATE('mx').operand(ancilla, d))
     return out
 
 def _qubitization_select_unary_iteration(gen_pauli_term, 
@@ -308,7 +325,7 @@ def build_qubitization(output_file: str,
 ):
     CTRL = 'ctrl'
     MAIN_REGISTER = 'q'
-    PHASE_REGISTER = 'z'
+    PHASE_REGISTER = 'psi'
     ANCILLA = 'a'
     
     with open(output_file, 'w') as f:
@@ -333,61 +350,34 @@ h {CTRL};
         prepare = _qubitization_ry_prepare(input_file, hamlib_key, num_phase_qubits, PHASE_REGISTER, ANCILLA) 
         print('generating select...')
         select = _qubitization_select(input_file, hamlib_key, num_phase_qubits, MAIN_REGISTER, PHASE_REGISTER, ANCILLA, CTRL)
-        f.write(prepare + ancilla + prepare)
+        f.write(prepare + select + prepare)
 
 #################################################################
 #################################################################
 
 BENCHMARK_LIST = [
-    ('v_c2h4o_ethylene_oxide_240', 'all-vib-c2h4o_ethylene_oxide.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 240),
-    ('v_hc3h2cn_288', 'all-vib-hc3h2cn.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 288),
-    ('e_cr2_120', 'Cr2.hdf5', '/ham_BK120', 120),
+    ('boron', 'B2.hdf5', '/ham_BK-52', 52, 508.65)
+#   ('chromium', 'Cr2.hdf5', '/ham_BK120', 120, 5796.98),
 ]
     
 if __name__ == '__main__':
-    for (output_file_name, input_file, key, num_qubits) in BENCHMARK_LIST:
-        term_count = count_terms_hdf5(f'bisquit/hamlib/{input_file}', key)
-        output_path = f'bisquit/qasm/{output_file_name}_trotter.qasm'
-        print(output_path)
+    def make_output_file_path(filename, suffix):
+        return f'bisquit/qasm/{filename}_{suffix}.qasm'
 
-        with open(output_path, 'w') as f:
-            f.write(f'OPENQASM 2.0;\n')
-            f.write(f'include "qelib1.inc";\n')
-            f.write(f'qreg q[{num_qubits}];\n')
-            f.write(f'qreg ctrl;\n')
+    for (output_filename, input_file, key, num_qubits, one_norm) in BENCHMARK_LIST:
+        trotterization_output_path = make_output_file_path(output_filename, 't')
+        qubitization_output_path = make_output_file_path(output_filename, 'q')
 
-            f.write('h ctrl;\n')
+        input_file = f'bisquit/hamlib/{input_file}'
+    
+        print(f'Now building: {output_filename}')
+        print('TROTTERIZATION --------------------------------------------------')
+#       build_trotterization(trotterization_output_path, input_file, key, num_qubits, one_norm)
 
-            # compute normalization constant:
-            n = 0
-            approx_lambda_max = 0.0
-            threshold = 0.0
-            for (labels, coeff, _) in read_pauli_strings_hdf5(f'bisquit/hamlib/{input_file}', key):
-                approx_lambda_max += abs(coeff)
-                threshold += abs(coeff)
-                n += 1
+        print('QUBITIZATION ----------------------------------------------------')
+        build_qubitization(qubitization_output_path, input_file, key, num_qubits)
 
-            # implement ipea:
-            threshold = threshold / n
-            print(f'reading {input_file}/{key}, threshold = {threshold}')
-            i = 0
-            for (labels, coeff, _) in read_pauli_strings_hdf5(f'bisquit/hamlib/{input_file}', key):
-                if abs(coeff) < threshold:
-                    continue
 
-                if i % 100_000 == 0:
-                    print(f'\twriting term {i}')
-                if i >= TERM_LIMIT:
-                    break
-
-                coeff *= 1/(2*approx_lambda_max)
-                
-                i += 1
-                trotter_pauli_expansion = trotter_expand_pauli_string('ctrl', 'q', labels, coeff, TROTTER_TIME_DIVISION)
-                if len(trotter_pauli_expansion) > 0:
-                    f.write(trotter_pauli_expansion)
-
-            f.write('h ctrl;\n')
 
 
 #################################################################

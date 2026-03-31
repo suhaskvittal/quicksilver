@@ -4,11 +4,11 @@ import os
 from sys import argv
 
 WORKLOADS = [
-    'benchmarks/bin/BQ_e_cr2_120_trotter.rpc.xz',
-    'benchmarks/bin/BQ_shor_rsa256_iter_4.rpc.xz',
-    'benchmarks/bin/BQ_v_c2h4o_ethylene_oxide_240_trotter.rpc.xz',
-    'benchmarks/bin/BQ_v_hc3h2cn_288_trotter.rpc.xz',
-    'benchmarks/bin/BQ_grover_3sat_schoning_1710.rpc.xz'
+    'benchmarks/bin/BQ_e_cr2_120_trotter.xz',
+#   'benchmarks/bin/BQ_shor_rsa256_iter_4.xz',
+    'benchmarks/bin/BQ_v_c2h4o_ethylene_oxide_240_trotter.xz',
+    'benchmarks/bin/BQ_v_hc3h2cn_288_trotter.xz',
+    'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz'
 ]
 
 ##############################################

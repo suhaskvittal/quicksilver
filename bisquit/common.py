@@ -57,7 +57,7 @@ def bit_is_set(x: int, where: int):
     return x & (1<<where)
 
 def log2_round_up(x):
-    return int( ceil(math.log2(x)) )
+    return int( math.ceil(math.log2(x)) )
 
 #################################################################
 #################################################################
@@ -68,18 +68,15 @@ class GATE:
         self.args = []
         self.operands = []
 
-    def arg(self, a) -> GATE:
+    def arg(self, a):
         self.args.append(str(a))
         return self
 
-    def operand(self, qr: str, indices=None) -> GATE:
-        if indices is None:
-            self.operands.append(sqr)
-        elif isinstance(indices, int):
-            self.operands.append(f'{qr}[{indices}]')
-        else:
-            for i in indices:
-                self.operands.append(f'{qr}[{i}]')
+    def operand(self, qr: str, *indices):
+        if len(indices) == 0:
+            self.operands.append(qr)
+        for i in indices:
+            self.operands.append(f'{qr}[{i}]')
         return self
 
     def __str__(self) -> str:
