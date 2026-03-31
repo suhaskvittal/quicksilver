@@ -58,3 +58,40 @@ def bit_is_set(x: int, where: int):
 
 #################################################################
 #################################################################
+
+class GATE:
+    def __init__(self, name: str):
+        self.name = name
+        self.args = []
+        self.operands = []
+
+    def arg(self, a) -> GATE:
+        self.args.append(str(a))
+        return self
+
+    def operand(self, qr: str, indices=None) -> GATE:
+        if indices is None:
+            self.operands.append(sqr)
+        elif isinstance(indices, int):
+            self.operands.append(f'{qr}[{indices}]')
+        else:
+            for i in indices:
+                self.operands.append(f'{qr}[{i}]')
+        return self
+
+    def __str__(self) -> str:
+        s = self.name
+        if len(self.args) > 0:
+            arg_string = ', '.join(self.args)
+            s += f'({arg_string})'
+        if len(self.operands) > 0:
+            op_string = ', '.join(self.operands)
+            s += f' {op_string}'
+        s += ';\n'
+        return s
+
+    def __repr__(self) -> str:
+        return str(self)
+
+#################################################################
+#################################################################

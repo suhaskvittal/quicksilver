@@ -1,4 +1,4 @@
-import numpy as np
+i mport numpy as np
 import h5py
 import re
 

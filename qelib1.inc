@@ -1,5 +1,6 @@
 OPENQASM 2.0;
 
+//
 //  author: Suhas Vittal
 // 
 //  This is Quicksilver's special `qelib1.inc` for its basis gate set:
@@ -67,6 +68,13 @@ gate ch a, b
     sx b;
 }
 
+gate cy a, b
+{
+    sdg b;
+    cx a, b;
+    s b;
+}
+
 //////////////////////////////////////
 //  CONTROLLED UNITARY GATES        //
 //////////////////////////////////////
@@ -101,7 +109,7 @@ gate cu1(X) a, b
     cx a, b;
     rz(-X/2) b;
     cx a, b;
-    rz (X/2) b;
+    rz(X/2) b;
 }
 
 gate cu3(X,Y,Z) a, b

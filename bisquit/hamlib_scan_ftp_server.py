@@ -78,20 +78,23 @@ def _print_results(rows: list[dict], subdir: str, min_qubits: int, min_terms: in
         return
 
     # Compute column widths for aligned output.
-    col_file    = max(len(r["File"])    for r in rows)
-    col_dataset = max(len(r["Dataset"]) for r in rows)
-    col_qubits  = max(len(r["nqubits"]) for r in rows)
-    col_terms   = max(len(r["terms"])   for r in rows)
+    col_file     = max(len(r["File"])     for r in rows)
+    col_dataset  = max(len(r["Dataset"])  for r in rows)
+    col_qubits   = max(len(r["nqubits"])  for r in rows)
+    col_terms    = max(len(r["terms"])    for r in rows)
+    col_one_norm = max(len(r["one_norm"]) for r in rows)
 
-    col_file    = max(col_file,    len("File"))
-    col_dataset = max(col_dataset, len("Dataset"))
-    col_qubits  = max(col_qubits,  len("nqubits"))
-    col_terms   = max(col_terms,   len("terms"))
+    col_file     = max(col_file,     len("File"))
+    col_dataset  = max(col_dataset,  len("Dataset"))
+    col_qubits   = max(col_qubits,   len("nqubits"))
+    col_terms    = max(col_terms,    len("terms"))
+    col_one_norm = max(col_one_norm, len("one_norm"))
 
     header = (f"{'File':<{col_file}}  "
               f"{'Dataset':<{col_dataset}}  "
               f"{'nqubits':>{col_qubits}}  "
-              f"{'terms':>{col_terms}}")
+              f"{'terms':>{col_terms}}  "
+              f"{'one_norm':>{col_one_norm}}")
     separator = "-" * len(header)
 
     print(f"\nHamiltonians matching ({filter_str}) in '{subdir}':")
@@ -102,7 +105,8 @@ def _print_results(rows: list[dict], subdir: str, min_qubits: int, min_terms: in
         print(f"{r['File']:<{col_file}}  "
               f"{r['Dataset']:<{col_dataset}}  "
               f"{int(r['nqubits']):>{col_qubits}}  "
-              f"{int(r['terms']):>{col_terms},}")
+              f"{int(r['terms']):>{col_terms},}  "
+              f"{float(r['one_norm']):>{col_one_norm}.2f}")
     print(separator)
     print(f"Total: {len(rows)} Hamiltonian(s)")
 
