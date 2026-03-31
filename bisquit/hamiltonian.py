@@ -50,8 +50,7 @@ def build_trotterization(output_file: str,
                          hamlib_key: str,
                          num_qubits: int,
                          one_norm: float,
-                         trotter_steps=10,
-                         max_terms=1_000_000
+                         trotter_steps=10
 ):
     ''' 
         Writes QASM for QPE + trotterization to the given output file.
@@ -72,7 +71,7 @@ h {CTRL};
         # now iterate through the terms:
         normalization_factor = math.pi / (one_norm*trotter_steps)
         term_count = count_terms_hdf5(input_file, hamlib_key)
-        threshold = one_norm / term_count
+        threshold = 0.01 * one_norm / term_count
         term_number = 0
         for (labels, coeff, _) in read_pauli_strings_hdf5(input_file, hamlib_key):
             if abs(coeff) < threshold:
@@ -81,8 +80,8 @@ h {CTRL};
             if term_number % 100_000 == 0:
                 print(f'\twriting term {term_number}')
             term_number += 1
-            if term_number >= max_terms:
-                break
+#           if term_number >= max_terms:
+#               break
             c = coeff * normalization_factor
             txt = _trotterization_write_pauli_string_ops(labels, c, MAIN_REGISTER, CTRL)
             f.write(txt)
@@ -128,10 +127,8 @@ def _qubitization_build_prepare_ry_tree(input_file: str, hamlib_key: str, num_qu
             if n == 0 or d == 0:
                 A = 0
             else:
-                A = math.acos(math.sqrt(n/d))
+                A = 2*math.acos(math.sqrt(n/d))
             tree[i][j] = A
-            if i == levels-1 and  A > 0:
-                print(i,j,n,d,A)
     return tree
 
 def _qubitization_ry_prepare_unary_iteration_helper(contents: list[float], 
@@ -356,8 +353,12 @@ h {CTRL};
 #################################################################
 
 BENCHMARK_LIST = [
-    ('boron', 'B2.hdf5', '/ham_BK-52', 52, 508.65)
-#   ('chromium', 'Cr2.hdf5', '/ham_BK120', 120, 5796.98),
+#   ('boron', 'B2.hdf5', '/ham_BK-52', 52, 508.65)
+    ('chromium', 'Cr2.hdf5', '/ham_BK120', 120, 5796.98),
+    ('manganese_nitride', 'MnN.hdf5', '/ham_BK88', 88, 3091.48),
+    ('hc3h2cn', 'all-vib-hc3h2cn.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 288, 3850401385.76),
+    ('c2h4o_ethylene_oxide', 'all-vib-c2h4o_ethylene_oxide.hdf5', '/enc_unary_dvalues_16-16-16-16-16-16-16-16-16-16-16-16-16-16-16', 240, 1448164628.78),
+    ('bose_hubbard', 'BH_D-3_d-8.hdf5', '/bh_graph-3D-grid-pbc-qubitnodes_Lx-9_Ly-9_Lz-9_U-90_enc-gray_d-8', 2187, 1492968.02)
 ]
     
 if __name__ == '__main__':
@@ -372,10 +373,10 @@ if __name__ == '__main__':
     
         print(f'Now building: {output_filename}')
         print('TROTTERIZATION --------------------------------------------------')
-#       build_trotterization(trotterization_output_path, input_file, key, num_qubits, one_norm)
+        build_trotterization(trotterization_output_path, input_file, key, num_qubits, one_norm)
 
         print('QUBITIZATION ----------------------------------------------------')
-        build_qubitization(qubitization_output_path, input_file, key, num_qubits)
+#       build_qubitization(qubitization_output_path, input_file, key, num_qubits)
 
 
 
