@@ -56,6 +56,9 @@ def calculate_aqft_max_denom(num_bits: int, e=1e-6) -> int:
 def bit_is_set(x: int, where: int):
     return x & (1<<where)
 
+def log2_round_up(x):
+    return int( ceil(math.log2(x)) )
+
 #################################################################
 #################################################################
 
