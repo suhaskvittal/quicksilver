@@ -142,9 +142,9 @@ main(int argc, char* argv[])
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
         .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
-        .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 8)
+        .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 16)
         .optional("", "--rdr-inst-delta-limit", "Instruction delta limit for runahead", sim::GL_RDR_INST_DELTA_LIMIT, 500)
-        .optional("", "--rdr-degree", "Degree of runahead (number of instructions)", sim::GL_RDR_DEGREE, 2)
+        .optional("", "--rdr-degree", "Degree of runahead (number of instructions)", sim::GL_RDR_DEGREE, 4)
         .optional("", "--rdr-completion-buffer-capacity", 
                         "Capacity of completion buffer (number of qubits)",
                         sim::GL_RDR_COMPLETION_BUFFER_CAPACITY,
