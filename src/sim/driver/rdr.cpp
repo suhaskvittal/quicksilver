@@ -6,6 +6,8 @@
 
 #include <random>
 
+//#define RDR_DEBUG
+
 namespace sim
 {
 
@@ -27,18 +29,12 @@ template <class ITER>
 ITER _find_request_for_instruction(ITER begin, ITER end, inst_ptr);
 
 /*
- * These are all functions used to determine which magic states
- * to produce.
- * */
-std::optional<request_type> _runahead(CLIENT*, inst_ptr);
-
-/*
  * Updates the estimated time to a rotation (second parameter). If
  * the given instruction is a rotation and the cost of the rotation
  * is within the current time to rotation for a qubit, then this
  * function returns true.
  * */
-bool _update_time_to_rotation(const inst_ptr, std::vector<int>&);
+bool _update_time_to_rotation(const inst_ptr, std::vector<int>&, size_t layer, double coverage);
 
 } // anon
 
@@ -60,7 +56,29 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 {
     long progress{0};
 
-    /* 1. allocate any free qubits */
+    /* 1. check if any pinned qubits can be deallocated and placed into the completion buffer */
+    
+    if (completion_buffer_.size() < GL_RDR_COMPLETION_BUFFER_CAPACITY)
+    {
+        // searhcing for entry in completion buffer:
+        auto req_it = std::find_if(active_requests_.begin(), active_requests_.end(),
+                            [c=compute_subsystem_->current_cycle()] (const auto& r)
+                            { 
+                                return r.done && r.pinned_qubit->cycle_available <= c;
+                            });
+        if (req_it != active_requests_.end())
+        {
+            auto* q = req_it->pinned_qubit;
+            if (compute_subsystem_->rdr_simulate_store(q))
+            {
+                free_qubits_.push_back(q);
+                completion_buffer_.insert(req_it->inst);
+            }
+            active_requests_.erase(req_it);
+        }
+    }
+
+    /* 2. allocate any free qubits */
 
     if (!free_qubits_.empty())
     {
@@ -76,7 +94,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
         }
     }
 
-    /* 2. try to execute gates on each active request */
+    /* 3. try to execute gates on each active request */
 
     std::sort(active_requests_.begin(), active_requests_.end(),
             [] (const auto& a, const auto& b)
@@ -99,12 +117,6 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
             retire_request(r);
     }
 
-    /* 3. remove any inactive requests (done and has no pinned qubit) */
-
-    auto req_it = std::remove_if(active_requests_.begin(), active_requests_.end(), 
-                                [] (const auto& r) { return r.done && r.pinned_qubit == nullptr; });
-    active_requests_.erase(req_it, active_requests_.end());
-
     /* 4. update cycle-level stats */
 
     s_completion_buffer_occu_sum += completion_buffer_.size();
@@ -119,13 +131,49 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 void
 ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
 {
+    const double cov = (s_requests_submitted < 100) ? 1.0 : mean(s_requests_completed, s_requests_submitted);
+    size_t start_layer = 0,
+           end_layer = GL_RDR_START_LAYER + GL_RDR_LOOKAHEAD_DEPTH;
+    //
+    // We want to find an instruction that has a decent amount of time to actually compute, since
+    // `src` is at the head of the DAG.
+    //
+    // A nice factor is that we only need to care about the current dependency path when determining which
+    // instruction to select. Here's why:
+    //  (1) If this is the slowest (longest time to rotation), then we are ok.
+    //  (2) If this is the fastest (shortest time to rotation), then we are beginning the rotation early
+    //      anyway, so there is a bit of a head start.
+    std::vector<int> time_to_rotation(c->num_qubits, 0);
+
     for (size_t i = 0; i < GL_RDR_DEGREE; i++)
     {
-        auto r = _runahead(c, from);
-        if (r.has_value())
-            enqueue_request(std::move(*r));
+#if defined(RDR_DEBUG)
+        std::cout << "--------------------------------------------------\n";
+#endif
+        auto [inst, layer] = c->dag()->find_earliest_dependent_instruction_from_memoized_instruction_such_that(
+                                                [cov, &time_to_rotation] (inst_ptr x, size_t layer)
+                                                {
+                                                    bool good = _update_time_to_rotation(x, time_to_rotation, layer, cov);
+                                                    return layer >= GL_RDR_START_LAYER
+                                                            && good
+                                                            && !x->rdr_is_pending
+                                                            && !x->rdr_has_been_visited;
+                                                },
+                                                from,
+                                                start_layer,
+                                                end_layer);
+        if (inst != nullptr)
+        {
+            request_type req{ .client=c, .inst=inst, .dag_layer=layer };
+            enqueue_request(std::move(req));
+        }
         else
+        {
             break;
+        }
+
+        start_layer = layer+1;
+        end_layer = start_layer + GL_RDR_LOOKAHEAD_DEPTH;
     }
 }
 
@@ -147,32 +195,42 @@ ROTATION_DIRECTED_RUNAHEAD::is_done(inst_ptr inst)
     return false;
 }
 
-bool
+ROTATION_DIRECTED_RUNAHEAD::APPLY_MAGIC_STATE_RESULT
 ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
 {
     const bool needs_correction = (GL_RNG() & 1) > 0;
-    const auto d = compute_subsystem_->code_distance;
 
-    s_requests_used++;
-
+    bool could_apply{false};
     auto b_it = completion_buffer_.find(inst);
     if (b_it != completion_buffer_.end())
     {
-        completion_buffer_.erase(b_it);
-        q->cycle_available = compute_subsystem_->current_cycle() + d + 2;
+        if (compute_subsystem_->rdr_apply_rotation_magic_state_from_memory(q))
+        {
+            completion_buffer_.erase(b_it);
+            could_apply = true;
+        }
     }
     else
     {
         auto a_it = _find_request_for_instruction(active_requests_.begin(), active_requests_.end(), inst);
         assert(a_it != active_requests_.end() && a_it->done);
-        cycle_type end_cycle = compute_subsystem_->current_cycle() + d;
-        q->cycle_available = end_cycle;
-        a_it->pinned_qubit->cycle_available = end_cycle;
-
-        free_qubits_.push_back(a_it->pinned_qubit);
-        active_requests_.erase(a_it);
+        if (compute_subsystem_->rdr_apply_rotation_magic_state_from_surface_code(q, a_it->pinned_qubit))
+        {
+            free_qubits_.push_back(a_it->pinned_qubit);
+            active_requests_.erase(a_it);
+            could_apply = true;
+        }
     }
-    return needs_correction;
+
+    if (could_apply)
+    {
+        s_requests_used++;
+        return needs_correction ? APPLY_MAGIC_STATE_RESULT::NEEDS_CORRECTION : APPLY_MAGIC_STATE_RESULT::GOOD;
+    }
+    else
+    {
+        return APPLY_MAGIC_STATE_RESULT::ROUTING_CONTENTION;
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -229,13 +287,6 @@ ROTATION_DIRECTED_RUNAHEAD::retire_request(request_type& r)
     r.inst->reset_uops();
     r.done = true;
     s_requests_completed++;
-
-    if (GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER)
-    {
-        free_qubits_.push_back(r.pinned_qubit);
-        r.pinned_qubit = nullptr;
-        completion_buffer_.insert(r.inst);
-    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -281,60 +332,50 @@ _find_request_for_instruction(ITER begin, ITER end, inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::optional<request_type>
-_runahead(CLIENT* c, inst_ptr from)
-{
-    // We want to find an instruction that has a decent amount of time to actually compute, since
-    // `src` is at the head of the DAG.
-    //
-    // A nice factor is that we only need to care about the current dependency path when determining which
-    // instruction to select. Here's why:
-    //  (1) If this is the slowest (longest time to rotation), then we are ok.
-    //  (2) If this is the fastest (shortest time to rotation), then we are beginning the rotation early
-    //      anyway, so there is a bit of a head start.
-    std::vector<int> time_to_rotation(c->num_qubits, 0);
-    auto [inst, layer] = c->dag()->find_earliest_dependent_instruction_from_memoized_instruction_such_that(
-                                            [&time_to_rotation] (inst_ptr x)
-                                            {
-                                                return _update_time_to_rotation(x, time_to_rotation) 
-                                                        && !x->rdr_is_pending
-                                                        && !x->rdr_has_been_visited;
-                                            },
-                                            from,
-                                            GL_RDR_START_LAYER, 
-                                            GL_RDR_LOOKAHEAD_DEPTH);
-    if (inst == nullptr)
-        return std::nullopt;
-    else
-        return std::make_optional(request_type{ .client=c, .inst=inst, .dag_layer=layer });
-}
-
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 bool
-_update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation)
+_update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation, size_t layer, double cov)
 {
     int cost;
     if (is_rotation_instruction(inst->type))
-        cost = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return is_t_like_instruction(t); });
+        cost = inst->uop_count();
     else if (is_toffoli_like_instruction(inst->type))
         cost = 13;
-    else if (is_cx_like_instruction(inst->type))
-        cost = 1;
-    else if (is_t_like_instruction(inst->type))
-        cost = 1;
     else
-        cost = 0;
+        cost = 1;
 
+    // if this is a rotation instruction that will be pre-prepared, then divide the cost by 2 given the
+    // 50% chance of success
+    if (inst->rdr_is_pending)
+        cost >>= 1;
+
+    const double icov = (cov < 0.1) ? 10.0 : (1.0/cov);
     bool good_rotation = is_rotation_instruction(inst->type)
-                            && cost < time_to_rotation[inst->qubits[0]];
+                            && !inst->rdr_is_pending
+                            && !inst->rdr_has_been_visited;
+    good_rotation &= (2*icov*cost < time_to_rotation[inst->qubits[0]]);
+#if defined(RDR_DEBUG)
+    if (is_rotation_instruction(inst->type))
+    {
+        std::cout << "inst = " << *inst 
+                    << ", icov = " << icov 
+                    << ", cost = " << cost 
+                    << ", t = " << time_to_rotation[inst->qubits[0]] 
+                    << ", L = " << layer
+                    << "\n";
+    }
+#endif
 
     int base_time{0};
-    // get max time to first rotation for all arguments
-    std::for_each(inst->q_begin(), inst->q_end(),
-            [&base_time, &time_to_rotation] (auto q) { base_time = std::max(base_time, time_to_rotation[q]); });
+    if (inst->qubit_count > 1)
+    {
+        // get max time to first rotation for all arguments
+        std::for_each(inst->q_begin(), inst->q_end(),
+                [&base_time, &time_to_rotation] (auto q) { base_time = std::max(base_time, time_to_rotation[q]); });
+    }
+    else
+    {
+        base_time = time_to_rotation[inst->qubits[0]];
+    }
     std::for_each(inst->q_begin(), inst->q_end(),
             [t=base_time+cost, &time_to_rotation] (auto q) { time_to_rotation[q] = t; });
 

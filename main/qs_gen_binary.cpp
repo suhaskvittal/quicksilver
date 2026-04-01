@@ -48,16 +48,18 @@ int main(int argc, char* argv[])
     std::string input_file;
     std::string output_file;
     std::string stats_output_file;
+    int64_t     inst_limit;
 
     ARGPARSE()
         .required("input-file", "input qasm file (can be compressed)", input_file)
         .required("output-file", "output binary file (.bin or .gz only)", output_file)
         .optional("-s", "--stats-output-file", "output file for statistics (.txt -- default is no stats)", stats_output_file, "")
         .optional("-p", "--print-progress", "the number of instructions to print progress", compiler::prog::GL_PRINT_PROGRESS, 1'000'000)
+        .optional("-i", "--inst-limit", "stop compilation after this many unrolled instructions", inst_limit, int64_t{500'000'000})
         .parse(argc, argv);
 
     compiler::prog::rotation_manager_init();
-    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file);
+    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file, static_cast<uint64_t>(inst_limit));
     std::cout << "DONE\n";
 
     if (stats_output_file.empty())

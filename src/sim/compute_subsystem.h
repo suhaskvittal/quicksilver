@@ -118,6 +118,22 @@ public:
      * */
     bool is_qubit_in_local_memory(const QUBIT*) const;
 
+    /*
+     * These are functions for simulating operations with rotation-directed
+     * runahead. They should only be called by `ROTATION_DIRECTED_RUNAHEAD`.
+     *
+     * These functions only model the routing overheads of the given operations.
+     * The caller must update the cycle availbility.
+     *
+     * `rdr_simulate_load_store()`: allocates the routing space for a load/store operation.
+     * `rdr_apply_rotation_magic_state_from_*()`: applies a magic state from either
+     *      memory or a fellow surface code qubit. The basic operation (a ZZ + X measurement)
+     *      is the same in both cases, but the routing space allocated is different.
+     * */
+    bool rdr_simulate_store(QUBIT*);
+    bool rdr_apply_rotation_magic_state_from_surface_code(QUBIT* target, QUBIT* magic_state);
+    bool rdr_apply_rotation_magic_state_from_memory(QUBIT*);
+
     const local_storage_type& local_memory() const;
     const production_level_type& t_factories() const;
     const memory_subsystem_type& memory_subsystem() const;

@@ -128,8 +128,8 @@ PROGRAM_INFO::stats_type::merge(const stats_type& other)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p)
-    :ostrm_p_(ostrm_p)
+PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p, uint64_t _inst_limit)
+    :inst_limit(_inst_limit), ostrm_p_(ostrm_p)
 {}
 
 ////////////////////////////////////////////////////////////
@@ -159,12 +159,12 @@ PROGRAM_INFO::from_file(std::string input_file)
 ////////////////////////////////////////////////////////////
 
 PROGRAM_INFO::stats_type
-PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file)
+PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, uint64_t inst_limit)
 {
     generic_strm_type ostrm;
     generic_strm_open(ostrm, output_file, "wb");
 
-    PROGRAM_INFO prog(&ostrm);
+    PROGRAM_INFO prog(&ostrm, inst_limit);
 
     // get the dirname of `input_file`
     std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
@@ -179,12 +179,18 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     std::istringstream _tmp{};
     OQ2_LEXER lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, dirname);
-    [[ maybe_unused ]] int retcode = parser();
+    try
+    {
+        [[ maybe_unused ]] int retcode = parser();
+        prog.flush_and_clear_instructions();
+    }
+    catch (const std::runtime_error& e)
+    {
+        std::cout << "[ PROGRAM_INFO ] " << e.what() << ", stopping at "
+                  << prog.final_stats.unrolled_inst_count << " unrolled instructions\n";
+    }
 
     generic_strm_close(istrm);
-
-    // need to get last set of stats and merge:
-    prog.flush_and_clear_instructions();
 
     return prog.final_stats;
 }
@@ -328,6 +334,9 @@ PROGRAM_INFO::flush_and_clear_instructions()
     // update stats first while we have `instructions_`
     auto curr_stats = compute_statistics_for_current_instructions();
     final_stats.merge(curr_stats);
+
+    if (final_stats.unrolled_inst_count >= inst_limit)
+        throw std::runtime_error("instruction limit reached");
 
     std::cout << "[ PROGRAM_INFO ] rotation count: " << final_stats.rotation_count
                 << "\n[ PROGRAM_INFO ] unrolled instruction count: " << final_stats.unrolled_inst_count
@@ -473,8 +482,8 @@ PROGRAM_INFO::expand_user_defined_gate(compiler::prog::QASM_INST_INFO&& qasm_ins
     if (gate_def.body.empty())
         return;   // this is a NOP
 
-    auto param_subst_map = _make_substitution_map(gate_def.params, qasm_inst.params, qasm_inst.gate_name);
-    auto arg_subst_map = _make_substitution_map(gate_def.args, qasm_inst.args, qasm_inst.gate_name);
+    auto param_subst_map = _make_substitution_map(gate_def.params, qasm_inst.params, _qasm_inst_to_string(qasm_inst));
+    auto arg_subst_map = _make_substitution_map(gate_def.args, qasm_inst.args, _qasm_inst_to_string(qasm_inst));
     for (const auto& q_inst : gate_def.body)
     {
         QASM_INST_INFO inst = q_inst;

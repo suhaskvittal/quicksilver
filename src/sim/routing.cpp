@@ -74,6 +74,8 @@ RESOURCE::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
     for (size_t i = 0; i < usage_.size(); i++)
     {
         const auto& [a, b] = usage_.at(i);
+        if (b < c)
+            continue;
         if (c+t < a)
             return c;
         else

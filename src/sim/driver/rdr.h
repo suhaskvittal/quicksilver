@@ -43,17 +43,7 @@ public:
         bool done{false};
     };
 
-    /*
-     * Comparator for priority queue:
-     * */
-    /*
-    struct request_queue_comparator
-    {
-        bool operator()(const request_type&, const request_type&) const;
-    };
-
-    using request_queue_type = std::priority_queue<request_type, std::vector<request_type>, request_queue_comparator>;
-    */
+    enum class APPLY_MAGIC_STATE_RESULT { GOOD, NEEDS_CORRECTION, ROUTING_CONTENTION };
 
     /*
      * Statistics:
@@ -107,7 +97,7 @@ public:
      * Returns true a correction is needed (teleportation failed).
      * Also, deletes the corresponding request.
      * */
-    bool apply_magic_state(inst_ptr, QUBIT* target);
+    APPLY_MAGIC_STATE_RESULT apply_magic_state(inst_ptr, QUBIT* target);
 
     /*
      * Sets the `interrupted` flag of the corresponding request, which indicates

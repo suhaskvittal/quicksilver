@@ -40,7 +40,7 @@ def _trotterization_write_pauli_string_ops(term: list[tuple[str,int]],
     
     out = fwd_basis_xform
     out += cx_slide
-    out += str(GATE('crz').arg(coeff).operand(main_register, lq))
+    out += str(GATE('crz').arg(coeff).operand(ctrl).operand(main_register, lq))
     out += cx_slide
     out += bck_basis_xform
     return out
@@ -333,7 +333,7 @@ def build_qubitization(output_file: str,
 
         # write preamble:
         f.write(f'''OPENQASM 2.0;
-`include "qelib1.inc"
+`include "qelib1.inc";
 qreg {MAIN_REGISTER}[{num_qubits}];
 qreg {PHASE_REGISTER}[{num_phase_qubits}];
 qreg {ANCILLA}[{num_ancilla}];
@@ -376,7 +376,7 @@ if __name__ == '__main__':
         build_trotterization(trotterization_output_path, input_file, key, num_qubits, one_norm)
 
         print('QUBITIZATION ----------------------------------------------------')
-#       build_qubitization(qubitization_output_path, input_file, key, num_qubits)
+        build_qubitization(qubitization_output_path, input_file, key, num_qubits)
 
 
 

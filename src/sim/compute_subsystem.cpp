@@ -36,6 +36,34 @@ std::optional<r_id_type> _test_endpoints_and_return_first_lockable(routing_type&
                                                                     cycle_type from,
                                                                     cycle_type to);
 
+/*
+ * This function calls `LOCK_PRED` to test if if a given routing resource is available from
+ * `start` to `start+delta`. If this fails, then the function tries again with `start+delta`
+ * to `start+2*delta` and so on until a success occurs. This function terminates when `start_max`
+ * is hit.
+ *
+ * If a success occurs, then this function returns the starting cycle that works. Otherwise,
+ * `std::nullopt` is returned.
+ * */
+template <class LOCK_PRED>
+std::optional<cycle_type> _test_multiple_time_intervals(cycle_type start, 
+                                                        cycle_type delta,
+                                                        cycle_type start_max,
+                                                        const LOCK_PRED&);
+
+template <class SRC_TYPE, class DST_TYPE>
+cycle_type _get_earliest_lockable_time_between(routing_type&, 
+                                                SRC_TYPE, 
+                                                DST_TYPE, 
+                                                cycle_type current_cycle, 
+                                                cycle_type lock_duration);
+
+template <class SRC_TYPE>
+cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&, 
+                                                        SRC_TYPE, 
+                                                        cycle_type current_cycle, 
+                                                        cycle_type lock_duration);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -214,11 +242,15 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
     // can only do this if the current uop is a non-clifford gate
     const bool first_uop_is_a_non_clifford = is_t_like_instruction(inst->current_uop()->type);
     auto result = execute_instruction(inst->current_uop(), {q});
-    if (result.progress && inst->retire_current_uop())
+    if (result.progress == 0)
         return result;
-    // also return if the first uop was not a non-Clifford
-    if (!first_uop_is_a_non_clifford)
+
+    if (inst->retire_current_uop() || !first_uop_is_a_non_clifford)
+    {
+        q->cycle_available = current_cycle()+result.latency;
+        q->last_operation_was_memory_access = false;
         return result;
+    }
 
     // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
     // from the program qubit to the EPR qubit.
@@ -259,7 +291,6 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
         // retire uop:
         inst->retire_current_uop();
     }
-
     q->cycle_available = current_cycle()+result.latency;
     q->last_operation_was_memory_access = false;
     return result;
@@ -273,6 +304,58 @@ COMPUTE_SUBSYSTEM::is_qubit_in_local_memory(const QUBIT* q) const
 {
     auto it = std::find(local_memory_.begin(), local_memory_.end(), q);
     return it != local_memory_.end();
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * RDR generally has poor priority when it comes to routing space,
+ * so we will need to allocate a space in advance.
+ * */
+
+bool
+COMPUTE_SUBSYSTEM::rdr_simulate_store(QUBIT* q)
+{
+    const size_t d = code_distance;
+    const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
+
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
+    if (!dst.has_value())
+        return false;
+    // lock routing space and return true:
+    routing_.lock_resources_between(q, *dst, c, c+d);
+    q->cycle_available = c+d+1;  // +1 due to destruction by X measurement
+    return true;
+}
+
+bool
+COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_surface_code(QUBIT* q, QUBIT* m)
+{
+    const size_t d = code_distance;
+    const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
+
+    if (!routing_.test_resources_between(q, m, c, c+d))
+        return false;
+    routing_.lock_resources_between(q, m, c, c+d);
+    q->cycle_available = c+d;
+    m->cycle_available = c+d+1;
+    return true;
+}
+
+bool
+COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
+{
+    const size_t d = code_distance;
+    const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
+
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
+    if (!dst.has_value())
+        return false;
+    // lock routing space and return true:
+    routing_.lock_resources_between(q, *dst, c, c+d);
+    q->cycle_available = c+d;
+    return true;
 }
 
 ////////////////////////////////////////////////////////////
@@ -360,7 +443,7 @@ COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
 
     (*f_it)->consume(1);
     routing_.lock_resources_between(q, *dst, t_start, t_end);
-    cycle_type latency = code_distance + GL_REACTION_TIME + 1;
+    cycle_type latency = code_distance + GL_REACTION_TIME;
     return execute_result_type{.progress=1, .latency=latency};
 }
 
@@ -470,6 +553,46 @@ _test_endpoints_and_return_first_lockable(routing_type& r, T src, cycle_type fro
         if (r.test_resources_between(src, dst, from, to))
             return std::make_optional(dst);
     return std::nullopt;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class LOCK_PRED> std::optional<cycle_type>
+_test_multiple_time_intervals(cycle_type start, cycle_type delta, cycle_type start_max, const LOCK_PRED& pred)
+{
+    while (start < start_max)
+    {
+        if (pred(start, start+delta))
+            return std::make_optional(start);
+        start += delta;
+    }
+
+    return std::nullopt;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+template <class T, class U> cycle_type
+_get_earliest_lockable_time_between(routing_type& r, T src, U dst, cycle_type c, cycle_type d)
+{
+    cycle_type out{0};
+    r.for_each_resource_between(src, dst,
+            [&out, c, d] (const auto& res)
+            {
+                out = std::max(out, res.next_ready_cycle(c, d));
+            });
+    return out;
+}
+
+template <class T> cycle_type
+_get_earliest_lockable_time_for_endpoints(routing_type& r, T src, cycle_type c, cycle_type d)
+{
+    cycle_type earliest{std::numeric_limits<cycle_type>::max()};
+    for (r_id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
+        earliest = std::min(earliest, _get_earliest_lockable_time_between(r, src, dst, c, d));
+    return earliest;
 }
 
 ////////////////////////////////////////////////////////////

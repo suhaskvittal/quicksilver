@@ -117,8 +117,15 @@ DRIVER::print_progress(std::ostream& out) const
         out << "\n\tinstructions completed = " << c->s_unrolled_inst_done
                 << "\n\tIPC = " << ipc
                 << "\n\tIPdC = " << ipdc
-                << "\n\tKIPS = " << kips
-                << "\n";
+                << "\n\tKIPS = " << kips;
+
+        if (GL_RDR_ENABLED)
+        {
+            double cov = mean(rdr_->s_requests_completed, rdr_->s_requests_submitted);
+            out << "\n\tRDR coverage = " << cov;
+        }
+
+        out << "\n";
     }
 }
 
@@ -420,11 +427,8 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
             // reaction-limited T teleportation:
             auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
             if (result.progress)
-            {
-                update_instruction_stats_before_retire(inst);
                 if (inst->uops_retired() == inst->uop_count())
                     retire_instruction(c, inst, result.latency);
-            }
         }
         else
         {
@@ -541,19 +545,27 @@ DRIVER::rdr_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
     }
     else if (rdr_->is_done(inst))
     {
-        bool needs_correction = rdr_->apply_magic_state(inst, q);
-        if (needs_correction)
+        using outcome_type = driver::ROTATION_DIRECTED_RUNAHEAD::APPLY_MAGIC_STATE_RESULT;
+
+        auto outcome = rdr_->apply_magic_state(inst, q);
+        if (outcome == outcome_type::GOOD)
+        {
+            retire_instruction(c, inst, q->cycle_available - current_cycle());
+            return true;
+        }
+        else if (outcome == outcome_type::NEEDS_CORRECTION)
         {
             inst->reset_uops();
             inst->urotseq = inst->corr_urotseq_array.front();
             inst->corr_urotseq_array.pop_front();
             rdr_->do_runahead(c, inst);
+            return false;
         }
-        else
+        else  // `outcome_type::ROUTING_CONTENTION`
         {
-            retire_instruction(c, inst, q->cycle_available - current_cycle());
+            // idle until we get routing space for the magic state
+            return true;
         }
-        return !needs_correction;
     }
     else
     {

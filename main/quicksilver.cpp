@@ -145,9 +145,10 @@ main(int argc, char* argv[])
         .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 8)
         .optional("", "--rdr-inst-delta-limit", "Instruction delta limit for runahead", sim::GL_RDR_INST_DELTA_LIMIT, 500)
         .optional("", "--rdr-degree", "Degree of runahead (number of instructions)", sim::GL_RDR_DEGREE, 2)
-        .optional("", "--rdr-enable-perfect-completion-buffer",
-                      "Enable perfect completion buffer for RDR",
-                      sim::GL_RDR_ENABLE_PERFECT_COMPLETION_BUFFER, false)
+        .optional("", "--rdr-completion-buffer-capacity", 
+                        "Capacity of completion buffer (number of qubits)",
+                        sim::GL_RDR_COMPLETION_BUFFER_CAPACITY,
+                        0)
 
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 

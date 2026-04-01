@@ -15,6 +15,7 @@
 #include "instruction_fpa_hash.inl"
 
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -137,6 +138,12 @@ public:
     stats_type final_stats{};
 
     /*
+     * Maximum number of unrolled instructions to compile before stopping.
+     * Defaults to no limit (std::numeric_limits<uint64_t>::max()).
+     * */
+    uint64_t inst_limit;
+
+    /*
      * OpenQASM version (2.0 is only supported, so don't use 3.0)
      * */
     std::string version;
@@ -155,14 +162,14 @@ private:
     uint64_t           inst_read_{0};
     bool               has_qubit_count_been_written_{false};
 public:
-    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr);
+    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr, uint64_t inst_limit=std::numeric_limits<uint64_t>::max());
     static PROGRAM_INFO from_file(std::string);
 
     /*
      * Compiles the input qasm file. Returns program statistics for the compilation (i.e., number
      * of gates).
      * */
-    static stats_type read_from_file_and_write_to_binary(std::string, std::string);
+    static stats_type read_from_file_and_write_to_binary(std::string, std::string, uint64_t inst_limit=std::numeric_limits<uint64_t>::max());
 
     /*
      * These are the public member functions used to build the program representation from

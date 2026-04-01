@@ -68,23 +68,35 @@ DAG::find_earliest_dependent_instruction_from_memoized_instruction_such_that(con
 template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
 DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, size_t min_layer, size_t max_layer) const
 {
+    iteration_generation_++;
+    const size_t gen = iteration_generation_;
     std::vector<node_type*> curr_layer(source_node->dependent);
 
     // use a sorted set to avoid duplicates and ensure deterministic iteration order
-    auto node_cmp = [] (const node_type* a, const node_type* b) { return a->inst->number < b->inst->number; };
-    std::set<node_type*, decltype(node_cmp)> next_layer_set(node_cmp);
+    std::vector<node_type*> next_layer;
 
     size_t layer_count{0};
     while (layer_count < max_layer)
     {
         for (auto* x : curr_layer)
         {
-            next_layer_set.insert(x->dependent.begin(), x->dependent.end());
-            if (layer_count >= min_layer && pred(x->inst))
+            if (layer_count >= min_layer && pred(x->inst, layer_count))
                 return std::make_pair(x->inst, layer_count);
+
+            // update dependents
+            for (auto* y : x->dependent)
+            {
+                if (y->last_generation_ != gen)
+                {
+                    y->last_generation_ = gen;
+                    y->tmp_pred_count_ = 0;
+                }
+                if ((++y->tmp_pred_count_) == y->pred_count)
+                    next_layer.push_back(y);
+            }
         }
-        curr_layer.assign(next_layer_set.begin(), next_layer_set.end());
-        next_layer_set.clear();
+        curr_layer = std::move(next_layer);
+        next_layer.clear();
         layer_count++;
     }
     
