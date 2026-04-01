@@ -20,7 +20,8 @@ namespace
 using fpa_type = INSTRUCTION::fpa_type;
 using urotseq_type = INSTRUCTION::urotseq_type;
 
-constexpr size_t LUT_COUNT{10*2};  // 12 buckets, one positive and one negative
+constexpr size_t LUT_COUNT_PER_SIGN{12};
+constexpr size_t LUT_COUNT{2*LUT_COUNT_PER_SIGN};
 
 struct lut_entry
 {
@@ -70,12 +71,22 @@ rotation_manager_init()
 #endif
 
     generic_strm_type istrm;
-    for (size_t i = 0; i < LUT_COUNT; i++)
+    for (size_t i = 0; i < LUT_COUNT_PER_SIGN; i++)
     {
-        std::string file_path = std::string{ROTATION_SYNTHESIS_LUT_FOLDER_PATH} + "/" + std::to_string(i) + ".bin.xz";
-        generic_strm_open(istrm, file_path, "rb");
-        LUT[i] = _read_lut_from_file(istrm);
-        generic_strm_close(istrm);
+        for (bool pos : {true,false})
+        {
+            std::string file_path{ROTATION_SYNTHESIS_LUT_FOLDER_PATH};
+            if (pos)  // negatiove
+                file_path += "/p";
+            else
+                file_path += "/n";
+            file_path += std::to_string(i) + ".bin.xz";
+            generic_strm_open(istrm, file_path, "rb");
+
+            size_t lut_idx = pos ? i : i + LUT_COUNT_PER_SIGN;
+            LUT[lut_idx] = _read_lut_from_file(istrm);
+            generic_strm_close(istrm);
+        }
     }
 }
 
