@@ -8,7 +8,7 @@ PROJECT = 'rdr_micro2026'
 '''
     Simulation settings:
 '''
-SIM_INST_COUNT = 100_000_000
+SIM_INST_COUNT = 10_000_000
 PRINT_PROGRESS = SIM_INST_COUNT
 COMPILE_INST_COUNT = 5*SIM_INST_COUNT
 
@@ -52,7 +52,7 @@ if experiment == 'sim_rdr':
                                 '--rdr-start-layer': 2,
                                 '--rdr-lookahead-depth': 16,
                                 '--rdr-degree': 4,
-                                '--rdr-completion-buffer-capacity': 8
+                                '--rdr-completion-buffer-capacity': 6
                             })
 
 if experiment == 'sim_rltp':

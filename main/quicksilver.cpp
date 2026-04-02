@@ -299,7 +299,7 @@ main(int argc, char* argv[])
     // RDR phsyical qubit overheads:
     const size_t rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                                           ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
-                                                * sim::configuration::surface_code_physical_qubit_count(15) // d = 15 for yoked surface code
+                                                * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
                                           : 0;
     const size_t rdr_footprint = sim::GL_RDR_ENABLED
                                     ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
