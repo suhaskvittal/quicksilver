@@ -1,9 +1,12 @@
-/* author: Suhas Vittal date:   12 March 2026
+/* 
+ *  author: Suhas Vittal 
+ *  date:   12 March 2026
  * */
 
 #include "sim/driver/rdr.h"
 #include "sim.h"
 
+#include <algorithm>
 #include <random>
 
 //#define RDR_DEBUG
@@ -42,7 +45,8 @@ bool _update_time_to_rotation(const inst_ptr, std::vector<int>&, size_t layer, d
 ////////////////////////////////////////////////////////////
 
 ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs)
-    :compute_subsystem_(cs)
+    :compute_subsystem_(cs),
+    lookahead_depth_(GL_RDR_LOOKAHEAD_DEPTH)
 {
     std::copy_if(cs->dedicated_ancilla().begin(), cs->dedicated_ancilla().end(), std::back_inserter(free_qubits_),
             [] (const auto* q) { return q->client_id == RDR_CLIENT_ID; });
@@ -131,9 +135,12 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 void
 ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
 {
+    if (from->rdr_has_been_visited)
+        return;
+
     const double cov = (s_requests_started < 100) ? 1.0 : mean(s_requests_completed, s_requests_started);
     size_t start_layer = 0,
-           end_layer = GL_RDR_START_LAYER + GL_RDR_LOOKAHEAD_DEPTH;
+           end_layer = GL_RDR_START_LAYER + lookahead_depth_;//GL_RDR_LOOKAHEAD_DEPTH;
     //
     // We want to find an instruction that has a decent amount of time to actually compute, since
     // `src` is at the head of the DAG.
@@ -144,6 +151,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     //  (2) If this is the fastest (shortest time to rotation), then we are beginning the rotation early
     //      anyway, so there is a bit of a head start.
     std::vector<int> time_to_rotation(c->num_qubits, 0);
+    bool any_install{false};
     for (size_t i = 0; i < GL_RDR_DEGREE; i++)
     {
 #if defined(RDR_DEBUG)
@@ -165,6 +173,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
         {
             request_type req{ .client=c, .inst=inst, .dag_layer=layer };
             enqueue_request(std::move(req));
+            any_install = true;
         }
         else
         {
@@ -172,8 +181,11 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
         }
 
         start_layer = layer+1;
-        end_layer = start_layer + GL_RDR_LOOKAHEAD_DEPTH;
+        end_layer = start_layer + lookahead_depth_;//GL_RDR_LOOKAHEAD_DEPTH;
     }
+
+    if (!any_install)
+        lookahead_depth_ = std::clamp(lookahead_depth_+4, ssize_t{0}, ssize_t{1024});
 }
 
 ////////////////////////////////////////////////////////////
@@ -270,11 +282,24 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
         {
             request_queue_.erase(r_it);
             s_requests_invalidated_before_issue++;
+
+            // reduce lookahead depth since we are overfetching:
+            lookahead_depth_ = std::clamp(lookahead_depth_-32, ssize_t{0}, ssize_t{1024});
+
             return true;
         }
     }
 
     return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+ssize_t
+ROTATION_DIRECTED_RUNAHEAD::lookahead_depth() const
+{
+    return lookahead_depth_;
 }
 
 ////////////////////////////////////////////////////////////

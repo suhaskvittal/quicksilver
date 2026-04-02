@@ -80,6 +80,8 @@ private:
     std::unordered_set<inst_ptr> completion_buffer_;
 
     COMPUTE_SUBSYSTEM* compute_subsystem_;
+
+    ssize_t lookahead_depth_;
 public:
     ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM*);
 
@@ -109,6 +111,8 @@ public:
      * Returns true on invalidation.
      * */
     bool interrupt_and_invalidate_if_necessary(inst_ptr);
+
+    ssize_t lookahead_depth() const;
 private:
     /*
      * Retires the request, and if possible, places it into the `completion_buffer_`.

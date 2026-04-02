@@ -122,7 +122,8 @@ DRIVER::print_progress(std::ostream& out) const
         if (GL_RDR_ENABLED)
         {
             double cov = mean(rdr_->s_requests_completed, rdr_->s_requests_submitted);
-            out << "\n\tRDR coverage = " << cov;
+            out << "\n\tRDR coverage = " << cov
+                << "\n\tRDR lookahead = " << rdr_->lookahead_depth();
         }
 
         out << "\n";
