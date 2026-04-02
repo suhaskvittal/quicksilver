@@ -144,7 +144,6 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     //  (2) If this is the fastest (shortest time to rotation), then we are beginning the rotation early
     //      anyway, so there is a bit of a head start.
     std::vector<int> time_to_rotation(c->num_qubits, 0);
-
     for (size_t i = 0; i < GL_RDR_DEGREE; i++)
     {
 #if defined(RDR_DEBUG)

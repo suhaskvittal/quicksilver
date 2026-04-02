@@ -23,13 +23,13 @@ experiment = argv[1]
 
 if experiment == 'compile_eif':
     for w in workload_list():
-        run_memory_scheduler(get_rdr_binary(w), PROJECT, 'eif', active_set_capacity=4, inst_limit=COMPILE_INST_COUNT, scheduler_id=0)
+        run_memory_scheduler(w, PROJECT, 'eif', active_set_capacity=4, inst_limit=COMPILE_INST_COUNT, scheduler_id=0)
 
 if experiment == 'sim_baseline':
     for w in workload_list():
-        for f in [20000, 40000, 60000, 80000, 100000]:
+        for f in range(20000, 80000, 5000):
             _f = f//1000
-            run_quicksilver(w, PROJECT, f'baseline_f{_f}', 'eif',
+            run_quicksilver(w, PROJECT, f'baseline_f{_f}k', 'eif',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=4,
                             total_program_inst=get_total_inst_count_for_workload(w),
@@ -38,9 +38,9 @@ if experiment == 'sim_baseline':
 
 if experiment == 'sim_rdr':
     for w in workload_list():
-        for f in [20000, 40000, 60000, 80000, 100000]:
+        for f in range(20000, 80000, 5000):
             _f = f//1000
-            run_quicksilver(w, PROJECT, f'rdr_f{_f}', 'eif',
+            run_quicksilver(w, PROJECT, f'rdr_f{_f}k', 'eif_rdr',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=4,
                             total_program_inst=get_total_inst_count_for_workload(w),
@@ -50,6 +50,22 @@ if experiment == 'sim_rdr':
                                 '-rdr': 1,
                                 '--rdr-capacity': 2,
                                 '--rdr-start-layer': 2,
-                                '--rdr-lookahead-depth': 8,
-                                '--rdr-inst-delta-limit': 250
+                                '--rdr-lookahead-depth': 16,
+                                '--rdr-degree': 4,
+                                '--rdr-completion-buffer-capacity': 8
                             })
+
+if experiment == 'sim_rltp':
+    for w in workload_list():
+        for f in range(20000, 80000, 5000):
+            for rltp in [2,4,6,8]:
+                _f = f//1000
+                run_quicksilver(w, PROJECT, f'rltp_{rltp}_{_f}k', 'eif',
+                                inst_limit=SIM_INST_COUNT,
+                                active_set_capacity=4,
+                                total_program_inst=get_total_inst_count_for_workload(w),
+                                print_progress=PRINT_PROGRESS,
+                                factory_budget=f,
+                                kwargs={
+                                    '--rltp-degree': rltp,
+                                })

@@ -4,11 +4,17 @@ import os
 from sys import argv
 
 WORKLOADS = [
-    'benchmarks/bin/BQ_e_cr2_120_trotter.xz',
-#   'benchmarks/bin/BQ_shor_rsa256_iter_4.xz',
-    'benchmarks/bin/BQ_v_c2h4o_ethylene_oxide_240_trotter.xz',
-    'benchmarks/bin/BQ_v_hc3h2cn_288_trotter.xz',
-    'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz'
+    'benchmarks/bin/BQ_chromium_q.xz',
+    'benchmarks/bin/BQ_chromium_t.xz',
+    'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz',
+    'benchmarks/bin/BQ_bose_hubbard_q.xz',
+    'benchmarks/bin/BQ_bose_hubbard_t.xz',
+    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_q.xz',
+    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
+    'benchmarks/bin/BQ_hc3h2cn_q.xz',
+    'benchmarks/bin/BQ_hc3h2cn_t.xz',
+    'benchmarks/bin/BQ_manganese_nitride_q.xz',
+    'benchmarks/bin/BQ_manganese_nitride_t.xz',
 ]
 
 ##############################################

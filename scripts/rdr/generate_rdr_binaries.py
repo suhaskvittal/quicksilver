@@ -1,11 +1,13 @@
-from scripts.common import *
+import os
 from sys import argv
 
-os.system('mkdir -p benchmarks/bin/rdr')
+INPUT_FOLDER = 'benchmarks/bin/compiled/rdr_micro2026/eif'
+OUTPUT_FOLDER = 'benchmarks/bin/compiled/rdr_micro2026/eif_rdr'
+os.system(f'mkdir -p {OUTPUT_FOLDER}')
 
-for w in workload_list():
-    name = get_workload_name(w)
-    output_file = f'benchmarks/bin/rdr/{name}'
-    cmd = f'./build/qs_convert_to_rdr_isa {w} {output_file} -rdr 1 && xz -z -T 8 {output_file}'
+for w in os.listdir(INPUT_FOLDER):
+    input_file = f'{INPUT_FOLDER}/{w}'
+    output_file = f'{OUTPUT_FOLDER}/{w}'
+    cmd = f'./build/qs_convert_to_rdr_isa {input_file} {output_file} -rdr 1'
     print(cmd)
     os.system(cmd)
