@@ -63,10 +63,6 @@ class MEMORY_LEVEL : public OPERABLE
 public:
     using storage_type = std::unordered_set<QUBIT*>;
 
-    /*
-     * These are the [[n,k,d]] parameters of the underlying
-     * storage (code block).
-     * */
     const size_t storage_physical_qubit_count;
     const size_t storage_logical_qubit_count;
     const size_t storage_code_distance;
@@ -105,7 +101,6 @@ public:
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
     virtual cycle_type next_ready_cycle_for_load(QUBIT*) const =0;
-
 protected:
     virtual MEMORY_ACCESS_RESULT load_impl(size_t idx, storage_type&, QUBIT*) =0;
     virtual MEMORY_ACCESS_RESULT store_impl(size_t idx, storage_type&, QUBIT*) =0;

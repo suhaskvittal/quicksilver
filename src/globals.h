@@ -85,6 +85,9 @@ void print_stat_line(std::ostream&, std::string_view, T);
 template <class T, class U>
 constexpr double mean(T, U);
 
+template <class T>
+constexpr T sqr(T);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

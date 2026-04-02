@@ -168,11 +168,7 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    if (GL_USE_RDR_ISA > 0)
-    {
-        sim::GL_RDR_ENABLED = true;
-        std::cout << "RDR = enabled\n";
-    }
+    sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -200,9 +196,7 @@ main(int argc, char* argv[])
 
     /* initialize magic state factories */
 
-    auto ms_specs = get_default_factory_specifications(regime, 
-                                                        compute_cycle_time_ns, 
-                                                        factory_ll_buffer_capacity);
+    auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
     auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
 
     /* initialize memory subsystem */
@@ -290,15 +284,61 @@ main(int argc, char* argv[])
 
     sim::print_sim_stats(std::cout, driver);
 
-//  sim::print_stats_for_factories(std::cout, "L1_FACTORY", ms_alloc.producers[0]);
-//  sim::print_stats_for_factories(std::cout, "L2_FACTORY", ms_alloc.producers[1]);
+    print_stat_line(std::cout, "COMPUTE_CODE_DISTANCE", compute_code_distance);
+    print_stat_line(std::cout, "MEMORY_CODE_DISTANCE", memory_code_distance);
 
-//  print_stat_line(std::cout, "COMPUTE_CODE_DISTANCE", compute_code_distance);
-//  print_stat_line(std::cout, "MEMORY_CODE_DISTANCE", memory_code_distance);
+    /*
+     * Compute physical qubit estimates:
+     * */
+
+    const size_t sc_footprint = sim::configuration::surface_code_physical_qubit_count(compute_code_distance);
+    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
+    const size_t program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+    // RLTP physical qubit overheads:
+    const size_t rltp_footprint = (sqr(sim::GL_RLTP_DEGREE)/2 + 2*sim::GL_RLTP_DEGREE) * sc_footprint;
+    // RDR phsyical qubit overheads:
+    const size_t rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+                                          ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
+                                                * sim::configuration::surface_code_physical_qubit_count(15) // d = 15 for yoked surface code
+                                          : 0;
+    const size_t rdr_footprint = sim::GL_RDR_ENABLED
+                                    ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+                                    : 0;
+    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
+
+    std::cout << "COMPUTE_FOOTPRINT\n";
+    print_stat_line(std::cout, "    PROGRAM_MEMORY", program_active_memory_footprint);
+    print_stat_line(std::cout, "    RLTP_WORKSPACE", rltp_footprint);
+    print_stat_line(std::cout, "    RDR_WORKSPACE", rdr_footprint);
+    print_stat_line(std::cout, "    TOTAL", total_compute_footprint);
+
+    /*
+     * Memory physical qubit overheads:
+     * */
+
+    const size_t program_inactive_memory_footprint = std::transform_reduce(
+                                                        memory_subsystem.begin(), 
+                                                        memory_subsystem.end(),
+                                                        size_t{0},
+                                                        std::plus<size_t>{},
+                                                        [sc_footprint] (const auto* m)
+                                                        {
+                                                            size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
+                                                            size_t routing_overhead = 0.5*m->num_blocks*sc_footprint;
+                                                            return memory_overhead + routing_overhead;
+                                                        });
+    
+    std::cout << "MEMORY_FOOTPRINT\n";
+    print_stat_line(std::cout, "    PROGRAM_MEMORY", program_inactive_memory_footprint);
+
+    std::cout << "FACTORY_FOOTPRINT\n";
+    print_stat_line(std::cout, "    TOTAL", ms_alloc.physical_qubit_count);
+
+    const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint + ms_alloc.physical_qubit_count;
+    print_stat_line(std::cout, "TOTAL_FOOTPRINT", total_footprint);
 
 //  print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
 //  print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
-//  print_stat_line(std::cout, "FACTORY_PHYSICAL_QUBITS", ms_alloc.physical_qubit_count);
 
 //  if (use_remote_memory)
 //      print_stat_line(std::cout, "ED_PHYSICAL_QUBITS", ed_alloc.physical_qubit_count);

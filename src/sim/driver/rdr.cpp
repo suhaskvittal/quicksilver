@@ -131,7 +131,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 void
 ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
 {
-    const double cov = (s_requests_submitted < 100) ? 1.0 : mean(s_requests_completed, s_requests_submitted);
+    const double cov = (s_requests_started < 100) ? 1.0 : mean(s_requests_completed, s_requests_started);
     size_t start_layer = 0,
            end_layer = GL_RDR_START_LAYER + GL_RDR_LOOKAHEAD_DEPTH;
     //
@@ -343,16 +343,11 @@ _update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation
     else
         cost = 1;
 
-    // if this is a rotation instruction that will be pre-prepared, then divide the cost by 2 given the
-    // 50% chance of success
-    if (inst->rdr_is_pending)
-        cost >>= 1;
-
     const double icov = (cov < 0.1) ? 10.0 : (1.0/cov);
     bool good_rotation = is_rotation_instruction(inst->type)
                             && !inst->rdr_is_pending
                             && !inst->rdr_has_been_visited;
-    good_rotation &= (2*icov*cost < time_to_rotation[inst->qubits[0]]);
+    good_rotation &= (2*sqr(icov)*cost < time_to_rotation[inst->qubits[0]]);
 #if defined(RDR_DEBUG)
     if (is_rotation_instruction(inst->type))
     {
@@ -363,6 +358,13 @@ _update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation
                     << ", L = " << layer
                     << "\n";
     }
+#endif
+
+    if (is_rotation_instruction(inst->type) && sim::GL_RLTP_DEGREE > 0)
+        cost = cost / (0.5 * sim::GL_RLTP_DEGREE); 
+#if defined(RDR_DEBUG)
+    if (is_rotation_instruction(inst->type) && sim::GL_RLTP_DEGREE > 0)
+        std::cout << "\trltp adjusted cost: " << cost << "\n";
 #endif
 
     int base_time{0};

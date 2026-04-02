@@ -22,3 +22,9 @@ mean(T x, U y)
 {
     return static_cast<double>(x) / static_cast<double>(y);
 }
+
+template <class T> constexpr T
+sqr(T x)
+{
+    return x*x;
+}
