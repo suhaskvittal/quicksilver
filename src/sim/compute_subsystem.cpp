@@ -245,7 +245,7 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
     if (result.progress == 0)
         return result;
 
-    if (inst->retire_current_uop() || !first_uop_is_a_non_clifford)
+    if (inst->retire_current_uop() || !first_uop_is_a_non_clifford || current_cycle() < rltp_ready_cycle_)
     {
         q->cycle_available = current_cycle()+result.latency;
         q->last_operation_was_memory_access = false;
@@ -293,6 +293,12 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
     }
     q->cycle_available = current_cycle()+result.latency;
     q->last_operation_was_memory_access = false;
+
+    // the RLTP resuorces become ready after 4d cycles:
+    //  (1) bell state prep (d)
+    //  (2) the 3d from the actual RLTP procedure
+    rltp_ready_cycle_ = current_cycle() + 4*code_distance;
+
     return result;
 }
 
@@ -383,6 +389,16 @@ const COMPUTE_SUBSYSTEM::local_storage_type&
 COMPUTE_SUBSYSTEM::dedicated_ancilla() const
 {
     return dedicated_ancilla_;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+COMPUTE_SUBSYSTEM::count_available_magic_states() const
+{
+    return std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0}, std::plus<size_t>{},
+                                [] (const auto* f) { return f->buffer_occupancy(); });
 }
 
 ////////////////////////////////////////////////////////////
@@ -489,16 +505,6 @@ COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
     execute_result_type out{.progress=1};
     out.latency = convert_cycles_between_frequencies(result.latency, result.freq_khz, freq_khz);
     return out;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t
-COMPUTE_SUBSYSTEM::count_available_magic_states() const
-{
-    return std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0}, std::plus<size_t>{},
-                                [] (const auto* f) { return f->buffer_occupancy(); });
 }
 
 ////////////////////////////////////////////////////////////

@@ -88,6 +88,11 @@ private:
      * indexes into `local_memory_`.
      * */
     std::unordered_map<QUBIT*, ssize_t> memory_level_map_;
+
+    /*
+     * Prevent multiple calls to RLTP from happening too soon.
+     * */
+    cycle_type rltp_ready_cycle_{0};
 public:
     COMPUTE_SUBSYSTEM(double freq_khz, 
                         size_t code_distance, 
@@ -138,6 +143,8 @@ public:
     const production_level_type& t_factories() const;
     const memory_subsystem_type& memory_subsystem() const;
     const local_storage_type& dedicated_ancilla() const;
+
+    size_t count_available_magic_states() const;
 protected:
     long operate() override { return 1; }
 private:
@@ -146,8 +153,6 @@ private:
     execute_result_type do_cx_like_gate(inst_ptr, QUBIT*, QUBIT*);
     execute_result_type do_t_like_gate(inst_ptr, QUBIT*);
     execute_result_type do_memory_access(inst_ptr, std::vector<QUBIT*>);
-
-    size_t count_available_magic_states() const;
 };
 
 ////////////////////////////////////////////////////////////

@@ -108,17 +108,25 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
                 else
                     return a.interrupted;
             });
+    
+    size_t magic_states_avail = compute_subsystem_->count_available_magic_states();
+
     for (auto& r : active_requests_)
     {
+        if (magic_states_avail <= 1)
+            break;
         if (r.done)
             continue;
         inst_ptr uop = r.inst->current_uop();
         auto result = compute_subsystem_->execute_instruction(uop, {r.pinned_qubit});
         progress += result.progress;
-        if (result.progress == 0)
-            break;
-        if (r.inst->retire_current_uop())
-            retire_request(r);
+        if (result.progress > 0)
+        {
+            if (is_t_like_instruction(uop->type))
+                magic_states_avail--;
+            if (r.inst->retire_current_uop())
+                retire_request(r);
+        }
     }
 
     /* 4. update cycle-level stats */
@@ -184,8 +192,8 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
         end_layer = start_layer + lookahead_depth_;//GL_RDR_LOOKAHEAD_DEPTH;
     }
 
-    if (!any_install)
-        lookahead_depth_ = std::clamp(lookahead_depth_+4, ssize_t{0}, ssize_t{1024});
+    if (!any_install && !GL_RDR_FIXED_LOOKAHEAD)
+        lookahead_depth_ = std::clamp(lookahead_depth_+8, ssize_t{0}, ssize_t{1024});
 }
 
 ////////////////////////////////////////////////////////////
@@ -284,7 +292,8 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
             s_requests_invalidated_before_issue++;
 
             // reduce lookahead depth since we are overfetching:
-            lookahead_depth_ = std::clamp(lookahead_depth_-32, ssize_t{0}, ssize_t{1024});
+            if (!GL_RDR_FIXED_LOOKAHEAD)
+                lookahead_depth_ = std::clamp(lookahead_depth_/2, ssize_t{0}, ssize_t{1024});
 
             return true;
         }
@@ -367,16 +376,15 @@ _update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation
     else
         cost = 1;
 
-    const double icov = (cov < 0.1) ? 10.0 : (1.0/cov);
     bool good_rotation = is_rotation_instruction(inst->type)
                             && !inst->rdr_is_pending
                             && !inst->rdr_has_been_visited;
-    good_rotation &= (2*sqr(icov)*cost < time_to_rotation[inst->qubits[0]]);
+    good_rotation &= (cost < time_to_rotation[inst->qubits[0]]);
 #if defined(RDR_DEBUG)
     if (is_rotation_instruction(inst->type))
     {
         std::cout << "inst = " << *inst 
-                    << ", icov = " << icov 
+                    << ", cov = " << cov 
                     << ", cost = " << cost 
                     << ", t = " << time_to_rotation[inst->qubits[0]] 
                     << ", L = " << layer

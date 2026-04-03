@@ -149,6 +149,7 @@ main(int argc, char* argv[])
                         "Capacity of completion buffer (number of qubits)",
                         sim::GL_RDR_COMPLETION_BUFFER_CAPACITY,
                         0)
+        .optional("", "--rdr-fixed-lookahead", "Fix RDR lookahead layers", sim::GL_RDR_FIXED_LOOKAHEAD, false)
 
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
