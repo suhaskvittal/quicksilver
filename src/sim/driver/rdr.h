@@ -41,6 +41,8 @@ public:
         bool interrupted{false};
         bool invalidated{false};
         bool done{false};
+
+        cycle_type cycle_installed;
     };
 
     enum class APPLY_MAGIC_STATE_RESULT { GOOD, NEEDS_CORRECTION, ROUTING_CONTENTION };
@@ -125,6 +127,11 @@ private:
     void allocate_free_qubit(QUBIT*);
 
     void enqueue_request(request_type&&);
+
+    /*
+     * This just calls `COMPUTE_SUBSYSTEM::current_cycle()`
+     * */
+    cycle_type current_cycle() const;
 };
 
 ////////////////////////////////////////////////////////////

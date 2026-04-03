@@ -25,6 +25,8 @@ namespace driver
 namespace
 {
 
+constexpr ssize_t MAX_LOOKAHEAD{1024};
+
 using inst_ptr = ROTATION_DIRECTED_RUNAHEAD::inst_ptr;
 using request_type = ROTATION_DIRECTED_RUNAHEAD::request_type;
 
@@ -66,7 +68,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
     {
         // searhcing for entry in completion buffer:
         auto req_it = std::find_if(active_requests_.begin(), active_requests_.end(),
-                            [c=compute_subsystem_->current_cycle()] (const auto& r)
+                            [c=current_cycle()] (const auto& r)
                             { 
                                 return r.done && r.pinned_qubit->cycle_available <= c;
                             });
@@ -179,7 +181,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
                                                 end_layer);
         if (inst != nullptr)
         {
-            request_type req{ .client=c, .inst=inst, .dag_layer=layer };
+            request_type req{ .client=c, .inst=inst, .dag_layer=layer, .cycle_installed=current_cycle() };
             enqueue_request(std::move(req));
             any_install = true;
         }
@@ -193,7 +195,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     }
 
     if (!any_install && !GL_RDR_FIXED_LOOKAHEAD)
-        lookahead_depth_ = std::clamp(lookahead_depth_+8, ssize_t{0}, ssize_t{1024});
+        lookahead_depth_ = std::clamp(lookahead_depth_+32, ssize_t{0}, ssize_t{MAX_LOOKAHEAD});
 }
 
 ////////////////////////////////////////////////////////////
@@ -288,12 +290,19 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
         auto r_it = _find_request_for_instruction(request_queue_.begin(), request_queue_.end(), inst);
         if (r_it != request_queue_.end())
         {
+#if defined(RDR_DEBUG)
+            std::cout << *r_it->inst << ": time in request queue " 
+                        << (current_cycle() - r_it->cycle_installed) 
+                        << ", dag_layer = " << r_it->dag_layer
+                        << "\n";
+#endif
+
             request_queue_.erase(r_it);
             s_requests_invalidated_before_issue++;
 
             // reduce lookahead depth since we are overfetching:
             if (!GL_RDR_FIXED_LOOKAHEAD)
-                lookahead_depth_ = std::clamp(lookahead_depth_/2, ssize_t{0}, ssize_t{1024});
+                lookahead_depth_ = std::clamp(lookahead_depth_/2, ssize_t{0}, ssize_t{MAX_LOOKAHEAD});
 
             return true;
         }
@@ -345,6 +354,15 @@ ROTATION_DIRECTED_RUNAHEAD::enqueue_request(request_type&& r)
     request_queue_.push_back(r);
     r.inst->rdr_is_pending = true;
     s_requests_submitted++;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+cycle_type
+ROTATION_DIRECTED_RUNAHEAD::current_cycle() const
+{
+    return compute_subsystem_->current_cycle();
 }
 
 ////////////////////////////////////////////////////////////
