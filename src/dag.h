@@ -29,8 +29,8 @@ public:
         /*
          * These variables are for `for_each_instruction_in_layer_order` (see below)
          * */
-        mutable uint8_t         tmp_pred_count_{0};
-        mutable size_t          last_generation_{0};
+        mutable uint8_t tmp_pred_count_{0};
+        mutable size_t  last_generation_{0};
     };
 
     const size_t qubit_count;

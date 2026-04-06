@@ -9,7 +9,7 @@ def get_workload_name(f: str):
 def build_binaries(extra_options=''):
     files = [f for f in os.listdir('bisquit/qasm') if f.endswith('.qasm') or f.endswith('.qasm.xz')]
     for f in files:
-        if '_t' not in f or 'boron' in f:
+        if 'qaoa' not in f:
             continue
         filename = get_workload_name(f)
         output_file = f'benchmarks/bin/BQ_{filename}'

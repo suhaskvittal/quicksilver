@@ -407,12 +407,12 @@ DRIVER::fetch_and_execute_instructions_from_client(CLIENT* c)
         std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
-        // update stats:
-        update_instruction_stats_on_fetch(inst, operands);
-
         // check if the operands are ready:
         if (!is_instruction_ready(executed_inst, operands))
             continue;
+
+        // update stats:
+        update_instruction_stats_on_fetch(inst, operands);
 
         /* RDR logic: first check if the rotation's magic state is already available    *
          * if so, then try and apply the magic state                                    */
@@ -551,6 +551,9 @@ DRIVER::rdr_handle_instruction(CLIENT* c, inst_ptr inst, QUBIT* q)
         auto outcome = rdr_->apply_magic_state(inst, q);
         if (outcome == outcome_type::GOOD)
         {
+//          std::cout << "RDR instruction latency: " << (q->cycle_available - *inst->first_ready_cycle) 
+//                      << " (apply time = " << (q->cycle_available - current_cycle()) 
+//                      << "\n";
             retire_instruction(c, inst, q->cycle_available - current_cycle());
             return true;
         }

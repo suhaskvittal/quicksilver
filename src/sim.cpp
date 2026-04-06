@@ -181,6 +181,7 @@ _print_client_stats(std::ostream& out, DRIVER* d, CLIENT* c)
     double ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, d->compute_subsystem()->code_distance);
     double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, d->freq_khz);
 
+    double uops_per_rotation = mean(c->s_total_rotation_uops, c->s_total_rotations);
     double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
     double mean_memory_access_latency = mean(c->s_memory_access_latency, c->s_memory_accesses);
 
@@ -191,6 +192,7 @@ _print_client_stats(std::ostream& out, DRIVER* d, CLIENT* c)
     print_stat_line(out, "    INSTRUCTIONS", c->s_unrolled_inst_done);
     print_stat_line(out, "    CYCLES", c->s_cycle_complete);
     print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
+    print_stat_line(out, "    MEAN_UOPS_PER_ROTATION", uops_per_rotation);
     print_stat_line(out, "    MEMORY_ACCESSES", c->s_memory_accesses);
     print_stat_line(out, "    MEAN_MEMORY_ACCESS_LATENCY", mean_memory_access_latency);
 }

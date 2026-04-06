@@ -268,7 +268,7 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
     // update the result latency, which is currently `code_distance + GL_REACTION_TIME + 1`.
     // The latter part (`GL_REACTION_TIME+1`) overlaps with the ZZ and XX measurements required
     // to teleport the program qubit
-    result.latency = 3*code_distance; 
+    result.latency = 3*code_distance + GL_REACTION_TIME; 
     while (inst->uops_retired() < inst->uop_count() && remaining > 0)
     {
         auto* uop = inst->current_uop();
@@ -320,17 +320,23 @@ COMPUTE_SUBSYSTEM::is_qubit_in_local_memory(const QUBIT* q) const
  * so we will need to allocate a space in advance.
  * */
 
+// FOR TESTING ONLY:
+// #define RDR_IGNORE_ROUTING_OVERHEADS
+
 bool
 COMPUTE_SUBSYSTEM::rdr_simulate_store(QUBIT* q)
 {
     const size_t d = code_distance;
+#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
+    const cycle_type c = current_cycle();
+#else
     const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
-
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
+#endif
     q->cycle_available = c+d+1;  // +1 due to destruction by X measurement
     return true;
 }
@@ -339,12 +345,15 @@ bool
 COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_surface_code(QUBIT* q, QUBIT* m)
 {
     const size_t d = code_distance;
+#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
+    const cycle_type c = current_cycle();
+#else
     const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
-
     if (!routing_.test_resources_between(q, m, c, c+d))
         return false;
     routing_.lock_resources_between(q, m, c, c+d);
-    q->cycle_available = c+d;
+#endif
+    q->cycle_available = c+d+GL_REACTION_TIME;
     m->cycle_available = c+d+1;
     return true;
 }
@@ -353,14 +362,17 @@ bool
 COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
 {
     const size_t d = code_distance;
+#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
+    const cycle_type c = current_cycle();
+#else
     const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
-
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
-    q->cycle_available = c+d;
+#endif
+    q->cycle_available = c+d+GL_REACTION_TIME;
     return true;
 }
 

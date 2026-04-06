@@ -296,7 +296,7 @@ main(int argc, char* argv[])
     // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
     const size_t program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
     // RLTP physical qubit overheads:
-    const size_t rltp_footprint = (sqr(sim::GL_RLTP_DEGREE)/2 + 2*sim::GL_RLTP_DEGREE) * sc_footprint;
+    const size_t rltp_footprint = (sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE) * sc_footprint;
     // RDR phsyical qubit overheads:
     const size_t rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                                           ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 

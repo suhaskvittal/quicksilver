@@ -89,6 +89,7 @@ CLIENT::retire_instruction(inst_ptr inst)
     {
         s_rotation_latency += inst_latency;
         s_total_rotation_uops += inst->original_unrolled_inst_count;
+        s_total_rotations++;
 
         s_t_gates_done += std::count_if(inst->urotseq.begin(), inst->urotseq.end(), 
                                     [] (auto t) { return is_t_like_instruction(t); });
