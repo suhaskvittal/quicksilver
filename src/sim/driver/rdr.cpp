@@ -164,7 +164,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
 
     if (!GL_RDR_FIXED_LOOKAHEAD)
     {
-        const double fom = tml;
+        const double fom = cov;
         if (fom < 0.5)        lookahead_depth_ = 16;
         else if (fom < 0.65)  lookahead_depth_ = 32;
         else if (fom < 0.8)   lookahead_depth_ = 64;
