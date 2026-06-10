@@ -3,7 +3,9 @@
  *  date:   11 March 2026
  * */
 
+#include "sim/client.h"
 #include "sim/compute_subsystem.h"
+#include "sim/configuration/resource_estimation.h"
 #include "sim.h"
 
 namespace sim
@@ -374,6 +376,35 @@ COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
 #endif
     q->cycle_available = c+d+GL_REACTION_TIME;
     return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+double
+COMPUTE_SUBSYSTEM::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) const
+{
+    const double cycles = convert_cycles_between_frequencies(c->s_cycle_complete, d_freq_khz, freq_khz) * scale;
+    const double ler_per_d_cycles = configuration::surface_code_logical_error_rate(code_distance, p);
+    const double t_gates = c->s_t_gates_done * scale;
+    const double t_infidelity = t_factories_[0]->output_error_probability;
+
+    // assert that all `t_factories_` have the same fidelity:
+    const bool all_fact_have_same_fidelity = std::all_of(t_factories_.begin(), t_factories_.end(),
+                                                [x=t_infidelity] (const auto* f)
+                                                {
+                                                    return std::abs(x - f->output_error_probability) < 1e-12;
+                                                });
+    if (!all_fact_have_same_fidelity)
+        std::cerr << "COMPUTE_SUBSYSTEM::log_fidelity: T factories do not have similar fidelities" << _die{};
+
+    // memory (idle) fidelity
+    const double log_f_mem = local_memory_capacity * mean(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
+    // T gate fidelity
+    const double log_f_t = t_gates * std::log(1.0 - t_infidelity);
+    // total fidelity:
+    const double log_f = log_f_mem + log_f_t;
+    return log_f;
 }
 
 ////////////////////////////////////////////////////////////

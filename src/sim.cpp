@@ -126,6 +126,14 @@ print_sim_stats(std::ostream& out, DRIVER* d)
         double completion_buffer_mean_occu = mean(d->rdr()->s_completion_buffer_occu_sum,
                                                    d->rdr()->s_completion_buffer_occu_ticks);
         print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occu);
+
+        double request_mean_latency = mean(d->rdr()->s_request_completion_cycles_sum, d->rdr()->s_requests_used);
+        double request_mean_latency_per_uop = mean(d->rdr()->s_request_completion_cycles_sum, d->rdr()->s_request_uop_sum);
+        print_stat_line(out, "RDR_REQUEST_COMPLETION_MEAN_LATENCY", request_mean_latency);
+        print_stat_line(out, "RDR_MEAN_LATENCY_PER_UOP", request_mean_latency_per_uop);
+
+        double request_idle_time = mean(d->rdr()->s_post_completion_idle_time_sum, d->rdr()->s_requests_used);
+        print_stat_line(out, "RDR_REQUEST_POST_COMPLETION_MEAN_IDLE_TIME", request_idle_time);
     }
 
     for (auto* c : d->clients())

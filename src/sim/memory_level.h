@@ -101,6 +101,13 @@ public:
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
     virtual cycle_type next_ready_cycle_for_load(QUBIT*) const =0;
+
+    /*
+     * Returns fidelity of memory subsystem for client's application.
+     * `scale` indicates the amount to scale values such as cycles or
+     * number of operations by. `d_freq_khz` is the frequency of the driver.
+     * */
+    virtual double log_fidelity(CLIENT*, double scale, double d_freq_khz, double phys_error) const =0;
 protected:
     virtual MEMORY_ACCESS_RESULT load_impl(size_t idx, storage_type&, QUBIT*) =0;
     virtual MEMORY_ACCESS_RESULT store_impl(size_t idx, storage_type&, QUBIT*) =0;

@@ -9,8 +9,6 @@
 #include <algorithm>
 #include <random>
 
-//#define RDR_DEBUG
-
 namespace sim
 {
 
@@ -25,7 +23,9 @@ namespace driver
 namespace
 {
 
+constexpr ssize_t MIN_LOOKAHEAD{8};
 constexpr ssize_t MAX_LOOKAHEAD{1024};
+constexpr ssize_t LOOKAHEAD_DELTA{8};
 
 using inst_ptr = ROTATION_DIRECTED_RUNAHEAD::inst_ptr;
 using request_type = ROTATION_DIRECTED_RUNAHEAD::request_type;
@@ -39,7 +39,11 @@ ITER _find_request_for_instruction(ITER begin, ITER end, inst_ptr);
  * is within the current time to rotation for a qubit, then this
  * function returns true.
  * */
-bool _update_time_to_rotation(const inst_ptr, std::vector<int>&, size_t layer, double coverage);
+bool _update_time_to_rotation(const inst_ptr, 
+                                std::vector<int>&, 
+                                size_t code_distance,
+                                double cov,
+                                size_t layer);
 
 } // anon
 
@@ -78,9 +82,9 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
             if (compute_subsystem_->rdr_simulate_store(q))
             {
                 free_qubits_.push_back(q);
-                completion_buffer_.insert(req_it->inst);
+                completion_buffer_.insert({req_it->inst, *req_it});
+                active_requests_.erase(req_it);
             }
-            active_requests_.erase(req_it);
         }
     }
 
@@ -115,7 +119,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
     {
         const size_t magic_states_avail = compute_subsystem_->count_available_magic_states();
         if (!r.interrupted && magic_states_avail <= 1)
-            break;
+            continue;
         if (r.done)
             continue;
         if (GL_RLTP_DEGREE == 0)
@@ -136,12 +140,6 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
             if (result.progress > 0 && r.inst->uops_retired() == r.inst->uop_count())
                 retire_request(r);
         }
-
-        // Check if there is space in the completion buffer. If not, then decrement
-        // the lookahead depth:
-        if (r.done)
-            if (completion_buffer_.size() >= GL_RDR_COMPLETION_BUFFER_CAPACITY && !GL_RDR_FIXED_LOOKAHEAD)
-                lookahead_depth_ = std::clamp(lookahead_depth_ - 8, ssize_t{0}, ssize_t{MAX_LOOKAHEAD});
     }
 
     /* 4. update cycle-level stats */
@@ -161,9 +159,21 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     if (from->rdr_has_been_visited)
         return;
 
-    const double cov = (s_requests_started < 100) ? 1.0 : mean(s_requests_completed, s_requests_started);
+    const double cov = (s_requests_started < 100) ? 1.0 : coverage();
+    const double tml = (s_requests_completed < 100) ? 1.0 : timeliness();
+
+    if (!GL_RDR_FIXED_LOOKAHEAD)
+    {
+        const double fom = tml;
+        if (fom < 0.5)        lookahead_depth_ = 16;
+        else if (fom < 0.65)  lookahead_depth_ = 32;
+        else if (fom < 0.8)   lookahead_depth_ = 64;
+        else if (fom < 0.9)   lookahead_depth_ = 128;
+        else                  lookahead_depth_ = 256;
+    }
+
     size_t start_layer = 0,
-           end_layer = GL_RDR_START_LAYER + lookahead_depth_;//GL_RDR_LOOKAHEAD_DEPTH;
+           end_layer = GL_RDR_START_LAYER + lookahead_depth_;
     //
     // We want to find an instruction that has a decent amount of time to actually compute, since
     // `src` is at the head of the DAG.
@@ -186,10 +196,20 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     c->dag()->for_each_instruction_in_layer_order(
                     [this, c, cov, &time_to_rotation, &request_count] (inst_ptr x, size_t layer)
                     {
-                        bool good = _update_time_to_rotation(x, time_to_rotation, layer, cov);
+                        cycle_type t = time_to_rotation[x->qubits[0]];
+
+                        bool good = _update_time_to_rotation(x, 
+                                                            time_to_rotation, 
+                                                            compute_subsystem_->code_distance,
+                                                            cov,
+                                                            layer);
                         if (layer >= GL_RDR_START_LAYER && good && request_count < GL_RDR_DEGREE)
                         {
-                            request_type req{ .client=c, .inst=x, .dag_layer=layer, .cycle_installed=current_cycle() };
+                            request_type req{ .client=c, 
+                                                .inst=x, 
+                                                .dag_layer=x->number, 
+                                                .expected_start_cycle=current_cycle()+t,
+                                                .install_cycle=current_cycle() };
                             enqueue_request(std::move(req));
                             request_count++;
 #if defined(RDR_DEBUG)
@@ -199,9 +219,6 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
                     },
                     start_layer,
                     end_layer);
-
-    if (request_count == 0 && !GL_RDR_FIXED_LOOKAHEAD)
-        lookahead_depth_ = std::clamp(lookahead_depth_ + 8, ssize_t{0}, ssize_t{MAX_LOOKAHEAD});
 }
 
 ////////////////////////////////////////////////////////////
@@ -227,12 +244,15 @@ ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
 {
     const bool needs_correction = (GL_RNG() & 1) == 0;
 
+    metadata_type meta;
+
     bool could_apply{false};
     auto b_it = completion_buffer_.find(inst);
     if (b_it != completion_buffer_.end())
     {
         if (compute_subsystem_->rdr_apply_rotation_magic_state_from_memory(q))
         {
+            meta = b_it->second;
             completion_buffer_.erase(b_it);
             could_apply = true;
         }
@@ -243,6 +263,7 @@ ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
         assert(a_it != active_requests_.end() && a_it->done);
         if (compute_subsystem_->rdr_apply_rotation_magic_state_from_surface_code(q, a_it->pinned_qubit))
         {
+            meta = *a_it;
             free_qubits_.push_back(a_it->pinned_qubit);
             active_requests_.erase(a_it);
             could_apply = true;
@@ -251,6 +272,22 @@ ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
 
     if (could_apply)
     {
+        // update stats:
+        const cycle_type rz_prep_time = meta.rdr_end_cycle - meta.rdr_start_cycle;
+        const cycle_type rz_idle_time = current_cycle() - meta.rdr_end_cycle;
+        update_on_consumption(meta.inst->uop_count(), rz_prep_time, rz_idle_time);
+
+#if defined(RDR_DEBUG)
+        std::cout << "Request consumed @ t = " << current_cycle()
+                    << "\n\tinst = " << *meta.inst
+                    << "\n\tinstall = " << meta.install_cycle
+                    << "\n\texpected start = " << meta.expected_start_cycle
+                    << "\n\tstart = " << meta.rdr_start_cycle
+                    << "\n\tend = " << meta.rdr_end_cycle
+                    << "\n\tinterrupted = " << meta.interrupted
+                    << "\n";
+#endif
+
         s_requests_used++;
         return needs_correction ? APPLY_MAGIC_STATE_RESULT::NEEDS_CORRECTION : APPLY_MAGIC_STATE_RESULT::GOOD;
     }
@@ -268,6 +305,7 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 {
     // first search for request amongst `active_requests_`
     auto a_it = _find_request_for_instruction(active_requests_.begin(), active_requests_.end(), inst);
+    bool request_killed{false};
     if (a_it != active_requests_.end())
     {
         assert(!a_it->done);
@@ -279,7 +317,7 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
             free_qubits_.push_back(a_it->pinned_qubit);
             s_requests_invalidated++;
             active_requests_.erase(a_it);
-            return true;
+            request_killed = true;
         }
         else
         {
@@ -288,7 +326,6 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
                 a_it->interrupted = true;
                 s_requests_interrupted++;
             }
-            return false;
         }
     }
     else
@@ -298,23 +335,19 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
         {
 #if defined(RDR_DEBUG)
             std::cout << *r_it->inst << ": time in request queue " 
-                        << (current_cycle() - r_it->cycle_installed) 
+                        << (current_cycle() - r_it->install_cycle) 
                         << ", dag_layer = " << r_it->dag_layer
                         << "\n";
 #endif
 
             request_queue_.erase(r_it);
             s_requests_invalidated_before_issue++;
-
-            // reduce lookahead depth since we are overfetching:
-            if (!GL_RDR_FIXED_LOOKAHEAD)
-                lookahead_depth_ = std::clamp(lookahead_depth_ - 8, ssize_t{0}, ssize_t{MAX_LOOKAHEAD});
-
-            return true;
         }
+        request_killed = true;
     }
 
-    return true;
+    // reduce lookahead depth since we are overfetching:
+    return request_killed;
 }
 
 ////////////////////////////////////////////////////////////
@@ -326,6 +359,18 @@ ROTATION_DIRECTED_RUNAHEAD::lookahead_depth() const
     return lookahead_depth_;
 }
 
+double
+ROTATION_DIRECTED_RUNAHEAD::coverage() const
+{
+    return mean(s_requests_completed, s_requests_submitted);
+}
+
+double
+ROTATION_DIRECTED_RUNAHEAD::timeliness() const
+{
+    return mean(s_requests_completed - s_requests_interrupted, s_requests_completed);
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -334,6 +379,7 @@ ROTATION_DIRECTED_RUNAHEAD::retire_request(request_type& r)
 {
     r.inst->reset_uops();
     r.done = true;
+    r.rdr_end_cycle = current_cycle();
     s_requests_completed++;
 }
 
@@ -344,9 +390,18 @@ void
 ROTATION_DIRECTED_RUNAHEAD::allocate_free_qubit(QUBIT* q)
 {
     assert(request_queue_.size() > 0);
-    request_type r = std::move(request_queue_.back());
-    request_queue_.pop_back();
+
+    request_type r = request_queue_.front();
+    while (current_cycle() > r.expected_start_cycle)
+    {
+        request_queue_.pop_front();
+        if (request_queue_.empty())
+            return;
+        r = request_queue_.front();
+    }
+    request_queue_.pop_front();
     r.pinned_qubit = q;
+    r.rdr_start_cycle = current_cycle();
     active_requests_.push_back(r);
     s_requests_started++;
 }
@@ -374,6 +429,18 @@ ROTATION_DIRECTED_RUNAHEAD::current_cycle() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+void
+ROTATION_DIRECTED_RUNAHEAD::update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time)
+{
+    // update stats
+    s_request_uop_sum += uops;
+    s_request_completion_cycles_sum += rz_prep_time;
+    s_post_completion_idle_time_sum += rz_idle_time;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 namespace
 {
 
@@ -390,15 +457,20 @@ _find_request_for_instruction(ITER begin, ITER end, inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 bool
-_update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation, size_t layer, double cov)
+_update_time_to_rotation(const inst_ptr inst, 
+                        std::vector<int>& time_to_rotation, 
+                        size_t d,
+                        double cov,
+                        // information only for debugging:
+                        size_t layer)
 {
     int cost;
     if (is_rotation_instruction(inst->type))
-        cost = inst->uop_count();
+        cost = inst->uop_count() * (d+GL_REACTION_TIME);
     else if (is_toffoli_like_instruction(inst->type))
-        cost = 13;
+        cost = 7*(d+GL_REACTION_TIME) + 8*2*d;
     else
-        cost = 1;
+        cost = 2*d;
 
     if (is_rotation_instruction(inst->type) && sim::GL_RLTP_DEGREE > 0)
         cost = cost /  sim::GL_RLTP_DEGREE; 
@@ -406,15 +478,15 @@ _update_time_to_rotation(const inst_ptr inst, std::vector<int>& time_to_rotation
     bool good_rotation = is_rotation_instruction(inst->type)
                             && !inst->rdr_is_pending
                             && !inst->rdr_has_been_visited;
-    good_rotation &= (2*cost < time_to_rotation[inst->qubits[0]]);
+    good_rotation &= (2.0*(1.0/cov)*cost < time_to_rotation[inst->qubits[0]]);
 #if defined(RDR_DEBUG)
-    if (is_rotation_instruction(inst->type))
+    if (is_rotation_instruction(inst->type) && !inst->rdr_is_pending && !inst->rdr_has_been_visited)
     {
         std::cout << "inst = " << *inst 
-                    << ", cov = " << cov 
                     << ", cost = " << cost 
                     << ", t = " << time_to_rotation[inst->qubits[0]] 
                     << ", L = " << layer
+                    << ", good = " << good_rotation
                     << "\n";
     }
 #endif

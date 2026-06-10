@@ -3,6 +3,8 @@
  *  date:   11 March 2026
  * */
 
+#include "sim/client.h"
+#include "sim/configuration/resource_estimation.h"
 #include "sim/memory/bivariate_bicycle.h"
 
 namespace sim
@@ -47,6 +49,56 @@ BB_MEMORY::BB_MEMORY(double freq_khz, size_t qubit_count, size_t n, size_t k, si
 
         routing_.set_location(i, ch, ro, co);
     }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+cycle_type
+BB_MEMORY::next_ready_cycle_for_load(QUBIT* q) const
+{
+    size_t idx = 0;
+    for (size_t i = 0; i < blocks_.size(); i++)
+    {
+        if (blocks_[i].count(q))
+        {
+            idx = i;
+            break;
+        }
+    }
+
+    cycle_type ready_cycle = adapters_[idx];
+    routing_.for_each_resource_between(idx, routing::MCB_LEFT_ENTRY,
+                        [this, &ready_cycle, d=storage_code_distance] (const auto& r)
+                        {
+                            ready_cycle = std::max(ready_cycle, r.next_ready_cycle(current_cycle(), d));
+                        });
+    return ready_cycle;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+double
+BB_MEMORY::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) const
+{
+    const double cycles = convert_cycles_between_frequencies(c->s_cycle_complete, d_freq_khz, freq_khz) * scale;
+    const double surgery_ops = s_surgery_operations * scale;
+    const double aut_ops = s_shift_automorphisms * scale;
+
+    const double ber_per_d_cycles = configuration::bivariate_bicycle_code_block_error_rate(storage_code_distance, p);
+    const double surgery_error_per_op = ber_per_d_cycles*100,
+                 aut_error_per_op = ber_per_d_cycles*10;
+
+    // memory (idle) fidelity
+    const double log_f_mem = num_blocks * mean(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
+    // surgery fidelity
+    const double log_f_surgery = surgery_ops * std::log(1-surgery_error_per_op);
+    // automorphism fidelity
+    const double log_f_aut = aut_ops * std::log(1-aut_error_per_op);
+    // total fidelity:
+    const double log_f = log_f_mem + log_f_surgery + log_f_aut;
+    return log_f;
 }
 
 ////////////////////////////////////////////////////////////
@@ -147,31 +199,6 @@ BB_MEMORY::coupled_load_store_impl(size_t idx, storage_type&, QUBIT* ld, QUBIT* 
     }
 
     return out;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-cycle_type
-BB_MEMORY::next_ready_cycle_for_load(QUBIT* q) const
-{
-    size_t idx = 0;
-    for (size_t i = 0; i < blocks_.size(); i++)
-    {
-        if (blocks_[i].count(q))
-        {
-            idx = i;
-            break;
-        }
-    }
-
-    cycle_type ready_cycle = adapters_[idx];
-    routing_.for_each_resource_between(idx, routing::MCB_LEFT_ENTRY,
-                        [this, &ready_cycle, d=storage_code_distance] (const auto& r)
-                        {
-                            ready_cycle = std::max(ready_cycle, r.next_ready_cycle(current_cycle(), d));
-                        });
-    return ready_cycle;
 }
 
 ////////////////////////////////////////////////////////////

@@ -139,6 +139,14 @@ public:
     bool rdr_apply_rotation_magic_state_from_surface_code(QUBIT* target, QUBIT* magic_state);
     bool rdr_apply_rotation_magic_state_from_memory(QUBIT*);
 
+    /*
+     * `log_fidelity()` returns the natural log of the fidelity of the compute subsystem (no error
+     * occurs during execution) for the given `CLIENT*`. `scale` indicates the amount to scale
+     * values such as the number of cycles by. `d_freq_khz` is the frequency of the `DRIVER`: note
+     * that `CLIENT::s_cycle_complete` is at the rate of `d_freq_khz`.
+     * */
+    double log_fidelity(CLIENT*, double scale, double d_freq_khz, double phys_error) const; 
+
     const local_storage_type& local_memory() const;
     const production_level_type& t_factories() const;
     const memory_subsystem_type& memory_subsystem() const;

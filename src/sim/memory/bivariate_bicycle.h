@@ -43,6 +43,7 @@ public:
     BB_MEMORY(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
     cycle_type next_ready_cycle_for_load(QUBIT*) const override;
+    double log_fidelity(CLIENT*, double, double, double) const override;
 private:
     MEMORY_ACCESS_RESULT load_impl(size_t idx, storage_type&, QUBIT*) override;
     MEMORY_ACCESS_RESULT store_impl(size_t idx, storage_type&, QUBIT*) override;

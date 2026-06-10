@@ -42,8 +42,18 @@ public:
         bool invalidated{false};
         bool done{false};
 
-        cycle_type cycle_installed;
+        cycle_type expected_start_cycle;
+
+        cycle_type install_cycle;
+        cycle_type rdr_start_cycle;
+        cycle_type rdr_end_cycle;
+        cycle_type cb_install_cycle;
     };
+
+    /*
+     * Metadata for completion buffer entries (i.e., for stats)
+     * */
+    using metadata_type = request_type;
 
     enum class APPLY_MAGIC_STATE_RESULT { GOOD, NEEDS_CORRECTION, ROUTING_CONTENTION };
 
@@ -58,6 +68,11 @@ public:
     uint64_t s_requests_interrupted{0};
     uint64_t s_requests_invalidated{0};
     uint64_t s_requests_used{0};
+
+    uint64_t s_request_uop_sum{0};
+
+    uint64_t s_request_completion_cycles_sum{0};
+    uint64_t s_post_completion_idle_time_sum{0};
 
     uint64_t s_completion_buffer_occu_sum{0};
     uint64_t s_completion_buffer_occu_ticks{0};
@@ -79,7 +94,7 @@ private:
     /*
      * `completion_buffer_` contains all completed requests.
      * */
-    std::unordered_set<inst_ptr> completion_buffer_;
+    std::unordered_map<inst_ptr, metadata_type> completion_buffer_;
 
     COMPUTE_SUBSYSTEM* compute_subsystem_;
 
@@ -115,6 +130,8 @@ public:
     bool interrupt_and_invalidate_if_necessary(inst_ptr);
 
     ssize_t lookahead_depth() const;
+    double coverage() const;
+    double timeliness() const;
 private:
     /*
      * Retires the request, and if possible, places it into the `completion_buffer_`.
@@ -126,12 +143,17 @@ private:
      * */
     void allocate_free_qubit(QUBIT*);
 
+    /*
+     * Adds a request to the `request_queue_`.
+     * */
     void enqueue_request(request_type&&);
 
     /*
      * This just calls `COMPUTE_SUBSYSTEM::current_cycle()`
      * */
     cycle_type current_cycle() const;
+
+    void update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time);
 };
 
 ////////////////////////////////////////////////////////////

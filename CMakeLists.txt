@@ -237,22 +237,22 @@ target_link_libraries(qs_convert_to_rdr_isa PRIVATE qs_common)
 ###################################################
 ###################################################
 
-# Magic state throughput estimation (qs_tpest)
-
-add_executable(qs_tpest main/qs_throughput_estimator.cpp)
-target_include_directories(qs_tpest PRIVATE "src")
-target_compile_options(qs_tpest PRIVATE ${COMPILE_OPTIONS})
-target_link_libraries(qs_tpest PRIVATE qs_simulator)
-
-###################################################
-###################################################
-
 # Static program report (qs_report)
 
 add_executable(qs_report main/qs_report.cpp)
 target_include_directories(qs_report PRIVATE "src")
 target_compile_options(qs_report PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_report PRIVATE qs_common)
+
+###################################################
+###################################################
+
+# Throughput estimator (qs_throughput_estimator)
+
+add_executable(qs_throughput_estimator main/qs_magic_state_throughput.cpp)
+target_include_directories(qs_throughput_estimator PRIVATE "src")
+target_compile_options(qs_throughput_estimator PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_throughput_estimator PRIVATE qs_simulator)
 
 ###################################################
 ###################################################

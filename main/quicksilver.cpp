@@ -30,17 +30,6 @@ namespace
 using FACTORY_SPECIFICATION = sim::configuration::FACTORY_SPECIFICATION;
 using ED_SPECIFICATION = sim::configuration::ED_SPECIFICATION;
 
-struct FIDELITY_RESULT
-{
-    /*
-     * Fidelity breakdown:
-     * */
-    double overall;
-    double compute_subsystem;
-    double memory_subsystem;
-    double magic_state;
-};
-
 std::vector<std::string> split_trace_string(std::string);
 
 /*
@@ -79,11 +68,6 @@ std::vector<ED_SPECIFICATION>      get_default_ed_specifications(std::string_vie
  * time (can be computed using `substrate_mismatch_factor` and `ED_SPECIFICATION`)
  * */
 size_t faster_substrate_ed_overhead(ED_SPECIFICATION&, int64_t substrate_mismatch_factor);
-
-/*
- * Computes the probability of success post-simulation
- * */
-FIDELITY_RESULT compute_application_fidelity(uint64_t scale_to_instructions, sim::CLIENT*, sim::COMPUTE_SUBSYSTEM*);
 
 } // anon
 
@@ -296,7 +280,7 @@ main(int argc, char* argv[])
     // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
     const size_t program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
     // RLTP physical qubit overheads:
-    const size_t rltp_footprint = (sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE) * sc_footprint;
+    const size_t rltp_footprint = (11*sim::GL_RLTP_DEGREE)/2 * sc_footprint;
     // RDR phsyical qubit overheads:
     const size_t rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                                           ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
@@ -337,6 +321,13 @@ main(int argc, char* argv[])
 
     const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint + ms_alloc.physical_qubit_count;
     print_stat_line(std::cout, "TOTAL_FOOTPRINT", total_footprint);
+
+    auto fidelity = driver->application_fidelity(0, 1'000'000'000ull, 1e-3);
+    std::cout << "FIDELITY\n";
+    print_stat_line(std::cout, "    OVERALL", fidelity.overall);
+    print_stat_line(std::cout, "    COMPUTE", fidelity.compute);
+    print_stat_line(std::cout, "    MEMORY", fidelity.mem);
+    print_stat_line(std::cout, "    RDR", fidelity.rdr);
 
 //  print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
 //  print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
@@ -569,124 +560,6 @@ get_default_ed_specifications(std::string_view regime,
     for (auto& s : specs)
         s.cycle_time_ns = c_round_time_ns;
     return specs;
-    */
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-size_t
-faster_substrate_ed_overhead(ED_SPECIFICATION& s, int64_t substrate_mismatch_factor)
-{
-    /*
-    // first, compute measurement distance for slower substrate
-    const size_t slow_dm = sim::configuration::surface_code_distance_for_target_logical_error_rate(s.output_error_rate,
-                                                                                                    sim::GL_PHYSICAL_ERROR_RATE);
-
-    // use this to compute idle time
-    const size_t idle_cycles = (s.input_count-s.output_count) * slow_dm * substrate_mismatch_factor;
-
-    // there is no good analytical expression for the faster substrate code distance, but we know it is 
-    // greater than or equal to `slow_dm`, so we can work from there
-    size_t dm{slow_dm};
-    auto f_error_rate = [idle_cycles, e_protocol=s.output_error_rate] (size_t d)
-                        {
-                            double ler = sim::configuration::surface_code_logical_error_rate(d, sim::GL_PHYSICAL_ERROR_RATE);
-                            double log_idle_fidelity = mean(idle_cycles, d) * std::log(1-ler);
-                            return 1 - (1-e_protocol)*std::exp(log_idle_fidelity);
-                        };
-    while (f_error_rate(dm) > 2*s.output_error_rate)
-    {
-        std::cout << "faster_substrate_ed_overhead: " << f_error_rate(dm) << " @ d = " << dm 
-                    << ", need = " << s.output_error_rate
-                    << "\t| idle_cycles = " << idle_cycles
-                    << "\n";
-        dm++;
-    }
-
-    double e = f_error_rate(dm);
-    size_t idx = sim::configuration::inner_surface_code_distance_for_target_logical_error_rate(e, s.dx, sim::GL_PHYSICAL_ERROR_RATE);
-    size_t idz = sim::configuration::inner_surface_code_distance_for_target_logical_error_rate(e, s.dz, sim::GL_PHYSICAL_ERROR_RATE);
-    size_t p = sim::configuration::surface_code_physical_qubit_count(idx,idz) * s.input_count;
-    p += p/2; // assume routing overheads add 50%
-
-    std::cout << "faster_substrate_ed_overhead: [[ " << s.input_count 
-                << ", " << s.output_count
-                << ", dx=" << s.dx 
-                << ", dz=" << s.dz 
-                << " ]] uses inner codes with distance"
-                << " dx = " << idx 
-                << ", dz = " << idz
-                << "\tphysical qubit overhead = " << p
-                << "\n";
-    
-    return p;
-    */
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-FIDELITY_RESULT
-compute_application_fidelity(uint64_t scale_to_inst, sim::CLIENT* c, sim::COMPUTE_SUBSYSTEM* cs)
-{
-    /*
-    std::vector<double> log_success_prob;
-
-    // scale factor for all calculations
-    const double scale = mean(scale_to_inst, c->s_unrolled_inst_done);
-
-    // Compute subsystem contribution
-    double sc_error_rate_per_d_cycles = sim::configuration::surface_code_logical_error_rate(cs->code_distance, sim::GL_PHYSICAL_ERROR_RATE);
-    double cs_error_per_d_cycles = 1.0 - std::pow(1.0-sc_error_rate_per_d_cycles, cs->local_memory_capacity);
-    double cs_scaled_cycles = scale * c->s_cycle_complete;
-    double cs_log_success_prob = mean(cs_scaled_cycles, cs->code_distance) * std::log(1.0-cs_error_per_d_cycles);
-    log_success_prob.push_back(cs_log_success_prob);
-
-    // Memory subsystem contribution
-    double memory_log_success_prob{0.0};
-    for (const auto* s : cs->memory_hierarchy()->storages())
-    {
-        // compute final simulation cycle for client `c`
-        auto final_cycle = sim::convert_cycles_between_frequencies(c->s_cycle_complete, cs->freq_khz, s->freq_khz);
-        double error_rate_per_d_cycles = sim::configuration::bivariate_bicycle_code_block_error_rate(s->code_distance, sim::GL_PHYSICAL_ERROR_RATE);
-        double scaled_cycles = scale * final_cycle;
-
-        // also handle errors from memory accesses (the surgery + automorphism operations)
-        double scaled_surgery_ops = s->s_surgery_operations * scale;
-        double error_rate_per_surgery_op = (100+10) * error_rate_per_d_cycles; // 100x error is from surgery,
-                                                                               // 10x is from automorphism
-
-        double lgs = mean(scaled_cycles, s->code_distance) * std::log(1.0-error_rate_per_d_cycles) 
-                     + scaled_surgery_ops * std::log(1.0-error_rate_per_surgery_op);
-        memory_log_success_prob += lgs;
-    }
-
-    if (cs->is_ed_in_use())
-    {
-        // handle affects of entanglement distillation -- probability of teleportation failure:
-        for (const auto* p : cs->entanglement_distillation_units().back())
-            memory_log_success_prob += p->s_consumed * scale * std::log(1.0 - p->output_error_probability);
-    }
-
-    log_success_prob.push_back(memory_log_success_prob);
-
-    // Magic state contribution
-    const auto& f = cs->top_level_t_factories();
-    double mean_t_error_probability = std::transform_reduce(f.begin(), f.end(), double{0.0}, std::plus<double>{},
-                                                    [] (const auto* x) { return x->output_error_probability; }) / f.size();
-    double scaled_t_count = scale * c->s_t_gates_done;
-    double t_log_success_prob = scaled_t_count * std::log(1.0 - mean_t_error_probability);
-
-    // finally, compute the probability that nothing fails using `log_success_prob`
-    double log_fidelity = std::reduce(log_success_prob.begin(), log_success_prob.end(), 0.0);
-    return FIDELITY_RESULT{
-                std::exp(log_fidelity),  // total fidelity
-                std::exp(cs_log_success_prob),
-                std::exp(memory_log_success_prob),
-                std::exp(t_log_success_prob)
-            };
-
     */
 }
 

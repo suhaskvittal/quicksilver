@@ -47,6 +47,20 @@ public:
     enum class STALL_TYPE { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
     using stall_monitor_type = STALL_MONITOR<static_cast<size_t>(STALL_TYPE::SIZE), STALL_TYPE>;
 
+    /*
+     * Fidelity output type
+     * */
+    struct fidelity_data_type
+    {
+        // total application fidelity
+        double overall{};
+
+        // breakdown of fidelity by component:
+        double compute{};
+        double mem{};
+        double rdr{};
+    };
+
     uint64_t cycles_without_progress{0};
 
     const size_t   concurrent_clients;
@@ -116,6 +130,13 @@ public:
      * stats.
      * */
     void stop_simulation();
+
+    /*
+     * Estimates application fidelity for given client. As the simulator does not
+     * typically evaluate the entire application, the user should supply the total
+     * number of instructions in the program so we can scale results accordingly.
+     * */
+    fidelity_data_type application_fidelity(int client_id, uint64_t scale_to_inst, double p) const;
 
     COMPUTE_SUBSYSTEM* compute_subsystem() const;
     const std::vector<CLIENT*>& clients() const;
