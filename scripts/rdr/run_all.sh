@@ -11,8 +11,11 @@ EXPERIMENTS=(
     sim_baseline_tr_sens
     sim_rltp_tr_sens
     sim_rdr_tr_sens
-    sim_rltp_9_11
-    sim_rdr_with_rltp
+#   sim_rltp_9_11
+#   sim_rdr_with_rltp
+    sim_baseline_na
+    sim_rltp_na
+    sim_rdr_na
 )
 
 rm commands.out

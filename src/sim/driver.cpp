@@ -242,7 +242,8 @@ DRIVER::application_fidelity(int id, uint64_t scale_to_inst, double p) const
         double ler_per_d_cycles = configuration::surface_code_logical_error_rate(d, p);
 
         lg_rdr_f = reqs * mean(mean_cycles_per_req, d) * std::log(1 - ler_per_d_cycles)
-                    + reqs * t_gates_per_req * std::log(1 - t_infidelity)
+                    + 0.5 * reqs * t_gates_per_req * std::log(1 - t_infidelity) // we need to multiply by 0.5 to avoid
+                                                                                // double counting with `lg_compute_f`
                     + reqs * mean(mean_idle_time_per_req, d) * std::log(1 - ler_per_d_cycles);
     }
 

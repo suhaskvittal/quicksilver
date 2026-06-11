@@ -111,7 +111,9 @@ main(int argc, char* argv[])
                     regime, "T")
         .optional("", "--total-program-instructions", 
                     "Total instructions in the program. Used for resource estimates. Does not affect performance.",
-                    total_inst, 1'000'000'000)
+                    total_inst, 1'000'000'000ll)
+
+        .optional("-na", "--neutral-atom", "Operate as neutral atom processor", sim::GL_OPERATE_AS_NEUTRAL_ATOM, false)
 
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
@@ -277,18 +279,37 @@ main(int argc, char* argv[])
      * */
 
     const size_t sc_footprint = sim::configuration::surface_code_physical_qubit_count(compute_code_distance);
-    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
-    const size_t program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
-    // RLTP physical qubit overheads:
-    const size_t rltp_footprint = (11*sim::GL_RLTP_DEGREE)/2 * sc_footprint;
-    // RDR phsyical qubit overheads:
-    const size_t rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
-                                          ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
-                                                * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
-                                          : 0;
-    const size_t rdr_footprint = sim::GL_RDR_ENABLED
-                                    ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
-                                    : 0;
+    size_t program_active_memory_footprint,
+           rltp_footprint,
+           rdr_storage_overhead,
+           rdr_footprint;
+    if (sim::GL_OPERATE_AS_NEUTRAL_ATOM)
+    {
+        // assume that all operations do not use routing space: we only use
+        program_active_memory_footprint = compute_local_memory_capacity * sc_footprint;
+        rltp_footprint = 3*sim::GL_RLTP_DEGREE*sc_footprint;
+
+        assert(sim::GL_RDR_COMPLETION_BUFFER_CAPACITY == 0);  // do not use completion buffer with NA
+        rdr_storage_overhead = 0;
+        rdr_footprint = sim::GL_RDR_CAPACITY*sc_footprint;
+    }
+    else
+    {
+        // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
+        program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+        // RLTP physical qubit overheads:
+        rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
+                                    sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
+                                 ) * sc_footprint;
+        // RDR phsyical qubit overheads:
+        rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+                                  ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
+                                        * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
+                                  : 0;
+        rdr_footprint = sim::GL_RDR_ENABLED
+                            ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+                            : 0;
+    }
     const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
 
     std::cout << "COMPUTE_FOOTPRINT\n";
@@ -309,7 +330,11 @@ main(int argc, char* argv[])
                                                         [sc_footprint] (const auto* m)
                                                         {
                                                             size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
-                                                            size_t routing_overhead = 0.5*m->num_blocks*sc_footprint;
+                                                            size_t routing_overhead;
+                                                            if (sim::GL_OPERATE_AS_NEUTRAL_ATOM)
+                                                                routing_overhead = 0;
+                                                            else
+                                                                routing_overhead = 0.5*m->num_blocks*sc_footprint;
                                                             return memory_overhead + routing_overhead;
                                                         });
     
@@ -322,55 +347,15 @@ main(int argc, char* argv[])
     const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint + ms_alloc.physical_qubit_count;
     print_stat_line(std::cout, "TOTAL_FOOTPRINT", total_footprint);
 
-    auto fidelity = driver->application_fidelity(0, 1'000'000'000ull, 1e-3);
+    auto fidelity = driver->application_fidelity(0, total_inst, sim::GL_PHYSICAL_ERROR_RATE);
     std::cout << "FIDELITY\n";
     print_stat_line(std::cout, "    OVERALL", fidelity.overall);
     print_stat_line(std::cout, "    COMPUTE", fidelity.compute);
     print_stat_line(std::cout, "    MEMORY", fidelity.mem);
     print_stat_line(std::cout, "    RDR", fidelity.rdr);
 
-//  print_stat_line(std::cout, "COMPUTE_PHYSICAL_QUBITS", compute_physical_qubits);
-//  print_stat_line(std::cout, "MEMORY_PHYSICAL_QUBITS", memory_physical_qubits);
-
-//  if (use_remote_memory)
-//      print_stat_line(std::cout, "ED_PHYSICAL_QUBITS", ed_alloc.physical_qubit_count);
-
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
-
-    /*
-    if (use_remote_memory)
-    {
-        uint64_t total_consumed_physical_epr_pairs = 
-            std::transform_reduce(ed_alloc.producers[0].begin(), ed_alloc.producers[0].end(), uint64_t{0},
-                                        std::plus<uint64_t>{},
-                                        [] (const auto* _p)
-                                        {
-                                            const auto* p = static_cast<const sim::producer::ENT_DISTILLATION*>(_p);
-                                            return p->s_physical_epr_pairs_consumed;
-                                        });
-        double physical_epr_bw = mean(total_consumed_physical_epr_pairs,
-                                        compute_subsystem->current_cycle() / (1e3*compute_subsystem->freq_khz));
-        print_stat_line(std::cout, "ED_BANDWIDTH_MAX_PER_S", ed_alloc.estimated_throughput);
-        print_stat_line(std::cout, "PHYSICAL_EPR_PAIRS_CONSUMED", total_consumed_physical_epr_pairs);
-        print_stat_line(std::cout, "PHYSICAL_EPR_BANDWIDTH", physical_epr_bw);
-    }
-    */
-
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
-
-    /* Estimate logical error rate */
-
-    /*
-    for (auto* c : compute_subsystem->clients())
-    {
-        auto f = compute_application_fidelity(total_inst, c, compute_subsystem);
-        std::cout << "CLIENT_" << static_cast<int>(c->id) << "_FIDELITY\n";
-        print_stat_line(std::cout, "    OVERALL", f.overall);
-        print_stat_line(std::cout, "    COMPUTE_SUBSYSTEM", f.compute_subsystem);
-        print_stat_line(std::cout, "    MEMORY_SUBSYSTEM", f.memory_subsystem);
-        print_stat_line(std::cout, "    MAGIC_STATE", f.magic_state);
-    }
-    */
 
     /* cleanup simulation */
 

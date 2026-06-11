@@ -58,7 +58,7 @@ if experiment == 'sim_rdr':
 if experiment == 'sim_rltp':
     for w in workload_list():
         for f in range(30000, 80000, 5000):
-            for rltp in [2,4,6]:
+            for rltp in [4,6]:
                 _f = f//1000
                 run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k', 'eif',
                                 inst_limit=SIM_INST_COUNT,
@@ -74,7 +74,7 @@ if experiment == 'sim_rdr_fixed_lookahead':
     for w in workload_list():
         F = 50000
         for ld in [16, 32, 64, 128, 256]:
-            run_quicksilver(w, PROJECT, f'rdr_f{F//1000}_fxld{ld}', 'eif_rdr',
+            run_quicksilver(w, PROJECT, f'rdr_f{F//1000}k_fxld{ld}', 'eif_rdr',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=4,
                             total_program_inst=get_total_inst_count_for_workload(w),
@@ -104,21 +104,21 @@ if experiment == 'sim_baseline_tr_sens':
                                 kwargs={'--reaction-time': tr})
 
 if experiment == 'sim_rltp_tr_sens':
-    RLTP = 4
     for w in workload_list():
-        for tr in [1, 23]:
-            for f in range(30000, 80000, 5000):
-                _f = f//1000
-                run_quicksilver(w, PROJECT, f'rltp_{RLTP}_f{_f}k_tr{tr}', 'eif',
-                                inst_limit=SIM_INST_COUNT,
-                                active_set_capacity=4,
-                                total_program_inst=get_total_inst_count_for_workload(w),
-                                print_progress=PRINT_PROGRESS,
-                                factory_budget=f,
-                                kwargs={
-                                    '--rltp-degree': RLTP,
-                                    '--reaction-time': tr
-                                })
+        for rltp in [4, 6]:
+            for tr in [1, 23]:
+                for f in range(30000, 80000, 5000):
+                    _f = f//1000
+                    run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k_tr{tr}', 'eif',
+                                    inst_limit=SIM_INST_COUNT,
+                                    active_set_capacity=4,
+                                    total_program_inst=get_total_inst_count_for_workload(w),
+                                    print_progress=PRINT_PROGRESS,
+                                    factory_budget=f,
+                                    kwargs={
+                                        '--rltp-degree': rltp,
+                                        '--reaction-time': tr
+                                    })
 
 if experiment == 'sim_rdr_tr_sens':
     for w in workload_list():
@@ -175,4 +175,59 @@ if experiment == 'sim_rdr_with_rltp':
                                 '--rdr-degree': 4,
                                 '--rdr-completion-buffer-capacity': 4,
                                 '--rltp-degree': 4
+                            })
+
+if experiment == 'sim_baseline_na':
+    for w in workload_list():
+        for f in range(300_000, 1_000_000, 100_000):
+            _f = f//1000
+            run_quicksilver(w, PROJECT, f'baseline_f{_f}k_na', 'eif',
+                            inst_limit=SIM_INST_COUNT,
+                            active_set_capacity=4,
+                            total_program_inst=get_total_inst_count_for_workload(w),
+                            print_progress=PRINT_PROGRESS,
+                            factory_budget=f,
+                            kwargs={
+                                # for neutral atom setup, set reaction time to 0 as the cycle time
+                                # is much, much larger than decoder reaction time
+                                '-na': '',
+                                '--reaction-time': 0
+                            })
+
+if experiment == 'sim_rltp_na':
+    for w in workload_list():
+        for f in range(300_000, 1_000_000, 100_000):
+            for rltp in [20, 40]:
+                _f = f//1000
+                run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k_na', 'eif',
+                                inst_limit=SIM_INST_COUNT,
+                                active_set_capacity=4,
+                                total_program_inst=get_total_inst_count_for_workload(w),
+                                print_progress=PRINT_PROGRESS,
+                                factory_budget=f,
+                                kwargs={
+                                    '--rltp-degree': rltp,
+                                    '-na': '',
+                                    '--reaction-time': 0
+                                })
+
+if experiment == 'sim_rdr_na':
+    for w in workload_list():
+        for f in range(300_000, 1_000_000, 100_000):
+            _f = f//1000
+            run_quicksilver(w, PROJECT, f'rdr_f{_f}k_na', 'eif_rdr',
+                            inst_limit=SIM_INST_COUNT,
+                            active_set_capacity=4,
+                            total_program_inst=get_total_inst_count_for_workload(w),
+                            print_progress=PRINT_PROGRESS,
+                            factory_budget=f,
+                            kwargs={
+                                '-rdr': 1,
+                                '--rdr-capacity': 4,
+                                '--rdr-start-layer': 2,
+                                '--rdr-lookahead-depth': 16,
+                                '--rdr-degree': 4,
+                                '--rdr-completion-buffer-capacity': 0,
+                                '-na': '',
+                                '--reaction-time': 0
                             })
