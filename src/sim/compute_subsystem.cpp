@@ -341,7 +341,7 @@ bool
 COMPUTE_SUBSYSTEM::rdr_simulate_store(QUBIT* q)
 {
     // we should not be using a completion buffer on a neutral atom system.
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (GL_OPERATE_AS_NEUTRAL_ATOM)
         std::cerr << "COMPUTE_SUBSYSTEM::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
 
     const size_t d = code_distance;
@@ -389,7 +389,7 @@ bool
 COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
 {
     // we should not be using a completion buffer on a neutral atom system.
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (GL_OPERATE_AS_NEUTRAL_ATOM)
         std::cerr << "COMPUTE_SUBSYSTEM::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
 
     const size_t d = code_distance;

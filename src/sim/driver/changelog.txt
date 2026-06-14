@@ -1,0 +1,7 @@
+Since initial MICRO submission:
+1. Adaptive RDR degree: coverage-based
+2. Cost of rotation is timeliness-aware, latency estimatino of rotation is rotation aware
+3. Requests are killed if the current cycle is past their expected start cycle
+4. Lookahead incremented when request cannot be found, decremented when request is invalidated in fifo.
+5. Min cost scaling for request is 4x instead of 2x
+6. RDR degree is 1 instead of 4
