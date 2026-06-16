@@ -98,6 +98,8 @@ main(int argc, char* argv[])
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
+    double oc_factory_readout_latency_fraction;
+
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
@@ -137,6 +139,7 @@ main(int argc, char* argv[])
                         4)
         .optional("", "--rdr-fixed-lookahead", "Fix RDR lookahead layers", sim::GL_RDR_FIXED_LOOKAHEAD, false)
         .optional("", "--rdr-cost-scale", "RDR Cost Multiplier", sim::GL_RDR_COST_SCALE, 4.0)
+        .optional("", "--rdr-inv-threshold", "RDR invalidation threshold", sim::GL_RDR_INV_THRESHOLD, 0.75)
 
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
@@ -153,6 +156,13 @@ main(int argc, char* argv[])
          * */
         .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
+
+        /*
+         * These are parameters for reducing readout latency
+         * */
+        .optional("", "--factory-readout-latency-fraction", 
+                    "Percentage of readout latency to retain", 
+                    oc_factory_readout_latency_fraction, 1.0)
 
         .parse(argc, argv);
 
@@ -185,6 +195,7 @@ main(int argc, char* argv[])
     /* initialize magic state factories */
 
     auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
+    ms_specs.back().cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_factory_readout_latency_fraction*800 ));
     auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
 
     /* initialize memory subsystem */

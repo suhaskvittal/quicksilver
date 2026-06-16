@@ -128,7 +128,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
             continue;
         if (r.done)
             continue;
-        if (GL_RLTP_DEGREE == 0)
+        if (GL_RLTP_DEGREE == 0 || magic_states_avail < GL_RLTP_DEGREE)
         {
             inst_ptr uop = r.inst->current_uop();
             auto result = compute_subsystem_->execute_instruction(uop, {r.pinned_qubit});
@@ -138,10 +138,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
         }
         else
         {
-            size_t degree = std::min(static_cast<size_t>(GL_RLTP_DEGREE), magic_states_avail-1);
-            if (r.interrupted)
-                degree = GL_RLTP_DEGREE;
-            auto result = compute_subsystem_->do_rotation_via_rltp(r.inst, r.pinned_qubit, degree);
+            auto result = compute_subsystem_->do_rotation_via_rltp(r.inst, r.pinned_qubit, GL_RLTP_DEGREE);
             progress += result.progress;
             if (result.progress > 0 && r.inst->uops_retired() == r.inst->uop_count())
                 retire_request(r);
@@ -338,7 +335,7 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
         assert(!a_it->done);
 
         const size_t progress = a_it->inst->uops_retired();
-        if (progress < 0.25*a_it->inst->uop_count())
+        if (progress < GL_RDR_INV_THRESHOLD*a_it->inst->uop_count())
         {
             // kill this request:
             free_qubits_.push_back(a_it->pinned_qubit);

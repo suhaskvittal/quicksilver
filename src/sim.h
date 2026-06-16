@@ -85,6 +85,7 @@ extern int64_t GL_RDR_DEGREE;
 extern int64_t GL_RDR_COMPLETION_BUFFER_CAPACITY;
 extern bool GL_RDR_FIXED_LOOKAHEAD;
 extern double GL_RDR_COST_SCALE;
+extern double GL_RDR_INV_THRESHOLD;
 
 constexpr client_id_type RDR_CLIENT_ID{-47};
 
