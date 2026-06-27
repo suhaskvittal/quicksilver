@@ -14,7 +14,7 @@
 ////////////////////////////////////////////////////////////
 
 /*
- * `small_vector<T, N>` is a small-buffer-optimized array.
+ * `SmallVector<T, N>` is a small-buffer-optimized array.
  *
  * Elements 0..N-1 are stored inline (no heap allocation).
  * For size > N, a heap buffer is allocated. The discriminant
@@ -23,7 +23,7 @@
  * T must be trivially copyable (e.g., an integer type).
  * */
 template <class T, size_t N>
-class small_vector
+class SmallVector
 {
 private:
     size_t size_{0};
@@ -37,16 +37,16 @@ public:
      * Initialize with given size. Values of container
      * are not cleared out.
      * */
-    small_vector(size_t size);
+    SmallVector(size_t size);
 
-    small_vector(std::initializer_list<T> il);
-    small_vector(const small_vector& other);
-    small_vector& operator=(const small_vector& other);
+    SmallVector(std::initializer_list<T> il);
+    SmallVector(const SmallVector& other);
+    SmallVector& operator=(const SmallVector& other);
 
-    template <class ITER>
-    small_vector(ITER begin, ITER end);
+    template <class Iter>
+    SmallVector(Iter begin, Iter end);
 
-    ~small_vector();
+    ~SmallVector();
 
     auto* data(this auto& self)              { return self.is_heap() ? self.heap_ : self.inline_; }
     auto& operator[](this auto& self, size_t i) { return self.data()[i]; }

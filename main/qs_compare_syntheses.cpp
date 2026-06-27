@@ -35,8 +35,8 @@
 namespace
 {
 
-using fpa_type = INSTRUCTION::fpa_type;
-using urotseq_type = INSTRUCTION::urotseq_type;
+using fpa_type = Instruction::fpa_type;
+using urotseq_type = Instruction::urotseq_type;
 
 constexpr size_t LUT_COUNT_PER_SIGN{12};
 
@@ -48,7 +48,7 @@ constexpr size_t LUT_COUNT_PER_SIGN{12};
  * */
 constexpr double MIN_RESOLVABLE_MAGNITUDE{1e-11};
 
-struct lut_entry
+struct LUTEntry
 {
     double       angle{};
     urotseq_type urotseq;
@@ -59,9 +59,9 @@ struct lut_entry
  * src/compiler/program/rotation_manager.cpp:
  *  - 8B floating point angle
  *  - 2B urotseq byte count
- *  - urotseq data (one byte per gate, cast to INSTRUCTION::TYPE)
+ *  - urotseq data (one byte per gate, cast to Instruction::Type)
  * */
-std::vector<lut_entry>
+std::vector<LUTEntry>
 read_lut_file(const std::string& file_path)
 {
     // Matches UROTSEQ_CAPACITY in rotation_manager.cpp; the longest stored
@@ -71,7 +71,7 @@ read_lut_file(const std::string& file_path)
     generic_strm_type strm;
     generic_strm_open(strm, file_path, "rb");
 
-    std::vector<lut_entry> out;
+    std::vector<LUTEntry> out;
 
     double   angle;
     uint16_t urotseq_byte_count;
@@ -93,9 +93,9 @@ read_lut_file(const std::string& file_path)
 
         urotseq_type urotseq(urotseq_byte_count);
         std::transform(urotseq_bytes, urotseq_bytes+urotseq_byte_count, urotseq.begin(),
-                        [] (uint8_t b) { return static_cast<INSTRUCTION::TYPE>(b); });
+                        [] (uint8_t b) { return static_cast<Instruction::Type>(b); });
 
-        out.push_back(lut_entry{angle, std::move(urotseq)});
+        out.push_back(LUTEntry{angle, std::move(urotseq)});
     }
 
     generic_strm_close(strm);

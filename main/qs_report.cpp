@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
         if (inst_count % print_progress == 0)
             std::cout << "progress: " << inst_count << " instructions read\n";
 
-        INSTRUCTION* inst = read_instruction_from_stream(istrm);
+        Instruction* inst = read_instruction_from_stream(istrm);
         if (inst == nullptr)
             break;
 
@@ -88,7 +88,7 @@ int main(int argc, char* argv[])
 
             t_gates_from_ccx += TOFFOLI_T_GATE_COUNT;
         }
-        else if (inst->type == INSTRUCTION::TYPE::H || is_s_like_instruction(inst->type))
+        else if (inst->type == Instruction::Type::H || is_s_like_instruction(inst->type))
         {
         }
         else

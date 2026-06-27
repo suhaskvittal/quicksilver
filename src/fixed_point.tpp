@@ -8,20 +8,20 @@
 #include <numeric>
 #include <sstream>
 
-#define TEMPL_PARAMS    template <size_t W, class WORD_TYPE>
-#define TEMPL_CLASS     FIXED_POINT<W, WORD_TYPE>
+#define TEMPL_PARAMS    template <size_t W, class Word>
+#define TemplClass     FixedPoint<W, Word>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <size_t _W>
-constexpr TEMPL_CLASS::FIXED_POINT(FIXED_POINT<_W> x)
+constexpr TemplClass::FixedPoint(FixedPoint<_W> x)
 {
     std::copy(x.get_words_ref().begin(), x.get_words_ref().end(), backing_array_.begin());
 }
 
-TEMPL_PARAMS template <class ITER_TYPE>
-constexpr TEMPL_CLASS::FIXED_POINT(ITER_TYPE begin, ITER_TYPE end)
+TEMPL_PARAMS template <class IterType>
+constexpr TemplClass::FixedPoint(IterType begin, IterType end)
 {
     std::copy(begin, end, backing_array_.begin());
 }
@@ -30,7 +30,7 @@ constexpr TEMPL_CLASS::FIXED_POINT(ITER_TYPE begin, ITER_TYPE end)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::set(size_t idx, bool value)
+TemplClass::set(size_t idx, bool value)
 {
     auto [word_idx, bit_idx] = get_word_and_bit_idx(idx);
     if (value)
@@ -40,20 +40,20 @@ TEMPL_CLASS::set(size_t idx, bool value)
 }
 
 TEMPL_PARAMS constexpr bool
-TEMPL_CLASS::test(size_t idx) const
+TemplClass::test(size_t idx) const
 {
     auto [word_idx, bit_idx] = get_word_and_bit_idx(idx);
     return (backing_array_[word_idx] >> bit_idx) & 1;
 }
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::set_word(size_t idx, word_type w)
+TemplClass::set_word(size_t idx, word_type w)
 {
     backing_array_[idx] = w;
 }
 
-TEMPL_PARAMS constexpr typename TEMPL_CLASS::word_type
-TEMPL_CLASS::test_word(size_t idx) const
+TEMPL_PARAMS constexpr typename TemplClass::word_type
+TemplClass::test_word(size_t idx) const
 {
     return backing_array_[idx];
 }
@@ -61,8 +61,8 @@ TEMPL_CLASS::test_word(size_t idx) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-TEMPL_PARAMS template <class XFORM_TYPE> constexpr void
-TEMPL_CLASS::transform(const XFORM_TYPE& xform, size_t from, size_t to)
+TEMPL_PARAMS template <class Xform> constexpr void
+TemplClass::transform(const Xform& xform, size_t from, size_t to)
 {
     auto begin = backing_array_.begin() + from,
          end = backing_array_.begin() + to;
@@ -74,7 +74,7 @@ TEMPL_CLASS::transform(const XFORM_TYPE& xform, size_t from, size_t to)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::lshft(int n)
+TemplClass::lshft(int n)
 {
     if (n < 0)
         return rshft(-n);
@@ -93,7 +93,7 @@ TEMPL_CLASS::lshft(int n)
 }
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::rshft(int n)
+TemplClass::rshft(int n)
 {
     if (n < 0)
         return lshft(-n);
@@ -112,7 +112,7 @@ TEMPL_CLASS::rshft(int n)
 }
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::lshft_w(int n)
+TemplClass::lshft_w(int n)
 {
     if (n < 0)
         return rshft_w(-n);
@@ -123,7 +123,7 @@ TEMPL_CLASS::lshft_w(int n)
 }
 
 TEMPL_PARAMS constexpr void
-TEMPL_CLASS::rshft_w(int n)
+TemplClass::rshft_w(int n)
 {
     if (n < 0)
         return lshft_w(-n);
@@ -136,7 +136,7 @@ TEMPL_CLASS::rshft_w(int n)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS constexpr size_t
-TEMPL_CLASS::popcount() const
+TemplClass::popcount() const
 {
     size_t count = 0;
     for (auto w : backing_array_)
@@ -145,7 +145,7 @@ TEMPL_CLASS::popcount() const
 }
 
 TEMPL_PARAMS constexpr int
-TEMPL_CLASS::join_word_and_bit_idx(index_pair idx) const
+TemplClass::join_word_and_bit_idx(index_pair idx) const
 {
     if (idx.first < 0 || idx.second < 0)
         return -1;
@@ -153,8 +153,8 @@ TEMPL_CLASS::join_word_and_bit_idx(index_pair idx) const
         return idx.first * BITS_PER_WORD + idx.second;
 }
 
-TEMPL_PARAMS constexpr typename TEMPL_CLASS::index_pair
-TEMPL_CLASS::get_word_and_bit_idx(size_t idx) const
+TEMPL_PARAMS constexpr typename TemplClass::index_pair
+TemplClass::get_word_and_bit_idx(size_t idx) const
 {
     return {idx / BITS_PER_WORD, idx % BITS_PER_WORD};
 }
@@ -162,8 +162,8 @@ TEMPL_CLASS::get_word_and_bit_idx(size_t idx) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-TEMPL_PARAMS constexpr typename TEMPL_CLASS::index_pair
-TEMPL_CLASS::msb() const
+TEMPL_PARAMS constexpr typename TemplClass::index_pair
+TemplClass::msb() const
 {
     auto nz_it = std::find_if(backing_array_.rbegin(), backing_array_.rend(), [] (word_type w) { return w != 0; });
     if (nz_it == backing_array_.rend())
@@ -173,8 +173,8 @@ TEMPL_CLASS::msb() const
     return {word_idx, bit_idx};
 }
 
-TEMPL_PARAMS constexpr typename TEMPL_CLASS::index_pair
-TEMPL_CLASS::lsb() const
+TEMPL_PARAMS constexpr typename TemplClass::index_pair
+TemplClass::lsb() const
 {
     auto nz_it = std::find_if(backing_array_.begin(), backing_array_.end(), [] (word_type w) { return w != 0; });
     if (nz_it == backing_array_.end())
@@ -188,7 +188,7 @@ TEMPL_CLASS::lsb() const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS std::string
-TEMPL_CLASS::to_hex_string() const
+TemplClass::to_hex_string() const
 {
     std::stringstream ss;
 
@@ -215,13 +215,13 @@ TEMPL_CLASS::to_hex_string() const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS constexpr bool
-TEMPL_CLASS::operator==(const TEMPL_CLASS& other) const
+TemplClass::operator==(const TemplClass& other) const
 {
     return std::equal(backing_array_.begin(), backing_array_.end(), other.backing_array_.begin());
 }
 
 TEMPL_PARAMS constexpr bool
-TEMPL_CLASS::operator!=(const TEMPL_CLASS& other) const
+TemplClass::operator!=(const TemplClass& other) const
 {
     return !(*this == other);
 }
@@ -230,4 +230,4 @@ TEMPL_CLASS::operator!=(const TEMPL_CLASS& other) const
 ////////////////////////////////////////////////////////////
 
 #undef TEMPL_PARAMS
-#undef TEMPL_CLASS
+#undef TemplClass

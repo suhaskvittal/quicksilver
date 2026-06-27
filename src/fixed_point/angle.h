@@ -11,30 +11,30 @@
 #include <string>
 
 template <size_t W>
-using FPA_TYPE = FIXED_POINT<W, uint64_t>;
+using FPAType = FixedPoint<W, uint64_t>;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W=512> constexpr FPA_TYPE<W>  convert_float_to_fpa(double, double tol=1e-18);
-template <size_t W>     constexpr double       convert_fpa_to_float(const FPA_TYPE<W>&);
+template <size_t W=512> constexpr FPAType<W>  convert_float_to_fpa(double, double tol=1e-18);
+template <size_t W>     constexpr double       convert_fpa_to_float(const FPAType<W>&);
 
 namespace fpa
 {
 
-template <size_t W> constexpr void negate_inplace(FPA_TYPE<W>&);
-template <size_t W> constexpr void add_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
-template <size_t W> constexpr void sub_inplace(FPA_TYPE<W>&, FPA_TYPE<W>);
-template <size_t W> constexpr void scalar_mul_inplace(FPA_TYPE<W>&, int64_t);
+template <size_t W> constexpr void negate_inplace(FPAType<W>&);
+template <size_t W> constexpr void add_inplace(FPAType<W>&, FPAType<W>);
+template <size_t W> constexpr void sub_inplace(FPAType<W>&, FPAType<W>);
+template <size_t W> constexpr void scalar_mul_inplace(FPAType<W>&, int64_t);
 
-template <size_t W> constexpr FPA_TYPE<W> negate(FPA_TYPE<W>);
-template <size_t W> constexpr FPA_TYPE<W> add(FPA_TYPE<W>, FPA_TYPE<W>);
-template <size_t W> constexpr FPA_TYPE<W> sub(FPA_TYPE<W>, FPA_TYPE<W>);
-template <size_t W> constexpr FPA_TYPE<W> scalar_mul(FPA_TYPE<W>, int64_t);
+template <size_t W> constexpr FPAType<W> negate(FPAType<W>);
+template <size_t W> constexpr FPAType<W> add(FPAType<W>, FPAType<W>);
+template <size_t W> constexpr FPAType<W> sub(FPAType<W>, FPAType<W>);
+template <size_t W> constexpr FPAType<W> scalar_mul(FPAType<W>, int64_t);
 
-enum class STRING_FORMAT { PRETTY, GRIDSYNTH, FORCE_DECIMAL, GRIDSYNTH_CPP };
+enum class StringFormat { PRETTY, GRIDSYNTH, FORCE_DECIMAL, GRIDSYNTH_CPP };
 
-template <size_t W> std::string to_string(const FPA_TYPE<W>&, STRING_FORMAT=STRING_FORMAT::PRETTY);
+template <size_t W> std::string to_string(const FPAType<W>&, StringFormat=StringFormat::PRETTY);
 
 } // namespace fpa
 

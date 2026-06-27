@@ -15,13 +15,13 @@ namespace memory_scheduler
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class SCHEDULER_IMPL> stats_type
-run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL& scheduler, config_type conf)
+template <class SchedulerImpl> Stats
+run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& scheduler, Config conf)
 {
-    stats_type stats;
+    Stats stats;
 
     // read number of qubits from `istrm`
-    IO_UTILITY io(istrm, ostrm);
+    IOUtility io(istrm, ostrm);
 
     // initialize `active_set`:
     active_set_type active_set;

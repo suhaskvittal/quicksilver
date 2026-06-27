@@ -25,7 +25,7 @@ namespace
 {
 
 void
-print_stats(std::ostream& out, const PROGRAM_INFO::stats_type& stats)
+print_stats(std::ostream& out, const ProgramInfo::stats_type& stats)
 {
     // print statistics:
     print_stat_line(out, "TOTAL_GATE_COUNT", stats.total_gate_count);
@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
         .parse(argc, argv);
 
     compiler::prog::rotation_manager_init();
-    auto stats = PROGRAM_INFO::read_from_file_and_write_to_binary(input_file, output_file, static_cast<uint64_t>(inst_limit));
+    auto stats = ProgramInfo::read_from_file_and_write_to_binary(input_file, output_file, static_cast<uint64_t>(inst_limit));
     std::cout << "DONE\n";
 
     if (stats_output_file.empty())

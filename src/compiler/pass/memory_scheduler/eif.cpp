@@ -18,8 +18,8 @@ namespace memory_scheduler
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-result_type
-eif(const active_set_type& active_set, const dag_ptr& dag, config_type conf)
+Result
+eif(const active_set_type& active_set, const dag_ptr& dag, Config conf)
 {
     active_set_type target_active_set;
     target_active_set.reserve(conf.active_set_capacity);

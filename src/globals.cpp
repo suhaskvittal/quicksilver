@@ -21,13 +21,13 @@ namespace sim
 {
 
 bool
-QUBIT::operator==(const QUBIT& other) const
+Qubit::operator==(const Qubit& other) const
 {
     return (qubit_id == other.qubit_id) && (client_id == other.client_id);
 }
 
 std::string
-QUBIT::to_string() const
+Qubit::to_string() const
 {
     std::stringstream ss;
     ss << *this;
@@ -35,7 +35,7 @@ QUBIT::to_string() const
 }
 
 std::ostream&
-operator<<(std::ostream& out, const QUBIT& q)
+operator<<(std::ostream& out, const Qubit& q)
 {
     out << q.qubit_id << "(" << q.client_id << ")";
     return out;

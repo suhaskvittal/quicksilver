@@ -19,7 +19,7 @@ main(int argc, char* argv[])
 {
     std::string                            input_trace_file;
     std::string                            output_trace_file;
-    compiler::pass::memory_scheduler::config_type conf;
+    compiler::pass::memory_scheduler::Config conf;
     int64_t                                scheduler_impl_id;
 
     ARGPARSE()
@@ -41,7 +41,7 @@ main(int argc, char* argv[])
     generic_strm_open(istrm, input_trace_file, "rb");
     generic_strm_open(ostrm, output_trace_file, "wb");
 
-    compiler::pass::memory_scheduler::stats_type stats;
+    compiler::pass::memory_scheduler::Stats stats;
     auto compile_start = std::chrono::high_resolution_clock::now();
     if (scheduler_impl_id == 0)
         stats = compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);

@@ -21,7 +21,7 @@ namespace prog
  *
  * This rotation sequence is optimized using TACO (H-gate elision and gate coalescing).
  * */
-INSTRUCTION::urotseq_type synthesize_rotation(const INSTRUCTION::fpa_type&, ssize_t precision, bool verbose);
+Instruction::urotseq_type synthesize_rotation(const Instruction::fpa_type&, ssize_t precision, bool verbose);
 
 /*
  * Checks if the given urotseq implements the given rotation up-to the given precision.
@@ -29,7 +29,7 @@ INSTRUCTION::urotseq_type synthesize_rotation(const INSTRUCTION::fpa_type&, ssiz
  *
  * If the urotseq is incorrect, then debug information is printed out to stderr.
  * */
-bool validate_urotseq(const INSTRUCTION::urotseq_type&, const INSTRUCTION::fpa_type&, ssize_t precision);
+bool validate_urotseq(const Instruction::urotseq_type&, const Instruction::fpa_type&, ssize_t precision);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

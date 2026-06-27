@@ -24,7 +24,7 @@ namespace pass
 /*
  * This is a utility class for managing IO during pass execution.
  * */
-class IO_UTILITY
+class IOUtility
 {
 public:
     constexpr static size_t OUTGOING_CAPACITY{16384};
@@ -42,13 +42,13 @@ private:
      * */
     fixed_buffer_type outgoing_buffer_;
 public:
-    IO_UTILITY(generic_strm_type& istrm, generic_strm_type& ostrm);
+    IOUtility(generic_strm_type& istrm, generic_strm_type& ostrm);
 
     /*
-     * Note: `IO_UTILITY` does not close either `istrm` or `ostrm`.
+     * Note: `IOUtility` does not close either `istrm` or `ostrm`.
      * It only drains `outgoing_buffer_` on deletion.
      * */
-    ~IO_UTILITY();
+    ~IOUtility();
 
     /*
      * Reads instructions from `istrm` and adds then to the DAG.
@@ -62,8 +62,8 @@ public:
      * */
     void write_instruction(DAG::inst_ptr);
 
-    template <class ITER>
-    void write_instructions(ITER begin, ITER end);
+    template <class Iter>
+    void write_instructions(Iter begin, Iter end);
 private:
     void drain_outgoing_buffer();
 };
@@ -72,11 +72,11 @@ private:
 ////////////////////////////////////////////////////////////
 
 /*
- * Implementation of `IO_UTILITY::write_instructions()`
+ * Implementation of `IOUtility::write_instructions()`
  * */
 
-template <class ITER> void
-IO_UTILITY::write_instructions(ITER begin, ITER end)
+template <class Iter> void
+IOUtility::write_instructions(Iter begin, Iter end)
 {
     size_t remaining_capacity = OUTGOING_CAPACITY - outgoing_buffer_.size();
     size_t d = std::distance(begin, end);

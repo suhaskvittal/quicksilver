@@ -5,8 +5,8 @@
 
 #include "argparse/argparse.h"
 #include "globals.h"
-#include "sim/configuration/allocator.h"
-#include "sim/configuration/allocator/impl.h"
+#include "perf_sim/configuration/allocator.h"
+#include "perf_sim/configuration/allocator/impl.h"
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -14,9 +14,9 @@
 namespace
 {
 
-using FACTORY_SPECIFICATION = sim::configuration::FACTORY_SPECIFICATION;
+using FactorySpecification = sim::configuration::FactorySpecification;
 
-constexpr FACTORY_SPECIFICATION CULTIVATION_D3
+constexpr FactorySpecification CULTIVATION_D3
 {
     .is_cultivation=true,
     .cycle_time_ns=1200,
@@ -27,7 +27,7 @@ constexpr FACTORY_SPECIFICATION CULTIVATION_D3
     .probability_of_success=0.2
 };
 
-constexpr FACTORY_SPECIFICATION CULTIVATION_D5
+constexpr FactorySpecification CULTIVATION_D5
 {
     .is_cultivation=true,
     .cycle_time_ns=1200,
@@ -38,7 +38,7 @@ constexpr FACTORY_SPECIFICATION CULTIVATION_D5
     .probability_of_success=0.02
 };
 
-constexpr FACTORY_SPECIFICATION DISTILLATION_15_TO_1
+constexpr FactorySpecification DISTILLATION_15_TO_1
 {
     .is_cultivation=false,
     .cycle_time_ns=1200,
@@ -70,7 +70,7 @@ main(int argc, char* argv[])
         .required("max-footprint", "Max number of physical qubits for allocation", footprint)
         .parse(argc, argv);
 
-    std::vector<FACTORY_SPECIFICATION> spec;
+    std::vector<FactorySpecification> spec;
     if (regime == "G")
     {
         spec.push_back(CULTIVATION_D5);

@@ -2,9 +2,9 @@ namespace std
 {
 
 template <>
-struct hash<INSTRUCTION::fpa_type>
+struct hash<Instruction::fpa_type>
 {
-    using value_type = INSTRUCTION::fpa_type;
+    using value_type = Instruction::fpa_type;
 
     size_t
     operator()(const value_type& x) const

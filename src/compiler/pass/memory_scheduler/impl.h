@@ -21,12 +21,12 @@ namespace memory_scheduler
 /*
  * EIF (Earliest Instructions First) scheduler policy.
  * */
-result_type eif(const active_set_type&, const dag_ptr&, config_type);
+Result eif(const active_set_type&, const dag_ptr&, Config);
 
 /*
  * HINT (High Intensity) scheduler policy.
  * */
-result_type hint(const active_set_type&, const dag_ptr&, config_type);
+Result hint(const active_set_type&, const dag_ptr&, Config);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

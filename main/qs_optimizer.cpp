@@ -18,7 +18,7 @@
 namespace
 {
 
-using result_type = compiler::pass::optimization::result_type;
+using Result = compiler::pass::optimization::Result;
 
 /*
  * This function does the following:
@@ -29,7 +29,7 @@ using result_type = compiler::pass::optimization::result_type;
  *  (4) The input stream is now updated to be the tmp file stream.
  * */
 template <class P>
-void run_pass(generic_strm_type&, const P&, result_type& running_result);
+void run_pass(generic_strm_type&, const P&, Result& running_result);
 
 }  // anon
 
@@ -53,8 +53,8 @@ main(int argc, char* argv[])
 
     compiler::prog::rotation_manager_init();
     
-    result_type total{};
-    result_type out;
+    Result total{};
+    Result out;
     size_t iter_idx{0};
     do
     {
@@ -63,7 +63,7 @@ main(int argc, char* argv[])
         // start timing this iteration:
         auto iter_start = std::chrono::high_resolution_clock::now();
 
-        out = result_type{};
+        out = Result{};
         /* passes start here */
         run_pass(istrm, compiler::pass::optimization::cancel_and_coalesce, out);
 
@@ -103,7 +103,7 @@ namespace
 {
 
 template <class P> void
-run_pass(generic_strm_type& istrm, const P& p, result_type& running_result)
+run_pass(generic_strm_type& istrm, const P& p, Result& running_result)
 {
     // create tmp file and call pass `p`
     generic_strm_type tmp_strm = tmpfile();

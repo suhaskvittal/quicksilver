@@ -4,13 +4,13 @@
  * */
 
 #define TEMPL_PARAMS template <class T, size_t N>
-#define TEMPL_CLASS  small_vector<T,N>
+#define TemplClass  SmallVector<T,N>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS
-TEMPL_CLASS::small_vector(size_t s)
+TemplClass::SmallVector(size_t s)
     :size_(s)
 {
     if (is_heap())
@@ -18,12 +18,12 @@ TEMPL_CLASS::small_vector(size_t s)
 }
 
 TEMPL_PARAMS
-TEMPL_CLASS::small_vector(std::initializer_list<T> il)
-    :small_vector(il.begin(), il.end())
+TemplClass::SmallVector(std::initializer_list<T> il)
+    :SmallVector(il.begin(), il.end())
 {}
 
 TEMPL_PARAMS
-TEMPL_CLASS::small_vector(const small_vector& other)
+TemplClass::SmallVector(const SmallVector& other)
     :size_(other.size_)
 {
     if (is_heap())
@@ -37,8 +37,8 @@ TEMPL_CLASS::small_vector(const small_vector& other)
     }
 }
 
-TEMPL_PARAMS template <class ITER>
-TEMPL_CLASS::small_vector(ITER begin, ITER end)
+TEMPL_PARAMS template <class Iter>
+TemplClass::SmallVector(Iter begin, Iter end)
     :size_(std::distance(begin, end))
 {
     if (is_heap())
@@ -52,8 +52,8 @@ TEMPL_CLASS::small_vector(ITER begin, ITER end)
     }
 }
 
-TEMPL_PARAMS TEMPL_CLASS&
-TEMPL_CLASS::operator=(const small_vector& other)
+TEMPL_PARAMS TemplClass&
+TemplClass::operator=(const SmallVector& other)
 {
     if (this == &other)
         return *this;
@@ -73,7 +73,7 @@ TEMPL_CLASS::operator=(const small_vector& other)
 }
 
 TEMPL_PARAMS
-TEMPL_CLASS::~small_vector()
+TemplClass::~SmallVector()
 {
     if (is_heap())
         delete[] heap_;
@@ -83,4 +83,4 @@ TEMPL_CLASS::~small_vector()
 ////////////////////////////////////////////////////////////
 
 #undef TEMPL_PARAMS
-#undef TEMPL_CLASS
+#undef TemplClass

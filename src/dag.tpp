@@ -10,8 +10,8 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> std::vector<DAG::inst_ptr>
-DAG::get_front_layer_if(const PRED& pred) const
+template <class Pred> std::vector<DAG::inst_ptr>
+DAG::get_front_layer_if(const Pred& pred) const
 {
     std::vector<inst_ptr> front_layer_insts;
     front_layer_insts.reserve(front_layer_.size());
@@ -24,8 +24,8 @@ DAG::get_front_layer_if(const PRED& pred) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class CALLBACK> void
-DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_layer, size_t max_layer) const
+template <class Callback> void
+DAG::for_each_instruction_in_layer_order(const Callback& callback, size_t min_layer, size_t max_layer) const
 {
     return _generic_operate_on_nodes_in_layer_order(
                         [&callback] (node_type* x, size_t layer) { callback(x->inst, layer); }, 
@@ -37,8 +37,8 @@ DAG::for_each_instruction_in_layer_order(const CALLBACK& callback, size_t min_la
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
-DAG::find_earliest_dependent_instruction_such_that(const PRED& pred, 
+template <class Pred> std::pair<typename DAG::inst_ptr, size_t>
+DAG::find_earliest_dependent_instruction_such_that(const Pred& pred, 
                                                     inst_ptr source, 
                                                     size_t min_layer,
                                                     size_t max_layer) const
@@ -51,8 +51,8 @@ DAG::find_earliest_dependent_instruction_such_that(const PRED& pred,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
-DAG::find_earliest_dependent_instruction_from_memoized_instruction_such_that(const PRED& pred, 
+template <class Pred> std::pair<typename DAG::inst_ptr, size_t>
+DAG::find_earliest_dependent_instruction_from_memoized_instruction_such_that(const Pred& pred, 
                                                                                 inst_ptr source, 
                                                                                 size_t min_layer,
                                                                                 size_t max_layer) const
@@ -65,8 +65,8 @@ DAG::find_earliest_dependent_instruction_from_memoized_instruction_such_that(con
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class PRED> std::pair<typename DAG::inst_ptr, size_t>
-DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, size_t min_layer, size_t max_layer) const
+template <class Pred> std::pair<typename DAG::inst_ptr, size_t>
+DAG::find_earliest_dependent_helper(const Pred& pred, node_type* source_node, size_t min_layer, size_t max_layer) const
 {
     iteration_generation_++;
     const size_t gen = iteration_generation_;
@@ -106,9 +106,9 @@ DAG::find_earliest_dependent_helper(const PRED& pred, node_type* source_node, si
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class CALLBACK> void
+template <class Callback> void
 DAG::_generic_operate_on_nodes_in_layer_order(this auto& self, 
-                                                const CALLBACK& callback, 
+                                                const Callback& callback, 
                                                 size_t min_layer, 
                                                 size_t max_layer)
 {

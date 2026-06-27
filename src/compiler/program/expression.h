@@ -21,43 +21,43 @@ namespace prog
 ////////////////////////////////////////////////////////////
 
 // Forward declarations
-struct EXPRESSION;
-struct VALUE_INFO;
+struct Expression;
+struct ValueInfo;
 
-// Operator enum (moved from EXPRESSION)
-enum class OPERATOR { ADD, SUBTRACT, MULTIPLY, DIVIDE };
+// Operator enum (moved from Expression)
+enum class Operator { ADD, SUBTRACT, MULTIPLY, DIVIDE };
 
 // Base types
-using expr_ptr = std::shared_ptr<EXPRESSION>;
+using expr_ptr = std::shared_ptr<Expression>;
 using generic_value_type = std::variant<int64_t, double, std::string, expr_ptr>;
 
-// Expression component types (flattened from EXPRESSION)
-struct EXPONENTIAL_VALUE
+// Expression component types (flattened from Expression)
+struct ExponentialValue
 {
     std::vector<generic_value_type> power_sequence;
     bool is_negated{false};
 };
 
-struct FACTOR
+struct Factor
 {
-    EXPONENTIAL_VALUE exponential_value;
-    OPERATOR operator_with_previous;
+    ExponentialValue exponential_value;
+    Operator operator_with_previous;
 };
 
-struct TERM
+struct Term
 {
-    std::vector<FACTOR> factors;
+    std::vector<Factor> factors;
 };
 
-struct TERM_ENTRY
+struct TermEntry
 {
-    TERM term;
-    OPERATOR operator_with_previous;
+    Term term;
+    Operator operator_with_previous;
 };
 
-struct EXPRESSION
+struct Expression
 {
-    std::vector<TERM_ENTRY> terms;
+    std::vector<TermEntry> terms;
 
     std::string to_string() const;
 };
@@ -66,10 +66,10 @@ struct EXPRESSION
 ////////////////////////////////////////////////////////////
 
 /*
- * Converts an `EXPRESSION` (symbolic) to an actual value
+ * Converts an `Expression` (symbolic) to an actual value
  * represented by either a `double` or fixed point type.
  * */
-VALUE_INFO evaluate_expression(const EXPRESSION&);
+ValueInfo evaluate_expression(const Expression&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

@@ -45,7 +45,7 @@ extern int64_t GL_USE_RDR_ISA;
 namespace sim
 {
 
-struct QUBIT
+struct Qubit
 {
     qubit_type     qubit_id{-1};
     client_id_type client_id{-1};
@@ -61,11 +61,11 @@ struct QUBIT
      * */
     bool last_operation_was_memory_access{false};
 
-    bool        operator==(const QUBIT&) const;
+    bool        operator==(const Qubit&) const;
     std::string to_string() const;
 };
 
-std::ostream& operator<<(std::ostream&, const QUBIT&);
+std::ostream& operator<<(std::ostream&, const Qubit&);
 
 }  // namespace sim
 

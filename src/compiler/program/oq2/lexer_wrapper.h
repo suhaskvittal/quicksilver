@@ -20,13 +20,13 @@
 
 #include "parser.tab.h"
 
-class OQ2_LEXER : public yyFlexLexer
+class OQ2Lexer : public yyFlexLexer
 {
 private:
     generic_strm_type* real_strm_p;
 public:
     // `_yyin` is unused.
-    OQ2_LEXER(std::istream& _yyin, generic_strm_type* _real_strm_p) 
+    OQ2Lexer(std::istream& _yyin, generic_strm_type* _real_strm_p) 
         :yyFlexLexer(_yyin, std::cout),
         real_strm_p(_real_strm_p)
     {}

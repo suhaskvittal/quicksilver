@@ -29,9 +29,9 @@ namespace
 
 std::string _generic_value_to_string(generic_value_type);
 
-std::string _op_to_string(OPERATOR);
-VALUE_INFO  _evaluate_expval(const EXPONENTIAL_VALUE&);
-VALUE_INFO  _evaluate_term(const TERM&);
+std::string _op_to_string(Operator);
+ValueInfo  _evaluate_expval(const ExponentialValue&);
+ValueInfo  _evaluate_term(const Term&);
 
 } // anon
 
@@ -39,7 +39,7 @@ VALUE_INFO  _evaluate_term(const TERM&);
 ////////////////////////////////////////////////////////////
 
 std::string
-EXPRESSION::to_string() const
+Expression::to_string() const
 {
     std::stringstream ss;
     for (size_t i = 0; i < terms.size(); ++i)
@@ -48,7 +48,7 @@ EXPRESSION::to_string() const
         const auto& entry = terms[i];
         const auto& op = entry.operator_with_previous;
         if (i > 0)
-            ss << (op == OPERATOR::ADD ? " + " : " - ");
+            ss << (op == Operator::ADD ? " + " : " - ");
 
         ss << "(";
         for (size_t j = 0; j < entry.term.factors.size(); ++j)
@@ -56,7 +56,7 @@ EXPRESSION::to_string() const
             const auto& factor = entry.term.factors[j];
             const auto& op2 = factor.operator_with_previous;
             if (j > 0)
-                ss << (op2 == OPERATOR::MULTIPLY ? " * " : "/ ");
+                ss << (op2 == Operator::MULTIPLY ? " * " : "/ ");
 
             if (factor.exponential_value.is_negated)
                 ss << "-";
@@ -79,19 +79,19 @@ EXPRESSION::to_string() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO
-evaluate_expression(const EXPRESSION& expr)
+ValueInfo
+evaluate_expression(const Expression& expr)
 {
-    VALUE_INFO result{};
+    ValueInfo result{};
     for (const auto& entry : expr.terms)
     {
-        VALUE_INFO v = _evaluate_term(entry.term);
+        ValueInfo v = _evaluate_term(entry.term);
 
         // here we should start consuming `is_negated` since all factors have been evaluated
         v.consume_negated();
-        if (entry.operator_with_previous == OPERATOR::ADD)
+        if (entry.operator_with_previous == Operator::ADD)
             result += v;
-        else if (entry.operator_with_previous == OPERATOR::SUBTRACT)
+        else if (entry.operator_with_previous == Operator::SUBTRACT)
             result -= v;
         else
             std::cerr << "evaluate_expression: unexpected operator " << _op_to_string(entry.operator_with_previous) << _die{};
@@ -121,32 +121,32 @@ _generic_value_to_string(generic_value_type val)
 }
 
 std::string
-_op_to_string(OPERATOR op)
+_op_to_string(Operator op)
 {
     switch (op)
     {
-        case OPERATOR::ADD:
+        case Operator::ADD:
             return "+";
-        case OPERATOR::SUBTRACT:
+        case Operator::SUBTRACT:
             return "-";
-        case OPERATOR::MULTIPLY:
+        case Operator::MULTIPLY:
             return "*";
         default:
             return "/";
     }
 }
 
-VALUE_INFO
-_evaluate_term(const TERM& term)
+ValueInfo
+_evaluate_term(const Term& term)
 {
-    VALUE_INFO result = VALUE_INFO::init_as_one();
+    ValueInfo result = ValueInfo::init_as_one();
     for (const auto& factor : term.factors)
     {
-        VALUE_INFO v;
+        ValueInfo v;
         v = _evaluate_expval(factor.exponential_value);
-        if (factor.operator_with_previous == OPERATOR::MULTIPLY)
+        if (factor.operator_with_previous == Operator::MULTIPLY)
             result *= v;
-        else if (factor.operator_with_previous == OPERATOR::DIVIDE)
+        else if (factor.operator_with_previous == Operator::DIVIDE)
             result /= v;
         else
             std::cerr << "_evaluate_term: unexpected operator " << _op_to_string(factor.operator_with_previous) << _die{};
@@ -154,15 +154,15 @@ _evaluate_term(const TERM& term)
     return result;
 }
 
-VALUE_INFO
-_evaluate_expval(const EXPONENTIAL_VALUE& expval)
+ValueInfo
+_evaluate_expval(const ExponentialValue& expval)
 {
-    VALUE_INFO result = VALUE_INFO::init_as_one();
+    ValueInfo result = ValueInfo::init_as_one();
     const auto& powseq = expval.power_sequence;
 
     // evaluate from right to left:
     for (auto it = powseq.rbegin(); it != powseq.rend(); it++)
-        result = VALUE_INFO{*it} ^ result;
+        result = ValueInfo{*it} ^ result;
     result.is_negated ^= expval.is_negated;
     return result;
 }

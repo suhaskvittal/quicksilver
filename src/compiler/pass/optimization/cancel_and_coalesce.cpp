@@ -28,9 +28,9 @@ constexpr size_t DAG_INST_CAPACITY{8192};
 
 using dag_ptr = std::unique_ptr<DAG>;
 using inst_ptr = DAG::inst_ptr;
-using fpa_type = INSTRUCTION::fpa_type;
-using coalesce_output_type = std::array<std::optional<INSTRUCTION>, 2>;
-using discrete_rotation_type = std::pair<INSTRUCTION::TYPE, INSTRUCTION::TYPE>;
+using fpa_type = Instruction::fpa_type;
+using coalesce_output_type = std::array<std::optional<Instruction>, 2>;
+using discrete_rotation_type = std::pair<Instruction::Type, Instruction::Type>;
 
 /*
  * `LAST_INST` is the last instruction for a given qubit.
@@ -44,9 +44,9 @@ static thread_local uint64_t INST_COUNT{0};
 /*
  * Subroutines
  * */
-void _init(IO_UTILITY&);
-bool _loop(result_type& out, DAG*, IO_UTILITY&);
-void _cleanup(IO_UTILITY&);
+void _init(IOUtility&);
+bool _loop(Result& out, DAG*, IOUtility&);
+void _cleanup(IOUtility&);
 
 /*
  * Merge the two instructions. The first instruction's data is modified,
@@ -61,17 +61,17 @@ coalesce_output_type _coalesce(inst_ptr, inst_ptr prev);
 /*
  * Helper functions:
  * */
-bool _is_z_basis(INSTRUCTION::TYPE);
-bool _is_coalescable(INSTRUCTION::TYPE, INSTRUCTION::TYPE);
+bool _is_z_basis(Instruction::Type);
+bool _is_coalescable(Instruction::Type, Instruction::Type);
 bool _gates_cancel_out(inst_ptr, inst_ptr);
-bool _gates_are_inverses(INSTRUCTION::TYPE, INSTRUCTION::TYPE);
-bool _fpa_is_near_zero(const INSTRUCTION::fpa_type&);
+bool _gates_are_inverses(Instruction::Type, Instruction::Type);
+bool _fpa_is_near_zero(const Instruction::fpa_type&);
 
 /*
  * Converts S and T like gates to an integer representing how
  * far they rotate a qubit.
  * */
-int8_t _discretize(INSTRUCTION::TYPE);
+int8_t _discretize(Instruction::Type);
 
 /*
  * Computes the instruction types for a given discrete value (0 thru 7).
@@ -83,7 +83,7 @@ discrete_rotation_type _reverse_discretization(int8_t, bool use_z_basis);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-result_type
+Result
 cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& istrm)
 {
     std::cout << "\tcancel_and_coalesce: ";
@@ -102,7 +102,7 @@ namespace
 ////////////////////////////////////////////////////////////
 
 void
-_init(IO_UTILITY& io)
+_init(IOUtility& io)
 {
     LAST_INST.resize(io.num_qubits);
     std::fill(LAST_INST.begin(), LAST_INST.end(), nullptr);
@@ -117,7 +117,7 @@ _init(IO_UTILITY& io)
 ////////////////////////////////////////////////////////////
 
 bool
-_loop(result_type& out, DAG* dag, IO_UTILITY& io)
+_loop(Result& out, DAG* dag, IOUtility& io)
 {
     const uint64_t prev_gates_removed{out.s_gates_removed};
 
@@ -158,12 +158,12 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
                 auto [i1, i2] = _coalesce(inst, prev_inst);
 
                 // replace data of `prev_inst` and `inst` completely:
-                inst->~INSTRUCTION();
-                new (inst) INSTRUCTION(*i1);
+                inst->~Instruction();
+                new (inst) Instruction(*i1);
                 if (i2.has_value()) 
                 {
-                    prev_inst->~INSTRUCTION();
-                    new (prev_inst) INSTRUCTION(*i2);
+                    prev_inst->~Instruction();
+                    new (prev_inst) Instruction(*i2);
                 } else 
                 {
                     prev_inst->deletable = true;
@@ -202,7 +202,7 @@ _loop(result_type& out, DAG* dag, IO_UTILITY& io)
 ////////////////////////////////////////////////////////////
 
 void
-_cleanup(IO_UTILITY& io)
+_cleanup(IOUtility& io)
 {
     for (auto* inst : PREV_FRONT_LAYER)
         if (!inst->deletable)
@@ -236,7 +236,7 @@ _coalesce(inst_ptr curr, inst_ptr prev)
             int8_t a = static_cast<int8_t>(std::round(d));
             auto [t1, t2] = _reverse_discretization(a, _is_z_basis(curr->type));
             out[0].emplace(t1, curr->q_begin(), curr->q_end());
-            if (t2 != INSTRUCTION::TYPE::NIL)
+            if (t2 != Instruction::Type::NIL)
                 out[1].emplace(t2, curr->q_begin(), curr->q_end());
         }
         else
@@ -254,7 +254,7 @@ _coalesce(inst_ptr curr, inst_ptr prev)
 
         auto [t1, t2] = _reverse_discretization(s, _is_z_basis(curr->type));
         out[0].emplace(t1, curr->q_begin(), curr->q_end());
-        if (t2 != INSTRUCTION::TYPE::NIL)
+        if (t2 != Instruction::Type::NIL)
             out[1].emplace(t2, prev->q_begin(), prev->q_end());
     }
     return out;
@@ -264,16 +264,16 @@ _coalesce(inst_ptr curr, inst_ptr prev)
 ////////////////////////////////////////////////////////////
 
 bool
-_is_z_basis(INSTRUCTION::TYPE t)
+_is_z_basis(Instruction::Type t)
 {
     switch (t)
     {
-    case INSTRUCTION::TYPE::Z:
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TDG:
-    case INSTRUCTION::TYPE::RZ:
+    case Instruction::Type::Z:
+    case Instruction::Type::S:
+    case Instruction::Type::SDG:
+    case Instruction::Type::T:
+    case Instruction::Type::TDG:
+    case Instruction::Type::RZ:
         return true;
     default:
         return false;
@@ -284,7 +284,7 @@ _is_z_basis(INSTRUCTION::TYPE t)
 ////////////////////////////////////////////////////////////
 
 bool
-_is_coalescable(INSTRUCTION::TYPE t1, INSTRUCTION::TYPE t2)
+_is_coalescable(Instruction::Type t1, Instruction::Type t2)
 {
     if (is_rotation_instruction(t1) && is_rotation_instruction(t2) && t1 == t2)
         return true;
@@ -321,42 +321,42 @@ _gates_cancel_out(inst_ptr a, inst_ptr b)
 ////////////////////////////////////////////////////////////
 
 bool
-_gates_are_inverses(INSTRUCTION::TYPE x, INSTRUCTION::TYPE y)
+_gates_are_inverses(Instruction::Type x, Instruction::Type y)
 {
     switch (x)
     {
     // check for self inverses:
-    case INSTRUCTION::TYPE::H:
-    case INSTRUCTION::TYPE::X:
-    case INSTRUCTION::TYPE::Y:
-    case INSTRUCTION::TYPE::Z:
-    case INSTRUCTION::TYPE::CX:
-    case INSTRUCTION::TYPE::CZ:
-    case INSTRUCTION::TYPE::CCX:
-    case INSTRUCTION::TYPE::CCZ:
-    case INSTRUCTION::TYPE::SWAP:
+    case Instruction::Type::H:
+    case Instruction::Type::X:
+    case Instruction::Type::Y:
+    case Instruction::Type::Z:
+    case Instruction::Type::CX:
+    case Instruction::Type::CZ:
+    case Instruction::Type::CCX:
+    case Instruction::Type::CCZ:
+    case Instruction::Type::SWAP:
         return (x == y);
 
     // other unitaries:
-    case INSTRUCTION::TYPE::S:
-        return y == INSTRUCTION::TYPE::SDG;
-    case INSTRUCTION::TYPE::SDG:
-        return y == INSTRUCTION::TYPE::S;
+    case Instruction::Type::S:
+        return y == Instruction::Type::SDG;
+    case Instruction::Type::SDG:
+        return y == Instruction::Type::S;
 
-    case INSTRUCTION::TYPE::SX:
-        return y == INSTRUCTION::TYPE::SXDG;
-    case INSTRUCTION::TYPE::SXDG:
-        return y == INSTRUCTION::TYPE::SX;
+    case Instruction::Type::SX:
+        return y == Instruction::Type::SXDG;
+    case Instruction::Type::SXDG:
+        return y == Instruction::Type::SX;
 
-    case INSTRUCTION::TYPE::T:
-        return y == INSTRUCTION::TYPE::TDG;
-    case INSTRUCTION::TYPE::TDG:
-        return y == INSTRUCTION::TYPE::T;
+    case Instruction::Type::T:
+        return y == Instruction::Type::TDG;
+    case Instruction::Type::TDG:
+        return y == Instruction::Type::T;
 
-    case INSTRUCTION::TYPE::TX:
-        return y == INSTRUCTION::TYPE::TXDG;
-    case INSTRUCTION::TYPE::TXDG:
-        return y == INSTRUCTION::TYPE::TX;
+    case Instruction::Type::TX:
+        return y == Instruction::Type::TXDG;
+    case Instruction::Type::TXDG:
+        return y == Instruction::Type::TX;
     }
 
     return false;
@@ -366,7 +366,7 @@ _gates_are_inverses(INSTRUCTION::TYPE x, INSTRUCTION::TYPE y)
 ////////////////////////////////////////////////////////////
 
 bool
-_fpa_is_near_zero(const INSTRUCTION::fpa_type& x)
+_fpa_is_near_zero(const Instruction::fpa_type& x)
 {
     constexpr int TOL_IDX = 8;  // so, assume any angle less than 2**(-W + TOL_IDX) is about 0.
                                 // for example, W = 64 and TOL_IDX = 4, then ignore all angles
@@ -393,28 +393,28 @@ _fpa_is_near_zero(const INSTRUCTION::fpa_type& x)
 ////////////////////////////////////////////////////////////
 
 int8_t
-_discretize(INSTRUCTION::TYPE t)
+_discretize(Instruction::Type t)
 {
     switch (t)
     {
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TX:
+    case Instruction::Type::T:
+    case Instruction::Type::TX:
         return 1;
 
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SX:
+    case Instruction::Type::S:
+    case Instruction::Type::SX:
         return 2;
 
-    case INSTRUCTION::TYPE::Z:
-    case INSTRUCTION::TYPE::X:
+    case Instruction::Type::Z:
+    case Instruction::Type::X:
         return 4;
 
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::SXDG:
+    case Instruction::Type::SDG:
+    case Instruction::Type::SXDG:
         return 6;
 
-    case INSTRUCTION::TYPE::TDG:
-    case INSTRUCTION::TYPE::TXDG:
+    case Instruction::Type::TDG:
+    case Instruction::Type::TXDG:
         return 7;
     }
 
@@ -428,24 +428,24 @@ _discretize(INSTRUCTION::TYPE t)
 discrete_rotation_type
 _reverse_discretization(int8_t s, bool is_z)
 {
-    INSTRUCTION::TYPE t1{INSTRUCTION::TYPE::NIL}, t2{INSTRUCTION::TYPE::NIL};
+    Instruction::Type t1{Instruction::Type::NIL}, t2{Instruction::Type::NIL};
     if (s == 1)
-        t1 = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
+        t1 = is_z ? Instruction::Type::T : Instruction::Type::TX;
     else if (s == 2)
-        t1 = is_z ? INSTRUCTION::TYPE::S : INSTRUCTION::TYPE::SX;
+        t1 = is_z ? Instruction::Type::S : Instruction::Type::SX;
     else if (s >= 3 && s <= 5)
-        t1 = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
+        t1 = is_z ? Instruction::Type::Z : Instruction::Type::X;
     else if (s == 6)
-        t1 = is_z ? INSTRUCTION::TYPE::SDG : INSTRUCTION::TYPE::SXDG;
+        t1 = is_z ? Instruction::Type::SDG : Instruction::Type::SXDG;
     else if (s == 7)
-        t1 = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
+        t1 = is_z ? Instruction::Type::TDG : Instruction::Type::TXDG;
 
     // in some cases, `prev->type` must be set
     if (s == 3)
-        t2 = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
+        t2 = is_z ? Instruction::Type::TDG : Instruction::Type::TXDG;
     else if (s == 5)
-        t2 = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
-    assert(t1 != INSTRUCTION::TYPE::NIL);
+        t2 = is_z ? Instruction::Type::T : Instruction::Type::TX;
+    assert(t1 != Instruction::Type::NIL);
     return std::make_pair(t1,t2);
 }
 

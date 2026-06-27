@@ -18,7 +18,7 @@
 class DAG
 {
 public:
-    using inst_ptr = INSTRUCTION*;
+    using inst_ptr = Instruction*;
 
     struct node_type
     {
@@ -86,15 +86,15 @@ public:
      * returns instructions in the front layer that meet the given
      * predicate.
      * */
-    template <class PRED>
-    std::vector<inst_ptr> get_front_layer_if(const PRED&) const;
+    template <class Pred>
+    std::vector<inst_ptr> get_front_layer_if(const Pred&) const;
 
     /*
      * Executes the given callback for `min_layer` to `max_layer`. The callback
      * is given the instruction (first argument) and the layer number (second argument).
      * */
-    template <class CALLBACK>
-    void for_each_instruction_in_layer_order(const CALLBACK&, size_t min_layer, size_t max_layer) const;
+    template <class Callback>
+    void for_each_instruction_in_layer_order(const Callback&, size_t min_layer, size_t max_layer) const;
 
     /*
      * Finds the earliest instruction dependent on the given instruction in the front layer
@@ -103,18 +103,18 @@ public:
      * Search is limited from `min_layer` to `max_layer`. Returns the instruction and layer it
      * was found in. If no instruction was found, then `inst_ptr == nullptr`
      * */
-    template <class PRED>
+    template <class Pred>
     std::pair<inst_ptr, size_t> find_earliest_dependent_instruction_such_that(
-                                        const PRED&, inst_ptr, size_t min_layer, size_t max_layer) const;
+                                        const Pred&, inst_ptr, size_t min_layer, size_t max_layer) const;
     
     /*
      * This is the same as the above function, except this function starts from a memoized instruction
      * (see `node_lookup_table_` above). Note that the layers passed in, and returned by, this function
      * are relative to the memoized function.
      * */
-    template <class PRED>
+    template <class Pred>
     std::pair<inst_ptr, size_t> find_earliest_dependent_instruction_from_memoized_instruction_such_that(
-                                        const PRED&, inst_ptr, size_t min_layer, size_t max_layer) const;
+                                        const Pred&, inst_ptr, size_t min_layer, size_t max_layer) const;
 
     size_t inst_count() const;
 private:
@@ -122,15 +122,15 @@ private:
      * This is a helper function for `find_earliest_dependent_instruction_such_that()` and
      * `find_earliest_dependent_instruction_from_memoized_instruction_such_that()`.
      * */
-    template <class PRED>
-    std::pair<inst_ptr, size_t> find_earliest_dependent_helper(const PRED&, node_type*, size_t, size_t) const;
+    template <class Pred>
+    std::pair<inst_ptr, size_t> find_earliest_dependent_helper(const Pred&, node_type*, size_t, size_t) const;
 
     /*
      * Templated functions that allow for a callback to a node on arrival. All nodes are traversed in layer
      * order.
      * */
-    template <class CALLBACK>
-    void _generic_operate_on_nodes_in_layer_order(this auto&, const CALLBACK&, size_t min_layer, size_t max_layer);
+    template <class Callback>
+    void _generic_operate_on_nodes_in_layer_order(this auto&, const Callback&, size_t min_layer, size_t max_layer);
 };
 
 ////////////////////////////////////////////////////////////
