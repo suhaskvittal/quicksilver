@@ -138,7 +138,7 @@ namespace
 lut_type
 _read_lut_from_file(generic_strm_type& strm)
 {
-    constexpr size_t UROTSEQ_CAPACITY{256};
+    constexpr size_t UROTSEQ_CAPACITY{512};
 
     lut_type out;
     out.reserve(1024);
@@ -229,7 +229,7 @@ _get_lut_array_idx(const fpa_type& angle)
     {
         double lower_bound = std::pow(10.0, -idx),
                upper_bound = (idx == 0) ? 2*M_PI : std::pow(10.0, -idx+1);
-        if (f > lower_bound && f < upper_bound)
+        if (f >= lower_bound && f < upper_bound)
             return is_negative ? idx+(LUT_COUNT/2) : idx;
         else
             idx++;

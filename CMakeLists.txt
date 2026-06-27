@@ -237,6 +237,19 @@ target_link_libraries(qs_convert_to_rdr_isa PRIVATE qs_common)
 ###################################################
 ###################################################
 
+# Synthesis comparison: Rz(x) vs Rz(2x) T-gate counts (qs_compare_syntheses)
+
+add_executable(qs_compare_syntheses main/qs_compare_syntheses.cpp
+                                     src/compiler/program/rotation_manager.cpp)
+target_include_directories(qs_compare_syntheses PRIVATE "src")
+target_compile_options(qs_compare_syntheses PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_compare_syntheses PRIVATE
+    -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
+target_link_libraries(qs_compare_syntheses PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Static program report (qs_report)
 
 add_executable(qs_report main/qs_report.cpp)

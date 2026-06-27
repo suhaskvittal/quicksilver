@@ -138,8 +138,10 @@ scalar_mul_inplace(FPA_TYPE<W>& x, int64_t y)
     }
 
     // algorithm, mostly because I am too lazy to implement FFT:
-    //  for each set bit in `y`, compute `x << i` and add it to `x`
+    //  accumulate `x_base << i` into `x` for each set bit `i` of `y`.
+    //  `x` is the accumulator, so it must start at zero (handles y == 0 too).
     FPA_TYPE<W> x_base{x};
+    x = FPA_TYPE<W>{};
     while (y)
     {
         size_t lsb_bit = std::countr_zero(static_cast<uint64_t>(y));
