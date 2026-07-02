@@ -34,13 +34,6 @@ constexpr std::string_view BASIS_GATES[] =
     "store",
     "coupled_load_store",
 
-    // pbc instruction:
-    "pauli_rotation_pi",
-    "pauli_rotation_h_pi",
-    "pauli_rotation_h_pi_dag",
-    "pauli_rotation_q_pi",
-    "pauli_rotation_q_pi_dag",
-
     "nil"
 };
 
@@ -83,14 +76,6 @@ public:
         LOAD,
         STORE,
         COUPLED_LOAD_STORE,
-
-        /*
-         * Pauli rotations are generic operations used with Pauli-Based
-         * Computation. The specific rotations for each qubit are stored
-         * in `pauli_rotation_axes`
-         * */
-        PAULI_ROTATION_Q_PI,
-        PAULI_ROTATION_Q_PI_DAG,
 
         NIL
     };
@@ -138,11 +123,6 @@ public:
     std::deque<urotseq_type> corr_urotseq_array{};
 
     /*
-     * Axes for each qubit of a `PAULI_ROTATION_*` instruction.
-     * */
-    std::vector<Pauli> pauli_rotation_axes{};
-
-    /*
      * Same value as `get_inst_qubit_count(type)`
      * */
     const size_t qubit_count;
@@ -186,8 +166,25 @@ public:
 
     /* Rotation-Directed Runahead state variables */
 
-    bool rdr_is_pending{false};
-    bool rdr_has_been_visited{false};
+    struct
+    {
+        bool pending{false};
+        bool visited{false};
+    } rdr;
+    
+    /* Triage state variables */
+    
+    struct
+    {
+        /*
+         * Number of neighbors in the previous, next and same layer.
+         * */
+        uint8_t n_prev{},
+                n_next{},
+                n_same{};
+        bool is_causal{false};
+
+    } triage;
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

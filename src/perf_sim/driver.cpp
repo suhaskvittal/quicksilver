@@ -480,7 +480,7 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
         {
             if (rdr_handle_instruction(c, inst, operands[0])) 
                 continue;
-            inst->rdr_has_been_visited = true;
+            inst->rdr.visited = true;
         }
 
         if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
@@ -596,10 +596,10 @@ Driver::is_instruction_ready(inst_ptr inst, const std::vector<Qubit*>& operands)
 bool
 Driver::rdr_handle_instruction(Client* c, inst_ptr inst, Qubit* q)
 {
-    if (inst->rdr_has_been_visited)
+    if (inst->rdr.visited)
         return false;
 
-    if (!inst->rdr_is_pending)
+    if (!inst->rdr.pending)
     {
         rdr_->do_runahead(c, inst);
         return false;

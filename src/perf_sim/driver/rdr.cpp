@@ -156,7 +156,7 @@ RotationDirectedRunahead::operate()
 void
 RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
 {
-    if (from->rdr_has_been_visited)
+    if (from->rdr.visited)
         return;
 
     const double cov = (s_requests_started < 100) ? 1.0 : coverage();
@@ -413,7 +413,7 @@ void
 RotationDirectedRunahead::enqueue_request(request_type&& r)
 {
     request_queue_.push_back(r);
-    r.inst->rdr_is_pending = true;
+    r.inst->rdr.pending = true;
     s_requests_submitted++;
 }
 
@@ -475,12 +475,10 @@ _update_time_to_rotation(const inst_ptr inst,
     if (is_rotation_instruction(inst->type) && sim::GL_RLTP_DEGREE > 0)
         cost = cost /  sim::GL_RLTP_DEGREE; 
 
-    bool good_rotation = is_rotation_instruction(inst->type)
-                            && !inst->rdr_is_pending
-                            && !inst->rdr_has_been_visited;
+    bool good_rotation = is_rotation_instruction(inst->type) && !inst->rdr.pending && !inst->rdr.visited;
     good_rotation &= (2.0*(1.0/cov)*cost < time_to_rotation[inst->qubits[0]]);
 #if defined(RDR_DEBUG)
-    if (is_rotation_instruction(inst->type) && !inst->rdr_is_pending && !inst->rdr_has_been_visited)
+    if (is_rotation_instruction(inst->type) && !inst->rdr.pending && !inst->rdr.visited)
     {
         std::cout << "inst = " << *inst 
                     << ", cost = " << cost 

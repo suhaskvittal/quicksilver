@@ -60,6 +60,10 @@ struct IOEncoding
     uint8_t  corr_urotseq_count{0};
     uint16_t corr_urotseq_sizes[MAX_CORR_UROTSEQ];
     uint8_t  corr_urotseq[MAX_CORR_UROTSEQ][UROTSEQ_CAPACITY];
+
+    uint8_t triage_prev_layer_neighbors{0},
+            triage_next_layer_neighbors{0},
+            triage_same_layer_neighbors{0};
 };
 
 Instruction::urotseq_type _retrieve_urotseq_from_encoded_data(uint16_t size, uint8_t*);
