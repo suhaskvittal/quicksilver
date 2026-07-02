@@ -352,12 +352,6 @@ RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ssize_t
-RotationDirectedRunahead::lookahead_depth() const
-{
-    return lookahead_depth_;
-}
-
 double
 RotationDirectedRunahead::coverage() const
 {

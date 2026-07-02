@@ -60,7 +60,7 @@ public:
 
     void print_deadlock_info(std::ostream&) const override;
 
-    size_t buffer_occupancy() const;
+    size_t buffer_occupancy() const { return buffer_occupancy_; }
 protected:
     long operate() override;
 

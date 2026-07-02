@@ -439,33 +439,6 @@ ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, doubl
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-const ComputeSubsystem::local_storage_type&
-ComputeSubsystem::local_memory() const
-{
-    return local_memory_;
-}
-
-const ComputeSubsystem::production_level_type&
-ComputeSubsystem::t_factories() const
-{
-    return t_factories_;
-}
-
-const ComputeSubsystem::memory_subsystem_type&
-ComputeSubsystem::memory_subsystem() const
-{
-    return memory_subsystem_;
-}
-
-const ComputeSubsystem::local_storage_type&
-ComputeSubsystem::dedicated_ancilla() const
-{
-    return dedicated_ancilla_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
 ComputeSubsystem::count_available_magic_states() const
 {

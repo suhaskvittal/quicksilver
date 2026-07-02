@@ -116,7 +116,7 @@ public:
     std::pair<inst_ptr, size_t> find_earliest_dependent_instruction_from_memoized_instruction_such_that(
                                         const Pred&, inst_ptr, size_t min_layer, size_t max_layer) const;
 
-    size_t inst_count() const;
+    size_t inst_count() const { return inst_count_; }
 private:
     /*
      * This is a helper function for `find_earliest_dependent_instruction_such_that()` and

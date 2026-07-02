@@ -64,7 +64,7 @@ public:
     virtual void print_progress(std::ostream&) const {}
     virtual void print_deadlock_info(std::ostream&) const {}
 
-    cycle_type current_cycle() const;
+    cycle_type current_cycle() const { return current_cycle_; }
 protected:
     /* 
      * This is what the descendant should implement.
@@ -83,7 +83,7 @@ private:
 /*
  * Computes the frequency (kHz) for the given period (ns)
  * */
-double compute_freq_khz(uint64_t period_in_nanoseconds);
+inline double compute_freq_khz(uint64_t period_in_nanoseconds) { return 1e6 / static_cast<double>(period_in_nanoseconds); }
 
 /*
  * Converts clock cycles between two different frequencies.

@@ -84,10 +84,10 @@ public:
 
     void retire_instruction(inst_ptr);
 
-    bool eof() const;
+    bool eof() const { return generic_strm_eof(tristrm_); }
 
-    const std::unique_ptr<DAG>& dag() const;
-    const std::vector<Qubit*>&  qubits() const;
+    const std::unique_ptr<DAG>& dag() const { return dag_; }
+    const std::vector<Qubit*>&  qubits() const { return qubits_; }
 private:
     size_t   open_file_and_read_qubit_count();
     inst_ptr read_instruction_from_trace();

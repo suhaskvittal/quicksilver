@@ -66,12 +66,6 @@ ProducerBase::install_resource_states()
     buffer_occupancy_ += output_count;
 }
 
-size_t
-ProducerBase::buffer_occupancy() const
-{
-    return buffer_occupancy_;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

@@ -49,20 +49,8 @@ Operable::tick()
     }
 }
 
-cycle_type
-Operable::current_cycle() const
-{
-    return current_cycle_;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-double
-compute_freq_khz(uint64_t p_ns)
-{
-    return 1e6 / static_cast<double>(p_ns);
-}
 
 uint64_t
 convert_cycles_to_time_ns(cycle_type c, double f)

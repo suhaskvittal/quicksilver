@@ -127,7 +127,7 @@ public:
      * */
     bool interrupt_and_invalidate_if_necessary(inst_ptr);
 
-    ssize_t lookahead_depth() const;
+    ssize_t lookahead_depth() const { return lookahead_depth_; }
     double coverage() const;
     double timeliness() const;
 private:

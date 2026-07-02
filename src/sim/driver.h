@@ -129,7 +129,7 @@ public:
      * This function should be called at the end of the simulation to cleanup any
      * stats.
      * */
-    void stop_simulation();
+    void stop_simulation() { stall_monitor_.commit_contents(); }
 
     /*
      * Estimates application fidelity for given client. As the simulator does not
@@ -138,10 +138,10 @@ public:
      * */
     fidelity_data_type application_fidelity(int client_id, uint64_t scale_to_inst, double p) const;
 
-    ComputeSubsystem* compute_subsystem() const;
-    const std::vector<Client*>& clients() const;
-    const stall_monitor_type& stall_monitor() const;
-    driver::RotationDirectedRunahead* rdr() const;
+    ComputeSubsystem* compute_subsystem() const { return compute_subsystem_; }
+    const std::vector<Client*>& clients() const { return clients_; }
+    const stall_monitor_type& stall_monitor() const { return stall_monitor_; }
+    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
 protected:
     long operate() override;
 private:
@@ -154,7 +154,7 @@ private:
      * If the output is not {nullptr, *},
      * `do_context_switch()` is called.
      * */
-    std::pair<Client*, Client*> context_switch_condition() const;
+    std::pair<Client*, Client*> context_switch_condition() const { return std::make_pair(nullptr, nullptr); }
     void                        do_context_switch(Client* incoming, Client* outgoing);
 
     /*

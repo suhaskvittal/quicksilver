@@ -157,12 +157,6 @@ Instruction::reset_uops()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t       Instruction::uops_retired() const { return uops_retired_; }
-Instruction* Instruction::current_uop() const { return current_uop_; }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 qubit_type*       Instruction::q_begin() { return const_cast<qubit_type*>(qubits.data()); }
 qubit_type*       Instruction::q_end() { return const_cast<qubit_type*>(qubits.data()) + qubit_count; }
 

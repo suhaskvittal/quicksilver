@@ -147,10 +147,10 @@ public:
      * */
     double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const; 
 
-    const local_storage_type& local_memory() const;
-    const production_level_type& t_factories() const;
-    const memory_subsystem_type& memory_subsystem() const;
-    const local_storage_type& dedicated_ancilla() const;
+    const local_storage_type& local_memory() const { return local_memory_; }
+    const production_level_type& t_factories() const { return t_factories_; }
+    const memory_subsystem_type& memory_subsystem() const { return memory_subsystem_; }
+    const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
 
     size_t count_available_magic_states() const;
 protected:

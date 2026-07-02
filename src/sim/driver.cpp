@@ -193,12 +193,6 @@ Driver::done() const
     return all_done;
 }
 
-void
-Driver::stop_simulation()
-{
-    stall_monitor_.commit_contents();
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -250,33 +244,6 @@ Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
     f.mem = std::exp(lg_memory_total_f);
     f.rdr = std::exp(lg_rdr_f);
     return f;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-ComputeSubsystem*
-Driver::compute_subsystem() const
-{
-    return compute_subsystem_;
-}
-
-const std::vector<Client*>&
-Driver::clients() const
-{
-    return clients_;
-}
-
-const Driver::stall_monitor_type&
-Driver::stall_monitor() const
-{
-    return stall_monitor_;
-}
-
-driver::RotationDirectedRunahead*
-Driver::rdr() const
-{
-    return rdr_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -377,15 +344,6 @@ Driver::handle_completed_clients()
             c_it++;
         }
     }
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::pair<Client*, Client*>
-Driver::context_switch_condition() const
-{
-    return std::make_pair(nullptr, nullptr);
 }
 
 ////////////////////////////////////////////////////////////

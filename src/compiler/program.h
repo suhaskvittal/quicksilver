@@ -184,7 +184,7 @@ public:
      * We implement basic optimizations to eliminate useless gates (via gate cancellation and
      * removal of identity gates).
      * */
-    size_t dead_gate_elimination();  // returns the number of gates removed
+    size_t dead_gate_elimination() { return dead_gate_elim_pass(); }  // returns the number of gates removed
 
     /*
      * Dumps instructions into the output stream at `*ostrm_p_`

@@ -379,42 +379,5 @@ ValueInfo::to_string() const
     return ss.str();
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-ValueInfo
-operator+(ValueInfo a, ValueInfo b)
-{
-    return a += b;
-}
-
-ValueInfo
-operator-(ValueInfo a, ValueInfo b)
-{
-    return a -= b;
-}
-
-ValueInfo
-operator*(ValueInfo a, ValueInfo b)
-{
-    return a *= b;
-}
-
-
-ValueInfo
-operator/(ValueInfo a, ValueInfo b)
-{
-    return a /= b;
-}
-
-ValueInfo
-operator^(ValueInfo a, ValueInfo b)
-{
-    return a ^= b;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 }   // namespace prog
 }   // namespace compiler

@@ -64,11 +64,11 @@ struct ValueInfo
     std::string to_string() const;
 };
 
-ValueInfo operator+(ValueInfo, ValueInfo);
-ValueInfo operator-(ValueInfo, ValueInfo);
-ValueInfo operator*(ValueInfo, ValueInfo);
-ValueInfo operator/(ValueInfo, ValueInfo);
-ValueInfo operator^(ValueInfo, ValueInfo);
+inline ValueInfo operator+(ValueInfo a, ValueInfo b) { return a += b; }
+inline ValueInfo operator-(ValueInfo a, ValueInfo b) { return a -= b; }
+inline ValueInfo operator*(ValueInfo a, ValueInfo b) { return a *= b; }
+inline ValueInfo operator/(ValueInfo a, ValueInfo b) { return a /= b; }
+inline ValueInfo operator^(ValueInfo a, ValueInfo b) { return a ^= b; }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

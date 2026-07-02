@@ -235,8 +235,8 @@ public:
      * */
     void reset_uops();
 
-    size_t       uops_retired() const;
-    Instruction* current_uop() const;
+    size_t       uops_retired() const { return uops_retired_; }
+    Instruction* current_uop() const { return current_uop_; }
 
     /*
      * `uop_count` returns the number of `uops` that must be executed.

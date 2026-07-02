@@ -141,11 +141,5 @@ DAG::get_front_layer() const
     return get_front_layer_if([] (const auto*) { return true; });
 }
 
-size_t
-DAG::inst_count() const
-{
-    return inst_count_;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
