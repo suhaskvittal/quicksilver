@@ -17,9 +17,6 @@ namespace sim
 namespace
 {
 
-constexpr cycle_type NA_SHUTTLING_LATENCY{1};
-constexpr cycle_type NA_CX_LATENCY = NA_SHUTTLING_LATENCY + 1;
-
 using execute_result_type = ComputeSubsystem::execute_result_type;
 using routing_type = ComputeSubsystem::routing_type;
 using r_id_type = routing_type::id_type;
@@ -257,28 +254,21 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
         return result;
     }
 
-    // only handle routing if this is a superconducting quantum processor:
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
-        // from the program qubit to the EPR qubit.
-        // 
-        // This involves moving out of this channel (so we need to route to `MCB_LEFT_ENTRY`
-        // or `MCB_RIGHT_ENTRY`). Assume that this routing problem is solved properly in practice,
-        // and choose whichever is free
-        cycle_type tp_start = current_cycle() + code_distance,
-                   tp_end = current_cycle() + 3*code_distance;
-        auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
-        if (!channel_out.has_value())
-            return result;
-        routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
-    }
+    // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
+    // from the program qubit to the EPR qubit.
+    //
+    // This involves moving out of this channel (so we need to route to `MCB_LEFT_ENTRY`
+    // or `MCB_RIGHT_ENTRY`). Assume that this routing problem is solved properly in practice,
+    // and choose whichever is free
+    cycle_type tp_start = current_cycle() + code_distance,
+               tp_end = current_cycle() + 3*code_distance;
+    auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
+    if (!channel_out.has_value())
+        return result;
+    routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
 
     // update the result latency, which is currently `code_distance + GL_REACTION_TIME + 1`.
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-        result.latency = 3*NA_CX_LATENCY + 1;  // three transversal CX + measuring qubits
-    else
-        result.latency = 3*code_distance + GL_REACTION_TIME;   // ZZ with |T> + teleporting XX and ZZ + feedforward
+    result.latency = 3*code_distance + GL_REACTION_TIME;   // ZZ with |T> + teleporting XX and ZZ + feedforward
 
     while (inst->uops_retired() < inst->uop_count() && remaining > 0)
     {
@@ -291,10 +281,7 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
             if (f_it == t_factories_.end())
                 break;
             (*f_it)->consume(1);
-            if (GL_OPERATE_AS_NEUTRAL_ATOM)
-                result.latency++;
-            else
-                result.latency += GL_REACTION_TIME + 1;  // need one cycle to measure |Y> ancilla
+            result.latency += GL_REACTION_TIME + 1;  // need one cycle to measure |Y> ancilla
             remaining--;
         }
         result.progress++;
@@ -340,10 +327,6 @@ ComputeSubsystem::is_qubit_in_local_memory(const Qubit* q) const
 bool
 ComputeSubsystem::rdr_simulate_store(Qubit* q)
 {
-    // we should not be using a completion buffer on a neutral atom system.
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
-        std::cerr << "ComputeSubsystem::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
-
     const size_t d = code_distance;
 #if defined(RDR_IGNORE_ROUTING_OVERHEADS)
     const cycle_type c = current_cycle();
@@ -363,35 +346,22 @@ bool
 ComputeSubsystem::rdr_apply_rotation_magic_state_from_surface_code(Qubit* q, Qubit* m)
 {
     const size_t d = code_distance;
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // CX + measure
-        q->cycle_available = current_cycle() + NA_CX_LATENCY + 1;
-        m->cycle_available = current_cycle() + NA_CX_LATENCY + 1;
-    }
-    else
-    {
 #if defined(RDR_IGNORE_ROUTING_OVERHEADS)
-        const cycle_type c = current_cycle();
+    const cycle_type c = current_cycle();
 #else
-        const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
-        if (!routing_.test_resources_between(q, m, c, c+d))
-            return false;
-        routing_.lock_resources_between(q, m, c, c+d);
+    const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
+    if (!routing_.test_resources_between(q, m, c, c+d))
+        return false;
+    routing_.lock_resources_between(q, m, c, c+d);
 #endif
-        q->cycle_available = c+d+GL_REACTION_TIME;
-        m->cycle_available = c+d+1;
-        return true;
-    }
+    q->cycle_available = c+d+GL_REACTION_TIME;
+    m->cycle_available = c+d+1;
+    return true;
 }
 
 bool
 ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
 {
-    // we should not be using a completion buffer on a neutral atom system.
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
-        std::cerr << "ComputeSubsystem::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
-
     const size_t d = code_distance;
 #if defined(RDR_IGNORE_ROUTING_OVERHEADS)
     const cycle_type c = current_cycle();
@@ -458,19 +428,10 @@ ComputeSubsystem::do_h_gate(inst_ptr inst, Qubit* q)
 execute_result_type
 ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
 {
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
     {
-        // assume transveral CX as it does not make sense to do lattice surgery for S
-        // on neutral atom systems
-        return execute_result_type{.progress=1, .latency=NA_CX_LATENCY+1};
-    }
-    else
-    {
-        if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
-        {
-            routing_.lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
-            return execute_result_type{.progress=1, .latency=code_distance};
-        }
+        routing_.lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
+        return execute_result_type{.progress=1, .latency=code_distance};
     }
     return execute_result_type{};
 }
@@ -478,17 +439,10 @@ ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
 execute_result_type
 ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 {
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
     {
-        return execute_result_type{.progress=1, .latency=NA_CX_LATENCY};  // transversal CX
-    }
-    else
-    {
-        if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
-        {
-            routing_.lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
-            return execute_result_type{.progress=1, .latency=2*code_distance};
-        }
+        routing_.lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
+        return execute_result_type{.progress=1, .latency=2*code_distance};
     }
     return execute_result_type{};
 }
@@ -505,27 +459,17 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
     if (f_it == t_factories_.end())
         return execute_result_type{};
 
-    cycle_type latency;
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // transversal CX ... assume auto-correction is used as it does not make sense to
-        // do S gate as it requires another patch anyway
-        latency = NA_CX_LATENCY + 1;  // CX gate + measurement of both |T> and |Y>
-    }
-    else
-    {
-        // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
-        // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
-        // takes 1us)
-        const cycle_type t_start = current_cycle(),
-                         t_end = current_cycle() + code_distance;
-        // get routing space -- on success, we can execute the T gate
-        auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
-        if (!dst.has_value())
-            return execute_result_type{};
-        routing_.lock_resources_between(q, *dst, t_start, t_end);
-        latency = code_distance + GL_REACTION_TIME;
-    }
+    // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
+    // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
+    // takes 1us)
+    const cycle_type t_start = current_cycle(),
+                     t_end = current_cycle() + code_distance;
+    // get routing space -- on success, we can execute the T gate
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
+    if (!dst.has_value())
+        return execute_result_type{};
+    routing_.lock_resources_between(q, *dst, t_start, t_end);
+    const cycle_type latency = code_distance + GL_REACTION_TIME;
     (*f_it)->consume(1);
     return execute_result_type{.progress=1, .latency=latency};
 }

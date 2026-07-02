@@ -113,8 +113,6 @@ main(int argc, char* argv[])
                     "Total instructions in the program. Used for resource estimates. Does not affect performance.",
                     total_inst, 1'000'000'000ll)
 
-        .optional("-na", "--neutral-atom", "Operate as neutral atom processor", sim::GL_OPERATE_AS_NEUTRAL_ATOM, false)
-
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
                       compute_local_memory_capacity, 12)
@@ -283,33 +281,20 @@ main(int argc, char* argv[])
            rltp_footprint,
            rdr_storage_overhead,
            rdr_footprint;
-    if (sim::GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // assume that all operations do not use routing space: we only use
-        program_active_memory_footprint = compute_local_memory_capacity * sc_footprint;
-        rltp_footprint = 3*sim::GL_RLTP_DEGREE*sc_footprint;
-
-        assert(sim::GL_RDR_COMPLETION_BUFFER_CAPACITY == 0);  // do not use completion buffer with NA
-        rdr_storage_overhead = 0;
-        rdr_footprint = sim::GL_RDR_CAPACITY*sc_footprint;
-    }
-    else
-    {
-        // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
-        program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
-        // RLTP physical qubit overheads:
-        rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
-                                    sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
-                                 ) * sc_footprint;
-        // RDR phsyical qubit overheads:
-        rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
-                                  ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2) 
-                                        * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
-                                  : 0;
-        rdr_footprint = sim::GL_RDR_ENABLED
-                            ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
-                            : 0;
-    }
+    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
+    program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+    // RLTP physical qubit overheads:
+    rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
+                                sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
+                             ) * sc_footprint;
+    // RDR phsyical qubit overheads:
+    rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+                              ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2)
+                                    * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
+                              : 0;
+    rdr_footprint = sim::GL_RDR_ENABLED
+                        ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+                        : 0;
     const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
 
     std::cout << "COMPUTE_FOOTPRINT\n";
@@ -330,11 +315,7 @@ main(int argc, char* argv[])
                                                         [sc_footprint] (const auto* m)
                                                         {
                                                             size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
-                                                            size_t routing_overhead;
-                                                            if (sim::GL_OPERATE_AS_NEUTRAL_ATOM)
-                                                                routing_overhead = 0;
-                                                            else
-                                                                routing_overhead = 0.5*m->num_blocks*sc_footprint;
+                                                            size_t routing_overhead = 0.5*m->num_blocks*sc_footprint;
                                                             return memory_overhead + routing_overhead;
                                                         });
     
