@@ -91,7 +91,7 @@ BBMemory::log_fidelity(Client* c, double scale, double d_freq_khz, double p) con
                  aut_error_per_op = ber_per_d_cycles*10;
 
     // memory (idle) fidelity
-    const double log_f_mem = num_blocks * mean(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
+    const double log_f_mem = num_blocks * fpdiv(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
     // surgery fidelity
     const double log_f_surgery = surgery_ops * std::log(1-surgery_error_per_op);
     // automorphism fidelity
@@ -226,7 +226,7 @@ namespace
 constexpr size_t
 _channel_width(size_t num_channels, size_t total_blocks)
 {
-    size_t blocks_per_channel = std::ceil(mean(total_blocks, num_channels));
+    size_t blocks_per_channel = std::ceil(fpdiv(total_blocks, num_channels));
     size_t w = blocks_per_channel >> 1;
     if (blocks_per_channel & 1)
         w++;

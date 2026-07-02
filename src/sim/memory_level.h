@@ -8,6 +8,7 @@
 
 #include "globals.h"
 #include "sim/operable.h"
+#include "sim/qubit.h"
 
 #include <iosfwd>
 #include <unordered_set>

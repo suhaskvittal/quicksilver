@@ -64,12 +64,6 @@ compute_freq_khz(uint64_t p_ns)
     return 1e6 / static_cast<double>(p_ns);
 }
 
-cycle_type
-convert_cycles_between_frequencies(cycle_type cycles, double original_freq_khz, double new_freq_khz)
-{
-    return static_cast<cycle_type>(std::ceil(cycles * new_freq_khz / original_freq_khz));
-}
-
 uint64_t
 convert_cycles_to_time_ns(cycle_type c, double f)
 {

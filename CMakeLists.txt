@@ -126,8 +126,7 @@ set(SIM_FILES
     src/sim/production/epr.cpp
     src/sim/production/magic_state.cpp
     src/sim/routing.cpp
-#   src/sim/rotation_subsystem.cpp
-    src/sim/stats.cpp
+    src/sim/metrics.cpp
     src/sim.cpp)
 
 ###################################################

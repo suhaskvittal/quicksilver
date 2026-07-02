@@ -428,7 +428,7 @@ ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, doubl
         std::cerr << "ComputeSubsystem::log_fidelity: T factories do not have similar fidelities" << _die{};
 
     // memory (idle) fidelity
-    const double log_f_mem = local_memory_capacity * mean(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
+    const double log_f_mem = local_memory_capacity * fpdiv(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
     // T gate fidelity
     const double log_f_t = t_gates * std::log(1.0 - t_infidelity);
     // total fidelity:

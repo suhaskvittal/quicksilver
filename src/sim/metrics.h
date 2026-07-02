@@ -6,9 +6,6 @@
 #ifndef SIM_STATS_h
 #define SIM_STATS_h
 
-#include <cstdint>
-#include <cstddef>
-
 namespace sim
 {
 namespace stats

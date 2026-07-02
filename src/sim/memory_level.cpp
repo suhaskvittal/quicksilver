@@ -18,10 +18,10 @@ MemoryLevel::MemoryLevel(std::string name, double freq_khz, size_t qubit_count, 
     storage_physical_qubit_count(n),
     storage_logical_qubit_count(k),
     storage_code_distance(d),
-    num_blocks(static_cast<size_t>( std::ceil(mean(qubit_count, k)) )),
+    num_blocks(static_cast<size_t>( std::ceil(fpdiv(qubit_count, k)) )),
     total_capacity(num_blocks * k)
 {
-    size_t num_blocks = std::ceil(mean(qubit_count, k));
+    size_t num_blocks = std::ceil(fpdiv(qubit_count, k));
     blocks_.resize(num_blocks);
 }
 

@@ -12,6 +12,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace sim
@@ -85,9 +86,12 @@ private:
 double compute_freq_khz(uint64_t period_in_nanoseconds);
 
 /*
- * Converts clock cycles between two different frequencies:
+ * Converts clock cycles between two different frequencies.
+ * We make this templated so we can also convert means and
+ * such.
  * */
-cycle_type convert_cycles_between_frequencies(cycle_type, double original_freq_khz, double new_freq_khz);
+template <class T>
+T convert_cycles_between_frequencies(T, double original_freq_khz, double f2);
 
 uint64_t convert_cycles_to_time_ns(cycle_type, double freq_khz);
 cycle_type convert_time_ns_to_cycles(uint64_t, double freq_khz);
@@ -105,6 +109,21 @@ void coordinate_clock_scale(std::vector<Operable*>);
  * Fast forwards the clock of all operables in the container to the given time.
  * */
 void fast_forward_all_operables_to_time_ns(std::vector<Operable*>, uint64_t);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Implementation of `convert_cycles_between_frequencies()`
+ * */
+template <class T> T
+convert_cycles_between_frequencies(T cycles, double f1, double f2)
+{
+    double out = cycles * (f2/f1);
+    if constexpr (std::is_integral<T>::value)
+        out = std::ceil(out);
+    return static_cast<T>(out);
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

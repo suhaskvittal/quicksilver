@@ -144,8 +144,7 @@ RotationDirectedRunahead::operate()
 
     /* 4. update cycle-level stats */
 
-    s_completion_buffer_occu_sum += completion_buffer_.size();
-    s_completion_buffer_occu_ticks++;
+    s_completion_buffer_occu.add(completion_buffer_.size());
 
     return progress;
 }
@@ -362,13 +361,13 @@ RotationDirectedRunahead::lookahead_depth() const
 double
 RotationDirectedRunahead::coverage() const
 {
-    return mean(s_requests_completed, s_requests_submitted);
+    return fpdiv(s_requests_completed, s_requests_submitted);
 }
 
 double
 RotationDirectedRunahead::timeliness() const
 {
-    return mean(s_requests_completed - s_requests_interrupted, s_requests_completed);
+    return fpdiv(s_requests_completed - s_requests_interrupted, s_requests_completed);
 }
 
 ////////////////////////////////////////////////////////////
@@ -433,9 +432,9 @@ void
 RotationDirectedRunahead::update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time)
 {
     // update stats
-    s_request_uop_sum += uops;
-    s_request_completion_cycles_sum += rz_prep_time;
-    s_post_completion_idle_time_sum += rz_idle_time;
+    s_request_latency.add(rz_prep_time);
+    s_request_latency_norm_uop.add(fpdiv(rz_prep_time, uops));
+    s_post_completion_idle_time.add(rz_idle_time);
 }
 
 ////////////////////////////////////////////////////////////

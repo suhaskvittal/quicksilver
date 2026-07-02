@@ -7,41 +7,11 @@
 
 #include <exception>
 #include <iostream>
-#include <sstream>
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 int64_t GL_USE_RDR_ISA{0};
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-namespace sim
-{
-
-bool
-Qubit::operator==(const Qubit& other) const
-{
-    return (qubit_id == other.qubit_id) && (client_id == other.client_id);
-}
-
-std::string
-Qubit::to_string() const
-{
-    std::stringstream ss;
-    ss << *this;
-    return ss.str();
-}
-
-std::ostream&
-operator<<(std::ostream& out, const Qubit& q)
-{
-    out << q.qubit_id << "(" << q.client_id << ")";
-    return out;
-}
-
-} // namespace sim
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

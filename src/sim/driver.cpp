@@ -5,7 +5,7 @@
 
 #include "sim/configuration/resource_estimation.h"
 #include "sim/driver.h"
-#include "sim/stats.h"
+#include "sim/metrics.h"
 
 #include <algorithm>
 #include <cassert>
@@ -206,7 +206,7 @@ Driver::fidelity_data_type
 Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
 {
     Client* c = clients_[id];
-    const double scale = mean(scale_to_inst, c->s_inst_done);
+    const double scale = fpdiv(scale_to_inst, c->s_inst_done);
 
     fidelity_data_type f{};
 
@@ -224,16 +224,13 @@ Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
     if (GL_RDR_ENABLED)
     {
         // we need to compute the fidelity of each Rz magic state upon consumption
-        double req_completion_cycles = convert_cycles_between_frequencies(rdr_->s_request_completion_cycles_sum,
+        double mean_cycles_per_req = convert_cycles_between_frequencies(rdr_->s_request_latency.mean(),
+                                                                        compute_subsystem_->freq_khz,
+                                                                        freq_khz);
+        double mean_idle_time_per_req = convert_cycles_between_frequencies(rdr_->s_post_completion_idle_time.mean(),
                                                                             compute_subsystem_->freq_khz,
                                                                             freq_khz);
-        double req_idle_cycles = convert_cycles_between_frequencies(rdr_->s_post_completion_idle_time_sum,
-                                                                    compute_subsystem_->freq_khz,
-                                                                    freq_khz);
-
-        double mean_cycles_per_req = mean(req_completion_cycles, rdr_->s_requests_used);
-        double t_gates_per_req = mean(c->s_total_rotation_uops, c->s_total_rotations);
-        double mean_idle_time_per_req = mean(req_idle_cycles, rdr_->s_requests_used);
+        double t_gates_per_req = c->s_rotation_uops.mean();
         double t_infidelity = t_factories_[0]->output_error_probability;
         double reqs = rdr_->s_requests_used * scale;
 
@@ -241,10 +238,10 @@ Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
 
         double ler_per_d_cycles = configuration::surface_code_logical_error_rate(d, p);
 
-        lg_rdr_f = reqs * mean(mean_cycles_per_req, d) * std::log(1 - ler_per_d_cycles)
+        lg_rdr_f = reqs * fpdiv(mean_cycles_per_req, d) * std::log(1 - ler_per_d_cycles)
                     + 0.5 * reqs * t_gates_per_req * std::log(1 - t_infidelity) // we need to multiply by 0.5 to avoid
                                                                                 // double counting with `lg_compute_f`
-                    + reqs * mean(mean_idle_time_per_req, d) * std::log(1 - ler_per_d_cycles);
+                    + reqs * fpdiv(mean_idle_time_per_req, d) * std::log(1 - ler_per_d_cycles);
     }
 
 

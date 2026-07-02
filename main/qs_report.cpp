@@ -103,11 +103,11 @@ int main(int argc, char* argv[])
 
     generic_strm_close(istrm);
 
-    double t_fraction = mean(t_gates, unrolled_insts);
-    double t_fraction_rz = mean(t_gates_from_rz, unrolled_insts);
-    double t_fraction_ccx = mean(t_gates_from_ccx, unrolled_insts);
-    double cx_fraction = mean(cx_cz_gates, unrolled_insts);
-    double mem_fraction = mean(mem_accesses, unrolled_insts);
+    double t_fraction = fpdiv(t_gates, unrolled_insts);
+    double t_fraction_rz = fpdiv(t_gates_from_rz, unrolled_insts);
+    double t_fraction_ccx = fpdiv(t_gates_from_ccx, unrolled_insts);
+    double cx_fraction = fpdiv(cx_cz_gates, unrolled_insts);
+    double mem_fraction = fpdiv(mem_accesses, unrolled_insts);
 
     print_stat_line(std::cout, "NUM_QUBITS",          num_qubits);
     print_stat_line(std::cout, "T_GATES",             t_gates);

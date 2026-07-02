@@ -51,7 +51,7 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
             active_set = std::move(out.active_set);
 
             stats.memory_accesses += out.memory_accesses.size();
-            stats.total_unused_bandwidth += out.unused_bandwidth;
+            stats.unused_bandwidth.add(out.unused_bandwidth);
             stats.scheduler_epochs++;
         }
         else

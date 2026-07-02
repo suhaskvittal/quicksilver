@@ -73,8 +73,8 @@ Client::retire_instruction(inst_ptr inst)
 
     if (is_memory_access(inst->type))
     {
-        s_memory_accesses++;
-        s_memory_access_latency += inst_latency;
+        s_memory_accesses_done++;
+        s_memory_access_latency.add(inst_latency);
 
         goto kill_instruction;
     }
@@ -87,9 +87,9 @@ Client::retire_instruction(inst_ptr inst)
 
     if (is_rotation_instruction(inst->type))
     {
-        s_rotation_latency += inst_latency;
-        s_total_rotation_uops += inst->original_unrolled_inst_count;
-        s_total_rotations++;
+        s_rotations_done++;
+        s_rotation_latency.add(inst_latency);
+        s_rotation_uops.add(inst->original_unrolled_inst_count);
 
         s_t_gates_done += std::count_if(inst->urotseq.begin(), inst->urotseq.end(), 
                                     [] (auto t) { return is_t_like_instruction(t); });
