@@ -290,8 +290,6 @@ constexpr bool is_rotation_instruction(Instruction::Type);
 constexpr bool is_cx_like_instruction(Instruction::Type);
 constexpr bool is_toffoli_like_instruction(Instruction::Type);
 
-constexpr bool is_pauli_rotation(Instruction::Type);
-
 /*
  * This function is a constexpr function that returns
  * the number of arguments for a given instruction type.

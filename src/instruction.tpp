@@ -112,13 +112,6 @@ is_toffoli_like_instruction(Instruction::Type t)
     return t == Instruction::Type::CCX || t == Instruction::Type::CCZ;
 }
 
-constexpr bool
-is_pauli_rotation(Instruction::Type t)
-{
-    return t == Instruction::Type::PAULI_ROTATION_Q_PI
-            || t == Instruction::Type::PAULI_ROTATION_Q_PI_DAG;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

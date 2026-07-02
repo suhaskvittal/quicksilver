@@ -5,8 +5,8 @@
 
 #include "argparse/argparse.h"
 #include "globals.h"
-#include "perf_sim/configuration/allocator.h"
-#include "perf_sim/configuration/allocator/impl.h"
+#include "sim/configuration/allocator.h"
+#include "sim/configuration/allocator/impl.h"
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

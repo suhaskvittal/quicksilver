@@ -3,16 +3,16 @@
  *  date:   16 January 2026
  * */
 
-#include "perf_sim.h"
-#include "perf_sim/configuration/allocator/impl.h"
-#include "perf_sim/configuration/predefined_ed_protocols.h"
-#include "perf_sim/configuration/resource_estimation.h"
-#include "perf_sim/compute_subsystem.h"
-#include "perf_sim/driver.h"
-#include "perf_sim/memory/bivariate_bicycle.h"
-#include "perf_sim/memory_level.h"
-#include "perf_sim/production/epr.h"
-#include "perf_sim/production/magic_state.h"
+#include "sim.h"
+#include "sim/configuration/allocator/impl.h"
+#include "sim/configuration/predefined_ed_protocols.h"
+#include "sim/configuration/resource_estimation.h"
+#include "sim/compute_subsystem.h"
+#include "sim/driver.h"
+#include "sim/memory/bivariate_bicycle.h"
+#include "sim/memory_level.h"
+#include "sim/production/epr.h"
+#include "sim/production/magic_state.h"
 
 #include "compiler/pass/memory_scheduler.h"
 #include "compiler/pass/memory_scheduler/impl.h"

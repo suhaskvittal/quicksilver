@@ -111,24 +111,24 @@ set(COMPILER_FILES
     src/compiler/pass/util.cpp)
 
 set(SIM_FILES
-    src/perf_sim/configuration/allocator/epr.cpp
-    src/perf_sim/configuration/allocator/magic_state.cpp
-    src/perf_sim/configuration/predefined_ed_protocols.cpp
-    src/perf_sim/configuration/resource_estimation.cpp
-    src/perf_sim/client.cpp
-    src/perf_sim/compute_subsystem.cpp
-    src/perf_sim/driver.cpp
-    src/perf_sim/driver/rdr.cpp
-    src/perf_sim/memory/bivariate_bicycle.cpp
-    src/perf_sim/memory_level.cpp
-    src/perf_sim/operable.cpp
-    src/perf_sim/production.cpp
-    src/perf_sim/production/epr.cpp
-    src/perf_sim/production/magic_state.cpp
-    src/perf_sim/routing.cpp
-#   src/perf_sim/rotation_subsystem.cpp
-    src/perf_sim/stats.cpp
-    src/perf_sim.cpp)
+    src/sim/configuration/allocator/epr.cpp
+    src/sim/configuration/allocator/magic_state.cpp
+    src/sim/configuration/predefined_ed_protocols.cpp
+    src/sim/configuration/resource_estimation.cpp
+    src/sim/client.cpp
+    src/sim/compute_subsystem.cpp
+    src/sim/driver.cpp
+    src/sim/driver/rdr.cpp
+    src/sim/memory/bivariate_bicycle.cpp
+    src/sim/memory_level.cpp
+    src/sim/operable.cpp
+    src/sim/production.cpp
+    src/sim/production/epr.cpp
+    src/sim/production/magic_state.cpp
+    src/sim/routing.cpp
+#   src/sim/rotation_subsystem.cpp
+    src/sim/stats.cpp
+    src/sim.cpp)
 
 ###################################################
 ###################################################

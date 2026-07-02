@@ -116,7 +116,8 @@ Instruction::Instruction(const Instruction& other)
     first_cycle_with_all_load_results_available(other.first_cycle_with_all_load_results_available),
     first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
-    rdr_has_been_visited(other.rdr_has_been_visited),
+    rdr(other.rdr),
+    triage(other.triage),
     current_uop_(other.current_uop_ ? new Instruction(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)
 {}
