@@ -10,6 +10,7 @@
 #include "generic_io.h"
 #include "globals.h"
 #include "small_vector.h"
+
 #include <deque>
 #include <iosfwd>
 #include <optional>
@@ -36,6 +37,9 @@ constexpr std::string_view BASIS_GATES[] =
 
     "nil"
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 class Instruction
 {
@@ -165,26 +169,11 @@ public:
     uint64_t original_unrolled_inst_count{};
 
     /* Rotation-Directed Runahead state variables */
-
     struct
     {
         bool pending{false};
         bool visited{false};
     } rdr;
-    
-    /* Triage state variables */
-    
-    struct
-    {
-        /*
-         * Number of neighbors in the previous, next and same layer.
-         * */
-        uint8_t n_prev{},
-                n_next{},
-                n_same{};
-        bool is_causal{false};
-
-    } triage;
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

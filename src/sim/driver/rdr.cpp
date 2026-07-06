@@ -193,6 +193,8 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
     std::cout << ">>>>>>>>>>\n";
 #endif
     c->dag()->for_each_instruction_in_layer_order(
+                    start_layer,
+                    end_layer,
                     [this, c, cov, &time_to_rotation, &request_count] (inst_ptr x, size_t layer)
                     {
                         cycle_type t = time_to_rotation[x->qubits[0]];
@@ -215,9 +217,7 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
                             std::cout << "installed " << *x << " @ layer = " << layer << "\n";
 #endif
                         }
-                    },
-                    start_layer,
-                    end_layer);
+                    });
 }
 
 ////////////////////////////////////////////////////////////

@@ -119,9 +119,9 @@ hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
     // build the CST:
     auto entry_points = _cst_init(active_set, dag->qubit_count);
     dag->for_each_instruction_in_layer_order(
-            [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); },
             0,
-            conf.hint_lookahead_depth
+            conf.hint_lookahead_depth,
+            [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); }
     );
 
     active_set_type best_active_set = conf.hint_use_complex_selection

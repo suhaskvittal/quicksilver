@@ -117,7 +117,6 @@ Instruction::Instruction(const Instruction& other)
     first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
     rdr(other.rdr),
-    triage(other.triage),
     current_uop_(other.current_uop_ ? new Instruction(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)
 {}
