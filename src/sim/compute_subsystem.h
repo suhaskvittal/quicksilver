@@ -69,6 +69,11 @@ public:
     const size_t dedicated_ancilla_count;
 
     /*
+     * Decoder characteristics:
+     * */
+    const DecoderTraits decoder_traits;
+
+    /*
      * Statistics:
      * */
 

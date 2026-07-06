@@ -9,7 +9,7 @@
 #include <type_traits>
 
 #define TEMPL_PARAMS template <class Impl>
-#define TemplClass  MultiChannelBus<Impl>
+#define TEMPL_CLASS  MultiChannelBus<Impl>
 
 namespace sim
 {
@@ -20,7 +20,7 @@ namespace routing
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS
-TemplClass::MultiChannelBus(size_t _num_channels, size_t num_resources_per_channel)
+TEMPL_CLASS::MultiChannelBus(size_t _num_channels, size_t num_resources_per_channel)
     :num_channels(_num_channels),
     channel_width(num_resources_per_channel),
     channels_(num_channels, channel_type(channel_width, Resource{}))
@@ -32,7 +32,7 @@ TemplClass::MultiChannelBus(size_t _num_channels, size_t num_resources_per_chann
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T> void
-TemplClass::set_location(T obj, int ch, int ro, int co)
+TEMPL_CLASS::set_location(T obj, int ch, int ro, int co)
 {
     id_type x = translate(obj);
     assert(location_map_.find(x) == location_map_.end());
@@ -43,13 +43,13 @@ TemplClass::set_location(T obj, int ch, int ro, int co)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T> bool
-TemplClass::test_local_resource(T obj, cycle_type a, cycle_type b) const
+TEMPL_CLASS::test_local_resource(T obj, cycle_type a, cycle_type b) const
 {
     return _get_local_resource_ref(obj).is_lockable(a, b);
 }
 
 TEMPL_PARAMS template <class T, class U> bool
-TemplClass::test_resources_between(T src, U dst, cycle_type a, cycle_type b) const
+TEMPL_CLASS::test_resources_between(T src, U dst, cycle_type a, cycle_type b) const
 {
     bool can_lock{true};
     _for_each_resource_between(src, dst, [a, b, &can_lock] (const Resource& r) { can_lock &= r.is_lockable(a, b); });
@@ -57,13 +57,13 @@ TemplClass::test_resources_between(T src, U dst, cycle_type a, cycle_type b) con
 }
 
 TEMPL_PARAMS template <class T> void
-TemplClass::lock_local_resource(T obj, cycle_type a, cycle_type b)
+TEMPL_CLASS::lock_local_resource(T obj, cycle_type a, cycle_type b)
 {
     _get_local_resource_ref(obj).lock_for_time_interval(a, b);
 }
 
 TEMPL_PARAMS template <class T, class U> void
-TemplClass::lock_resources_between(T src, U dst, cycle_type a, cycle_type b)
+TEMPL_CLASS::lock_resources_between(T src, U dst, cycle_type a, cycle_type b)
 {
     _for_each_resource_between(src, dst, [a, b] (Resource& r) { r.lock_for_time_interval(a, b); });
 }
@@ -72,7 +72,7 @@ TemplClass::lock_resources_between(T src, U dst, cycle_type a, cycle_type b)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T, class U> void
-TemplClass::swap_locations_of(T x, U y)
+TEMPL_CLASS::swap_locations_of(T x, U y)
 {
     auto x_it = location_map_.find(translate(x)),
          y_it = location_map_.find(translate(y));
@@ -81,7 +81,7 @@ TemplClass::swap_locations_of(T x, U y)
 }
 
 TEMPL_PARAMS template <class T, class U> void
-TemplClass::replace(T out, U in)
+TEMPL_CLASS::replace(T out, U in)
 {
     auto it = location_map_.find(translate(out));
     assert(it != location_map_.end());
@@ -95,13 +95,27 @@ TemplClass::replace(T out, U in)
 
 
 TEMPL_PARAMS template <class T> const Resource&
-TemplClass::get_local_resource_ref(T obj) const
+TEMPL_CLASS::get_local_resource_ref(T obj) const
 {
     return _get_local_resource_ref(obj);
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+TEMPL_PARAMS template <class T, class U> size_t
+TEMPL_CLASS::patch_distance(T src, U dst)
+{
+    size_t d{0};
+    _for_each_resource_between(src, dst, [&d] (const auto&) { d++; return false; });
+    return d;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 TEMPL_PARAMS template <class T, class U, class Callback> void
-TemplClass::for_each_resource_between(T src, U dst, const Callback& callback) const
+TEMPL_CLASS::for_each_resource_between(T src, U dst, const Callback& callback) const
 {
     _for_each_resource_between(src, dst, callback);
 }
@@ -109,8 +123,8 @@ TemplClass::for_each_resource_between(T src, U dst, const Callback& callback) co
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-TEMPL_PARAMS template <class T> typename TemplClass::id_type
-TemplClass::translate(T obj) const
+TEMPL_PARAMS template <class T> typename TEMPL_CLASS::id_type
+TEMPL_CLASS::translate(T obj) const
 {
     if constexpr (std::is_integral<T>::value)
         return static_cast<id_type>(obj);
@@ -122,7 +136,7 @@ TemplClass::translate(T obj) const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T> auto&
-TemplClass::_get_local_resource_ref(this auto& self, T obj)
+TEMPL_CLASS::_get_local_resource_ref(this auto& self, T obj)
 {
     id_type x = self.translate(obj);
     auto it = self.location_map_.find(x);
@@ -135,7 +149,7 @@ TemplClass::_get_local_resource_ref(this auto& self, T obj)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T, class U, class Callback> void
-TemplClass::_for_each_resource_between(this auto& self, T src, U dst, const Callback& callback)
+TEMPL_CLASS::_for_each_resource_between(this auto& self, T src, U dst, const Callback& callback)
 {
     id_type src_id = self.translate(src),
             dst_id = self.translate(dst);
@@ -198,4 +212,4 @@ TemplClass::_for_each_resource_between(this auto& self, T src, U dst, const Call
 } // namespace sim
 
 #undef TEMPL_PARAMS
-#undef TemplClass
+#undef TEMPL_CLASS

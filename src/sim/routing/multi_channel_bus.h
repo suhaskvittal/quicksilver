@@ -115,6 +115,12 @@ public:
     const Resource& get_local_resource_ref(T) const;
 
     /*
+     * Returns number of patches between two points.
+     * */
+    template <class T, class U>
+    size_t patch_distance(T, U) const;
+
+    /*
      * Calls `Callback` for each routing resource between the two
      * objects. `Callback` is given a `const Resource&`.
      *

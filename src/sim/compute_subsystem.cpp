@@ -21,6 +21,8 @@ using execute_result_type = ComputeSubsystem::execute_result_type;
 using routing_type = ComputeSubsystem::routing_type;
 using r_id_type = routing_type::id_type;
 
+constexpr size_t MAX_QUBITS_PER_CHANNEL{8};
+
 size_t _dedicated_ancilla_count();
 size_t _num_routing_channels(ComputeSubsystem*);
 size_t _channel_width(ComputeSubsystem*);
@@ -99,6 +101,7 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
     dedicated_ancilla_count(_dedicated_ancilla_count()),
+    decoder_traits(code_distance, GL_REACTION_TIME),
     local_memory_(local_memory_capacity),
     t_factories_(t_factories),
     memory_subsystem_(memory_subsystem),
@@ -267,9 +270,10 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
         return result;
     routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
 
-    // update the result latency, which is currently `code_distance + GL_REACTION_TIME + 1`.
-    result.latency = 3*code_distance + GL_REACTION_TIME;   // ZZ with |T> + teleporting XX and ZZ + feedforward
-
+    // update the result latency, which is currently `code_distance + decoder_traits.reaction_time() `.
+    result.latency = 3*code_distance + decoder_traits.reaction_time();   // ZZ with |T> 
+                                                                         // + teleporting XX and ZZ 
+                                                                         // + feedforward
     while (inst->uops_retired() < inst->uop_count() && remaining > 0)
     {
         auto* uop = inst->current_uop();
@@ -281,7 +285,7 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
             if (f_it == t_factories_.end())
                 break;
             (*f_it)->consume(1);
-            result.latency += GL_REACTION_TIME + 1;  // need one cycle to measure |Y> ancilla
+            result.latency += 1 + decoder_traits.reaction_time();  // need one cycle to measure |Y> ancilla
             remaining--;
         }
         result.progress++;
@@ -354,8 +358,8 @@ ComputeSubsystem::rdr_apply_rotation_magic_state_from_surface_code(Qubit* q, Qub
         return false;
     routing_.lock_resources_between(q, m, c, c+d);
 #endif
-    q->cycle_available = c+d+GL_REACTION_TIME;
-    m->cycle_available = c+d+1;
+    q->cycle_available = c + d + decoder_traits.reaction_time();
+    m->cycle_available = c + d + 1;
     return true;
 }
 
@@ -373,7 +377,7 @@ ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
 #endif
-    q->cycle_available = c+d+GL_REACTION_TIME;
+    q->cycle_available = c + d + decoder_traits.reaction_time();
     return true;
 }
 
@@ -469,9 +473,29 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
     if (!dst.has_value())
         return execute_result_type{};
     routing_.lock_resources_between(q, *dst, t_start, t_end);
-    const cycle_type latency = code_distance + GL_REACTION_TIME;
+
+    cycle_type decode_latency;
+    // if the decoder can use a sliding window approach, compute the decode latency with
+    // sliding window decoding (dependent on patch distance).
+    if (decoder_traits.is_swd_supported())
+    {
+        // SWD latency scales with patch distance.
+        const size_t pdist = routing_->patch_distance(q, *dst);
+        const cycle_type swd_latency = decoder_traits.swd_reaction_time() * pdist;
+        if (GL_FORCE_SLIDING_WINDOW_DECODING)
+            decode_latency = swd_latency;
+        else
+            decode_latency = std::min(swd_latency, decoder_traits.pwd_reaction_time());
+    }
+    else
+    {
+        decode_latency = decoder_traits.pwd_reaction_time();
+    }
+
+    // estimate decoding latency:
+    const cycle_type total_latency = code_distance + decode_latency;
     (*f_it)->consume(1);
-    return execute_result_type{.progress=1, .latency=latency};
+    return execute_result_type{.progress=1, .latency=total_latency};
 }
 
 ////////////////////////////////////////////////////////////
@@ -530,7 +554,8 @@ namespace
 size_t
 _num_routing_channels(ComputeSubsystem* c)
 {
-    return 1;
+    const size_t total_capacity = c->local_memory_capacity + c->dedicated_ancilla_count;
+    return (total_capacity + MAX_QUBITS_PER_CHANNEL - 1) / MAX_QUBITS_PER_CHANNEL;
 }
 
 size_t
@@ -539,6 +564,7 @@ _channel_width(ComputeSubsystem* c)
     size_t q_count = c->dedicated_ancilla_count + c->local_memory_capacity;
     if (q_count & 1)
         q_count++;
+    q_count = std::min(MAX_QUBITS_PER_CHANNEL, q_count);
     size_t w = q_count >> 1;
     return w;
 }

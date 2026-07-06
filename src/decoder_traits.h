@@ -17,27 +17,30 @@
 class DecoderTraits
 {
 public:
-    const cycle_type reaction_time;
-    const size_t     code_distance;
+    const size_t code_distance;
+private:
+    const cycle_type reaction_time_;
 public:
     /*
      * Only thing we need to initialize decoder is 
      * reaction time (`tr`) and code distance (`d`)
      * */
-    constexpr DecoderTraits(cycle_type tr, size_t d) :reaction_time(tr), code_distance(d) {}
+    constexpr DecoderTraits(size_t d, cycle_type d_cycle_reaction_time) 
+        :code_distance(d), reaction_time_(d_cycle_reaction_time) 
+    {}
 
     /*
      * `swd_reaction_time()` is 2x the d round reaction time since only d
      * rounds of corrections are committed for every 2d rounds.
      * */
-    constexpr cycle_type swd_reaction_time() { return 2*reaction_time; }
+    constexpr cycle_type swd_reaction_time() { return 2*d_cycle_reaction_time; }
     
     /*
      * `pwd_reaction_time()` is 6x the `d` round reaction time as we need to
      * decode 3d rounds concurrently (assume time is `3*reaction_time`) and
      * we need to do this twice.
      * */
-    constexpr cycle_type pwd_reaction_time() { return 2*3*reaction_time; }
+    constexpr cycle_type pwd_reaction_time() { return 2*3*d_cycle_reaction_time; }
 
     /*
      * `swd_throughput()` is straightforward.
@@ -60,8 +63,8 @@ public:
         return static_cast<size_t>( std::ceil(_n) );
     }
 
-    constexpr bool is_swd_sufficient() const { return swd_throughput() < 1.0+1e-12; }  // +1e-12 for FP-error
-    constexpr bool is_pwd_required() const { return !is_swd_sufficient(); }
+    constexpr bool is_swd_supported() const { return swd_throughput() < 1.0+1e-12; }  // +1e-12 for FP-error
+    constexpr bool is_pwd_required() const { return !is_swd_supported(); }
 };
 
 ////////////////////////////////////////////////////////////

@@ -61,6 +61,8 @@ extern double GL_PHYSICAL_ERROR_RATE;
  * Reaction time in terms of compute cycles.
  * */
 extern int64_t GL_REACTION_TIME;
+extern bool    GL_TRACK_DECODER_PROGRESS;
+extern bool    GL_FORCE_SLIDING_WINDOW_DECODING
 
 /*
  * Reaction-limited T teleportation

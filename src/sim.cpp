@@ -33,6 +33,8 @@ bool GL_T_GATE_DO_AUTOCORRECT{false};
 ////////////////////////////////////////////////////////////
 
 int64_t GL_REACTION_TIME{10};
+bool    GL_TRACK_DECODER_PROGRESS{false};
+
 int64_t GL_RLTP_DEGREE{0};
 
 bool GL_RDR_ENABLED{false};
