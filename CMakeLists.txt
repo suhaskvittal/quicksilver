@@ -281,3 +281,26 @@ target_link_libraries(quicksilver PRIVATE qs_simulator)
 
 ###################################################
 ###################################################
+
+# Validation tests (CTest). Enable with -DBUILD_TESTING=ON (default ON via CTest).
+
+include(CTest)
+
+if (BUILD_TESTING)
+    # One executable per module under test. Each links `qs_simulator`
+    # (which transitively brings in `qs_common`) and registers as one `add_test`.
+    function(qs_add_test name)
+        add_executable(${name} tests/${name}.cpp)
+        target_include_directories(${name} PRIVATE "src" "tests")
+        target_compile_options(${name} PRIVATE ${COMPILE_OPTIONS})
+        target_link_libraries(${name} PRIVATE qs_simulator)
+        add_test(NAME ${name} COMMAND ${name})
+    endfunction()
+
+    qs_add_test(test_resource_estimation)
+    qs_add_test(test_memory_level)
+    qs_add_test(test_operable)
+endif()
+
+###################################################
+###################################################

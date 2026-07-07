@@ -6,6 +6,7 @@
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
 #define SIM_COMPUTE_SUBSYSTEM_h
 
+#include "decoder_traits.h"
 #include "globals.h"
 #include "instruction.h"
 #include "sim/production.h"

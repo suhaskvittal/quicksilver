@@ -104,7 +104,7 @@ TEMPL_CLASS::get_local_resource_ref(T obj) const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T, class U> size_t
-TEMPL_CLASS::patch_distance(T src, U dst)
+TEMPL_CLASS::patch_distance(T src, U dst) const
 {
     size_t d{0};
     _for_each_resource_between(src, dst, [&d] (const auto&) { d++; return false; });

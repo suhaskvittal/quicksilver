@@ -62,7 +62,11 @@ convert_cycles_to_time_ns(cycle_type c, double f)
 cycle_type
 convert_time_ns_to_cycles(uint64_t t_ns, double f)
 {
-    return static_cast<cycle_type>(std::ceil((t_ns*1e-9) * (f*1e3)));
+    // cycles = time_s * freq_hz = (t_ns * 1e-9) * (f * 1e3) = t_ns * f / 1e6.
+    // Dividing by the exactly-representable 1e6 (instead of multiplying by the
+    // inexact 1e-6) keeps a whole number of cycles exact, so ceil() does not
+    // spuriously over-provision by one cycle for some inputs.
+    return static_cast<cycle_type>(std::ceil(static_cast<double>(t_ns) * f / 1e6));
 }
 
 ////////////////////////////////////////////////////////////

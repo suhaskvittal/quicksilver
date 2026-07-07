@@ -10,6 +10,7 @@
 #include "sim/operable.h"
 #include "sim/qubit.h"
 
+#include <cassert>
 #include <iosfwd>
 #include <unordered_set>
 #include <vector>
@@ -109,6 +110,8 @@ public:
      * number of operations by. `d_freq_khz` is the frequency of the driver.
      * */
     virtual double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const =0;
+
+    const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:
     virtual MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) =0;
