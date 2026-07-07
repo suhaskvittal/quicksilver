@@ -68,16 +68,6 @@ cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&,
                                                         cycle_type current_cycle, 
                                                         cycle_type lock_duration);
 
-/*
- * Two versions of `_effective_reaction_time()`.
- * Use the first version when routing overhead is non-existent (simplifies to min of
- * SWD and PWD latency). Use the second version otherwise.
- * */
-cycle_type _effective_reaction_time(const DecoderTraits&);
-
-template <class Src, class Dst>
-cycle_type _effective_reaction_time(const DecoderTraits&, const routing_type&, Src, Dst);
-
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -111,7 +101,6 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
     dedicated_ancilla_count(_dedicated_ancilla_count()),
-    decoder_traits(code_distance, GL_REACTION_TIME),
     local_memory_(local_memory_capacity),
     t_factories_(t_factories),
     memory_subsystem_(memory_subsystem),
@@ -281,11 +270,7 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
     routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
 
     // update the result latency which is incorrect
-    result.latency = 3*code_distance 
-                     + _effective_reaction_time(decoder_traits, routing_, q, *channel_out);  // ZZ with |T> 
-                                                                                                     // + teleporting 
-                                                                                                     //     XX and ZZ 
-                                                                                                     // + feedforward
+    result.latency = 3*code_distance + GL_REACTION_TIME;  // ZZ with |T> + teleporting XX and ZZ + feedforward
     while (inst->uops_retired() < inst->uop_count() && remaining > 0)
     {
         auto* uop = inst->current_uop();
@@ -298,7 +283,7 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
                 break;
             (*f_it)->consume(1);
             // need one cycle to measure |Y> ancilla
-            result.latency += 1 + _effective_reaction_time(decoder_traits);  
+            result.latency += 1 + GL_REACTION_TIME;  
             remaining--;
         }
         result.progress++;
@@ -360,7 +345,7 @@ ComputeSubsystem::rdr_apply_rotation_magic_state_from_surface_code(Qubit* q, Qub
     if (!routing_.test_resources_between(q, m, c, c+d))
         return false;
     routing_.lock_resources_between(q, m, c, c+d);
-    q->cycle_available = c + d + _effective_reaction_time(decoder_traits, routing_, q, m);
+    q->cycle_available = c + d + GL_REACTION_TIME;
     m->cycle_available = c + d + 1;
     return true;
 }
@@ -375,7 +360,7 @@ ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
         return false;
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
-    q->cycle_available = c + d + _effective_reaction_time(decoder_traits, routing_, q, *dst);
+    q->cycle_available = c + d + GL_REACTION_TIME;
     return true;
 }
 
@@ -473,8 +458,7 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
     routing_.lock_resources_between(q, *dst, t_start, t_end);
 
     // estimate decoding latency:
-    const cycle_type total_latency = code_distance 
-                                        + _effective_reaction_time(decoder_traits, routing_, q, *dst);
+    const cycle_type total_latency = code_distance + GL_REACTION_TIME;
     (*f_it)->consume(1);
     return execute_result_type{.progress=1, .latency=total_latency};
 }
@@ -617,39 +601,6 @@ _get_earliest_lockable_time_for_endpoints(routing_type& r, T src, cycle_type c, 
     for (r_id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
         earliest = std::min(earliest, _get_earliest_lockable_time_between(r, src, dst, c, d));
     return earliest;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-cycle_type
-_effective_reaction_time(const DecoderTraits& dec)
-{
-    if (dec.is_swd_supported())
-        return dec.swd_reaction_time();
-    else
-        return dec.pwd_reaction_time();
-}
-
-template <class S, class D> cycle_type
-_effective_reaction_time(const DecoderTraits& dec, const routing_type& r, S src, D dst)
-{
-    cycle_type decode_latency;
-    if (dec.is_swd_supported())
-    {
-        // SWD latency scales with patch distance.
-        const size_t pdist = r.patch_distance(src, dst);
-        const cycle_type swd_latency = dec.swd_reaction_time() * pdist;
-        if (GL_FORCE_SLIDING_WINDOW_DECODING)
-            decode_latency = swd_latency;
-        else
-            decode_latency = std::min(swd_latency, dec.pwd_reaction_time());
-    }
-    else
-    {
-        decode_latency = dec.pwd_reaction_time();
-    }
-    return decode_latency;
 }
 
 ////////////////////////////////////////////////////////////

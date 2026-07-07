@@ -6,7 +6,6 @@
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
 #define SIM_COMPUTE_SUBSYSTEM_h
 
-#include "decoder_traits.h"
 #include "globals.h"
 #include "instruction.h"
 #include "sim/production.h"
@@ -70,14 +69,8 @@ public:
     const size_t dedicated_ancilla_count;
 
     /*
-     * Decoder characteristics:
-     * */
-    const DecoderTraits decoder_traits;
-
-    /*
      * Statistics:
      * */
-
     inst_usage_array s_inst_executed_by_type{};
 private:
     local_storage_type local_memory_;
