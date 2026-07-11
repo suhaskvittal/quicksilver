@@ -174,6 +174,14 @@ public:
         bool pending{false};
         bool visited{false};
     } rdr;
+
+    /* Reaction related state variables */
+    struct
+    {
+        bool retireable{false},
+             executed{false},
+             erroneous{false};
+    } rx;
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute

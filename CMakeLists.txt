@@ -268,6 +268,18 @@ target_link_libraries(qs_throughput_estimator PRIVATE qs_simulator)
 ###################################################
 ###################################################
 
+# Reaction-time decoder simulator (qs_reaction_sim)
+
+add_executable(qs_reaction_sim main/qs_reaction_sim.cpp
+                               main/qs_reaction_sim/history.cpp
+                               main/qs_reaction_sim/sim.cpp)
+target_include_directories(qs_reaction_sim PRIVATE "src" "main")
+target_compile_options(qs_reaction_sim PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_reaction_sim PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Main simulator (quicksilver)
 
 add_executable(quicksilver main/quicksilver.cpp
@@ -300,6 +312,8 @@ if (BUILD_TESTING)
     qs_add_test(test_resource_estimation)
     qs_add_test(test_memory_level)
     qs_add_test(test_operable)
+    qs_add_test(test_routing)
+    qs_add_test(test_stall_monitor)
 endif()
 
 ###################################################

@@ -6,6 +6,8 @@
 #ifndef SIM_STALL_MONITOR_h
 #define SIM_STALL_MONITOR_h
 
+#include "globals.h"   // cycle_type
+
 #include <array>
 #include <cstdint>
 #include <vector>

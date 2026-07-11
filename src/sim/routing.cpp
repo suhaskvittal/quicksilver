@@ -76,7 +76,9 @@ Resource::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
         const auto& [a, b] = usage_.at(i);
         if (b < c)
             continue;
-        if (c+t < a)
+        // Ranges are half-open [a, b): a duration-t lock occupies [c, c+t), so
+        // it fits before this range as long as c+t <= a (adjacency is allowed).
+        if (c+t <= a)
             return c;
         else
             c = b;
