@@ -40,10 +40,11 @@ HistoryEvent::init_idle(qubit_type q)
 }
 
 HistoryEvent*
-HistoryEvent::init_pauli_product_meas(std::initializer_list<qubit_type> qubits, cycle_type d, size_t w)
+HistoryEvent::init_pauli_product_meas(std::initializer_list<qubit_type> qubits, cycle_type d, size_t w, cycle_type c)
 {
     return new HistoryEvent{
                             .type = HistoryEvent::PauliProductMeas,
+                            .cycle_available = c,
                             .duration = d,
                             .patch_count = w,
                             .qubits = std::vector<qubit_type>{qubits}
@@ -51,20 +52,22 @@ HistoryEvent::init_pauli_product_meas(std::initializer_list<qubit_type> qubits, 
 }
 
 HistoryEvent*
-HistoryEvent::init_conditional_basis_meas(inst_ptr owner, qubit_type q)
+HistoryEvent::init_conditional_basis_meas(inst_ptr owner, qubit_type q, cycle_type c)
 {
     return new HistoryEvent{
                             .type = HistoryEvent::CondBasisMeas,
+                            .cycle_available = c,
                             .owning_inst = owner,
                             .qubits = {q}
                         };
 }
 
 HistoryEvent*
-HistoryEvent::init_known_basis_meas(qubit_type q)
+HistoryEvent::init_known_basis_meas(qubit_type q, cycle_type c)
 {
     return new HistoryEvent{
                             .type = HistoryEvent::KnownBasisMeas,
+                            .cycle_available = c,
                             .qubits = {q},
                         };
 }
@@ -72,14 +75,12 @@ HistoryEvent::init_known_basis_meas(qubit_type q)
 HistoryEvent*
 HistoryEvent::init_pauli_correction(qubit_type q, std::initializer_list<HistoryEvent*> driving_meas)
 {
-    // A correction blocks its qubit's decoder iff it is driven by a conditional
-    // basis measurement (T-like); otherwise it is Pauli-frame trackable and may
-    // be decoded past out-of-order (CX/S-like).
-    const bool blocking = std::any_of(driving_meas.begin(), driving_meas.end(), 
-                                [] (const auto* f) { return f->type == HistoryEvent::CondBasisMeas; });
+    // Every Pauli correction is Pauli-frame trackable and never blocks its
+    // qubit's decoder: the decoder may advance past it out-of-order. The only
+    // reaction-time block lives on the CondBasisMeas it may depend on, which
+    // cannot resolve until its own predecessors have finished decoding.
     auto* e = new HistoryEvent{
-                        .type = blocking ? HistoryEvent::BlockingCorrection
-                                         : HistoryEvent::NonblockingCorrection,
+                        .type = HistoryEvent::PauliCorrection,
                         .duration = 0,
                         .qubits = {q}
                     };
@@ -157,6 +158,18 @@ History::retire_front_event(qubit_type q)
     if (!e->is_fully_decoded())
         std::cerr << "History::retire_front_event: event is not fully decoded" << _die{};
 
+    // A successorless idle that is still unresolved is the live tail of an
+    // idling qubit: keep it at the front so it keeps absorbing idle cycles and
+    // being re-decoded, instead of being retired off the front and orphaned
+    // (which would let the next pushed event seize the vacated front slot ahead
+    // of it). It is finalized later via the predecessor cascade in
+    // `resolve_event` -- advancing to a successor if one has since arrived, or
+    // resolving. A resolved (predecessor-less) tail must still retire, else the
+    // qubit would wedge; measurements terminate their qubit, so they too retire
+    // with no successor.
+    if (e->type == HistoryEvent::Idle && e->dependent.empty() && !e->predecessors.empty())
+        return {};
+
     // if we cannot decode OoO (SWD), then check that all predecessors are retired
     if (!can_decode_ooo() && !e->predecessors.empty())
         std::cerr << "History::retire_front_event:: attempted to retire out-of-order with pending predecessors" << _die{};
@@ -231,18 +244,18 @@ History::add_idle(qubit_type q, cycle_type duration)
 ////////////////////////////////////////////////////////////
 
 History::event_add_result_type
-History::add_events_for_instructions(inst_ptr inst)
+History::add_events_for_instructions(inst_ptr inst, cycle_type current_cycle)
 {
     auto* uop = (inst->uop_count() > 0) ? inst->current_uop() : inst;
     if (is_software_instruction(uop->type) || uop->type == Instruction::Type::H)
         return {};
     // only care about CX, S, and T
     if (is_cx_like_instruction(uop->type))
-        return add_cx_like_instruction(uop);
+        return add_cx_like_instruction(uop, current_cycle);
     if (is_s_like_instruction(uop->type))
-        return add_s_like_instruction(uop);
+        return add_s_like_instruction(uop, current_cycle);
     if (is_t_like_instruction(uop->type))
-        return add_t_like_instruction(uop);
+        return add_t_like_instruction(uop, current_cycle);
     std::cerr << "History::add_events_for_instructions: unexpected instruction: " << *uop << _die{};
     return {};
 }
@@ -344,15 +357,15 @@ History::get_ancilla()
 ////////////////////////////////////////////////////////////
 
 History::event_add_result_type
-History::add_cx_like_instruction(inst_ptr inst)
+History::add_cx_like_instruction(inst_ptr inst, cycle_type c)
 {
     qubit_type q0 = inst->qubits[0],
                 q1 = inst->qubits[1],
                 a = get_ancilla();
     // we need to do two PPMs + one known basis measurement
-    auto* ppm1 = HistoryEvent::init_pauli_product_meas({q0, a}, code_distance, 2),
-        * ppm2 = HistoryEvent::init_pauli_product_meas({q1, a}, code_distance, 2),
-        * ma = HistoryEvent::init_known_basis_meas(a);
+    auto* ppm1 = HistoryEvent::init_pauli_product_meas({q0, a}, code_distance, 2, c+code_distance),
+        * ppm2 = HistoryEvent::init_pauli_product_meas({q1, a}, code_distance, 2, c+2*code_distance),
+        * ma = HistoryEvent::init_known_basis_meas(a, c+2*code_distance+1);
     auto* cq0 = HistoryEvent::init_pauli_correction(q0, {ppm1, ma}),
         * cq1 = HistoryEvent::init_pauli_correction(q1, {ppm2});
 
@@ -367,12 +380,12 @@ History::add_cx_like_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 History::event_add_result_type
-History::add_s_like_instruction(inst_ptr inst)
+History::add_s_like_instruction(inst_ptr inst, cycle_type c)
 {
     qubit_type q = inst->qubits[0],
                 a = get_ancilla();
-    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, 2),
-        * ma = HistoryEvent::init_known_basis_meas(a);
+    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, 2, c+code_distance),
+        * ma = HistoryEvent::init_known_basis_meas(a, c+code_distance+1);
     auto* cq = HistoryEvent::init_pauli_correction(q, {ma});
     push_back_events({ppm, ma, cq});
     // Known-basis ancilla: deallocated immediately, no idle-cycle tracking.
@@ -383,12 +396,15 @@ History::add_s_like_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 History::event_add_result_type
-History::add_t_like_instruction(inst_ptr inst)
+History::add_t_like_instruction(inst_ptr inst, cycle_type c)
 {
+    const cycle_type meas_y_latency = code_distance/2 + 2;
+    const cycle_type expected_meas_latency = (meas_y_latency+1) / 2;
+
     qubit_type q = inst->qubits[0],
                 a = get_ancilla();
-    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, 2);
-    auto* ma = HistoryEvent::init_conditional_basis_meas(inst, a);
+    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, 2, c+code_distance);
+    auto* ma = HistoryEvent::init_conditional_basis_meas(inst, a, c+code_distance+expected_meas_latency);
     auto* cq = HistoryEvent::init_pauli_correction(q, {ma});
     push_back_events({ppm, ma, cq});
     return {.ancilla = {a}};
@@ -424,7 +440,7 @@ _event_to_string(HistoryEvent::Type t)
 {
     constexpr std::string_view STR[]
     {
-        "Idle", "PauliProductMeas", "CondBasisMeas", "KnownBasisMeas", "BlockingCorrection", "NonblockingCorrection"
+        "Idle", "PauliProductMeas", "CondBasisMeas", "KnownBasisMeas", "PauliCorrection"
     };
     return STR[static_cast<size_t>(t)];
 }

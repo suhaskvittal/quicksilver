@@ -89,7 +89,7 @@ Driver::operate()
         uop->first_ready_cycle = current_cycle();
 
         // 3. add instruction to `syndrome_history_`
-        auto result = syndrome_history_->add_events_for_instructions(uop);
+        auto result = syndrome_history_->add_events_for_instructions(uop, current_cycle());
         uop->rx.executed = true;
         // 3a. update qubit availability cycle:
         const auto avail_cycle = current_cycle() + _inst_latency(uop->type, code_distance);
@@ -125,17 +125,29 @@ Driver::operate()
                 if (syndrome_history_->front(q) == nullptr)
                     break;
                 auto* e = syndrome_history_->front(q);
-                if (visited.count(e) > 0)
+                if (current_cycle() < e->cycle_available || visited.count(e) > 0)
                     break;
                 visited.insert(e);
 
                 const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
                 const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
 
-                // if there is no more windows to decode, then this can only be a conditional
-                // basis measurement or its dependent correction.
+                // Nothing left to decode for `e`. Two cases:
+                //  - a Pauli correction: non-blocking, so advance the decoder
+                //    front past it (it resolves later via the predecessor
+                //    cascade) and keep decoding this qubit -- no window spent.
+                //  - otherwise a CondBasisMeas still waiting on undecoded
+                //    predecessors, the sole blocking event: stop this qubit.
                 if (volume_to_decode == 0)
+                {
+                    if (e->is_pauli_correction() && syndrome_history_->can_decode_ooo())
+                    {
+                        for (auto a : syndrome_history_->retire_front_event(q))
+                            anc_available_cycle_.erase(a);
+                        continue;
+                    }
                     break;
+                }
 
                 e->volume_decoded += volume_to_decode;
                 if (e->is_fully_decoded())
@@ -171,6 +183,8 @@ Driver::operate()
 void
 Driver::print_progress(std::ostream& ostrm) const
 {
+    ostrm << "t = " << current_cycle() << " ===================================================\n";
+
     ostrm << "DAG front layer:";
     for (auto* inst : dag_->get_front_layer())
         ostrm << "\n\t" << *inst;
@@ -191,6 +205,8 @@ Driver::print_progress(std::ostream& ostrm) const
         }
     }
     ostrm << "\nIPdC = " << ipc()*code_distance 
+            << "\ninst read = " << s_inst_read 
+            << "\ninst done = " << s_inst_done
             << "\n";
 }
 
@@ -252,7 +268,7 @@ void
 Driver::update_stats(inst_ptr inst)
 {
     s_inst_done++;
-    auto latency = current_cycle() - *inst->first_ready_cycle;
+    auto latency = (current_cycle() - *inst->first_ready_cycle);
     if (is_t_like_instruction(inst->type))
         t_latency.add(latency);
 }

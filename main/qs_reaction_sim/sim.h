@@ -71,6 +71,11 @@ private:
     std::unordered_map<qubit_type, cycle_type> anc_available_cycle_;
 
     cycle_type decoder_avail_next_cycle_{0};
+
+    /*
+     * Routing logic:
+     * */
+
 public:
     Driver(std::string trace_file, 
             DecoderTraits,

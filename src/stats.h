@@ -46,7 +46,7 @@ public:
     void add(U);
 
     double mean() const { return fpdiv(sum_, total_); }
-    double std() const { return std::sqrt(fpdiv(sum_sq_, total_) - mean()); }
+    double std() const { return std::sqrt(fpdiv(sum_sq_, total_) - mean()*mean()); }
     T min() const { return min_; }
     T max() const { return max_; }
     size_t total() const { return total_; }

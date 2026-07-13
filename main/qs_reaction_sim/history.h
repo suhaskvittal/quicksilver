@@ -26,10 +26,9 @@ struct HistoryEvent
     {
         Idle,               // qubit idles for n cycles
         PauliProductMeas,
-        CondBasisMeas,      // these are the only "blocking" events
+        CondBasisMeas,      // the sole blocking event: gates its qubit's decoder until its predecessors decode
         KnownBasisMeas,
-        BlockingCorrection,     // correction that gates its qubit's decoder (depends on a CBM, e.g. T)
-        NonblockingCorrection,  // Pauli-frame-trackable correction, decodable out-of-order (e.g. CX, S)
+        PauliCorrection,    // Pauli-frame-trackable correction; never blocks, decodable out-of-order
     };
 
     using enum Type;
@@ -37,6 +36,14 @@ struct HistoryEvent
     using inst_ptr = Instruction*;
 
     Type type;
+    /*
+     * An event can only be decoded once the current cycle exceeds `cycle_available`
+     * */
+    cycle_type cycle_available{};
+    /*
+     * `duration` and `patch_count` dictate the amount of volume that must be decoded.
+     * See `spacetime_volume()` below.
+     * */
     cycle_type duration{1};
     size_t     patch_count{1};
     size_t     volume_decoded{0};
@@ -52,14 +59,16 @@ struct HistoryEvent
      * Initialization functions:
      * */
     static HistoryEvent* init_idle(qubit_type);
-    static HistoryEvent* init_pauli_product_meas(std::initializer_list<qubit_type>, cycle_type d, size_t width);
-    static HistoryEvent* init_conditional_basis_meas(inst_ptr, qubit_type);
-    static HistoryEvent* init_known_basis_meas(qubit_type);
+    static HistoryEvent* init_pauli_product_meas(std::initializer_list<qubit_type>, 
+                                                    cycle_type d, 
+                                                    size_t width, 
+                                                    cycle_type cycle_available);
+    static HistoryEvent* init_conditional_basis_meas(inst_ptr, qubit_type, cycle_type cycle_available);
+    static HistoryEvent* init_known_basis_meas(qubit_type, cycle_type cycle_available);
     static HistoryEvent* init_pauli_correction(qubit_type, std::initializer_list<HistoryEvent*>);
 
     size_t spacetime_volume() const { return duration * patch_count; }
-
-    bool is_pauli_correction() const { return type == BlockingCorrection || type == NonblockingCorrection; }
+    bool is_pauli_correction() const { return type == PauliCorrection; }
 
     bool
     is_fully_decoded() const
@@ -122,6 +131,8 @@ public:
     HistoryEvent* back(qubit_type q) const { return back_layer_[q]; }
 
     /*
+     * AI-GENERATED
+     *
      * Retires the fully-decoded front event on `q`, cascading resolution
      * through the predecessor graph. Returns the conditional-basis (T-like)
      * ancillas freed during this call -- the only ancillas the Driver
@@ -130,7 +141,13 @@ public:
     std::vector<qubit_type> retire_front_event(qubit_type);
 
     void add_idle(qubit_type, cycle_type duration);
-    event_add_result_type add_events_for_instructions(inst_ptr);
+
+    /*
+     * Auto-generates decoding events for given instruction. Events are made
+     * available at a future time depending on the instruction and current cycle.
+     * See `HistoryEvent::cycle_available`
+     * */
+    event_add_result_type add_events_for_instructions(inst_ptr, cycle_type current_cycle);
     
     size_t event_count() const { return event_count_; }
     bool can_decode_ooo() const { return decoding_method == DecodingMethod::PWD; }
@@ -141,6 +158,8 @@ private:
     void push_back_events(std::initializer_list<HistoryEvent*> arr) { for (auto* e : arr) push_back_event(e); }
 
     /*
+     * AI-GENERATED
+     *
      * `advance_front_past` moves `front_layer_` forward for every qubit for
      * which `e` is currently the front, promoting the appropriate dependent
      * (or nullptr). It is idempotent: a no-op for an event no longer fronting
@@ -157,9 +176,9 @@ private:
     void advance_front_past(HistoryEvent*);
     void resolve_event(HistoryEvent*, std::vector<qubit_type>& freed);
 
-    event_add_result_type add_cx_like_instruction(inst_ptr);
-    event_add_result_type add_s_like_instruction(inst_ptr);
-    event_add_result_type add_t_like_instruction(inst_ptr);
+    event_add_result_type add_cx_like_instruction(inst_ptr, cycle_type);
+    event_add_result_type add_s_like_instruction(inst_ptr, cycle_type);
+    event_add_result_type add_t_like_instruction(inst_ptr, cycle_type);
 };
 
 ////////////////////////////////////////////////////////////
