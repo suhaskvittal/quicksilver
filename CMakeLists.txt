@@ -272,11 +272,10 @@ target_link_libraries(qs_throughput_estimator PRIVATE qs_simulator)
 
 add_executable(qs_reaction_sim main/qs_reaction_sim.cpp
                                main/qs_reaction_sim/history.cpp
-                               main/qs_reaction_sim/sim.cpp
-                                src/sim/operable.cpp)
+                               main/qs_reaction_sim/sim.cpp)
 target_include_directories(qs_reaction_sim PRIVATE "src" "main")
 target_compile_options(qs_reaction_sim PRIVATE ${COMPILE_OPTIONS})
-target_link_libraries(qs_reaction_sim PRIVATE qs_common)
+target_link_libraries(qs_reaction_sim PRIVATE qs_simulator)
 
 ###################################################
 ###################################################

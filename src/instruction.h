@@ -181,6 +181,9 @@ public:
         bool retireable{false},
              executed{false},
              erroneous{false};
+
+        // we need this to calculate spacetime volume consumed
+        size_t routing_space_consumed{0};
     } rx;
 private:
     /*

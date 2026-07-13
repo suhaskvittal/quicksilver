@@ -107,7 +107,27 @@ TEMPL_PARAMS template <class T, class U> size_t
 TEMPL_CLASS::patch_distance(T src, U dst) const
 {
     size_t d{0};
-    _for_each_resource_between(src, dst, [&d] (const auto&) { d++; return false; });
+    for_each_resource_between(src, dst, [&d] (const auto&) { d++; return false; });
+    // we also need to handle the case where `src` and `dst` are in different
+    // channels:
+    //
+    // only when dst or src are not one of the channel entries
+    if (src == MCB_LEFT_ENTRY || src == MCB_RIGHT_ENTRY || dst == MCB_LEFT_ENTRY || dst == MCB_RIGHT_ENTRY)
+        return d;
+    auto [s_ch, s_ro, s_co] = location_map_.at(src);
+    auto [d_ch, d_ro, d_co] = location_map_.at(dst);
+    if (s_ch != d_ch)
+    {
+        if (s_ch > d_ch)
+            std::swap(s_ch, d_ch);
+        // we need to adjust `d` for the channel difference.
+        const size_t channels_traversed_exc = d_ch - s_ch - 1;  // channels traversed that are not the src/dst channel
+        d += 3*channels_traversed_exc;  // these count for three (2 rows + 1 routing row per channel = height of 3)
+        // for src and dst channels, only 2 extra patches per src and dst as we need  to exit via routing row + 
+        // pass some other row . So four total
+        // also subtract one for MCB_LEFT_ENTRY or MCB_RIGHT_ENTRY -- 3 total
+        d += 3;
+    }
     return d;
 }
 

@@ -363,8 +363,8 @@ History::add_cx_like_instruction(inst_ptr inst, cycle_type c)
                 q1 = inst->qubits[1],
                 a = get_ancilla();
     // we need to do two PPMs + one known basis measurement
-    auto* ppm1 = HistoryEvent::init_pauli_product_meas({q0, a}, code_distance, 2, c+code_distance),
-        * ppm2 = HistoryEvent::init_pauli_product_meas({q1, a}, code_distance, 2, c+2*code_distance),
+    auto* ppm1 = HistoryEvent::init_pauli_product_meas({q0, a}, code_distance, inst->rx.routing_space_consumed, c+code_distance),
+        * ppm2 = HistoryEvent::init_pauli_product_meas({q1, a}, code_distance, inst->rx.routing_space_consumed, c+2*code_distance),
         * ma = HistoryEvent::init_known_basis_meas(a, c+2*code_distance+1);
     auto* cq0 = HistoryEvent::init_pauli_correction(q0, {ppm1, ma}),
         * cq1 = HistoryEvent::init_pauli_correction(q1, {ppm2});
@@ -403,7 +403,7 @@ History::add_t_like_instruction(inst_ptr inst, cycle_type c)
 
     qubit_type q = inst->qubits[0],
                 a = get_ancilla();
-    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, 2, c+code_distance);
+    auto* ppm = HistoryEvent::init_pauli_product_meas({q, a}, code_distance, inst->rx.routing_space_consumed, c+code_distance);
     auto* ma = HistoryEvent::init_conditional_basis_meas(inst, a, c+code_distance+expected_meas_latency);
     auto* cq = HistoryEvent::init_pauli_correction(q, {ma});
     push_back_events({ppm, ma, cq});

@@ -16,10 +16,27 @@ namespace rs
 namespace
 {
 
+using routing_type = Driver::routing_type;
+
+constexpr size_t CHANNEL_CAPACITY{32};
+
+/*
+ * `n` = program qubits. Used to set up routing object.
+ * */
+size_t _num_routing_channels(size_t);
+size_t _channel_width(size_t);
+
 bool _can_retire_immediately(Instruction::Type);
 cycle_type _inst_latency(Instruction::Type, size_t d);
 
 } // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+Driver::routing_type::routing_type(size_t n)
+    :sim::routing::MultiChannelBus<routing_type>(_num_routing_channels(n), _channel_width(n))
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -35,6 +52,7 @@ Driver::Driver(std::string trace_file,
     decoder_count(_decoder_count),
     code_distance(_code_distance)
 {
+    // Open trace file:
     uint32_t qubit_count{};
     generic_strm_open(trace_strm_, trace_file, "rb");
     generic_strm_read(trace_strm_, &qubit_count, sizeof(uint32_t));
@@ -45,6 +63,19 @@ Driver::Driver(std::string trace_file,
 
     program_qubit_available_cycle_.resize(program_qubits_, 0);
     anc_available_cycle_.reserve(128);
+
+    // initialize routing:
+    routing_ = std::make_unique<routing_type>(program_qubits());
+    for (qubit_type i = 0; i < program_qubits(); i++)
+    {
+        size_t ii{i};
+        const auto ch = ii % routing_->num_channels;
+        ii /= routing_->num_channels;
+        const auto ro = ii % 2;
+        ii /= 2;
+        const auto co = ii;
+        routing_->set_location(i, ch, ro, co);
+    }
 }
 
 
@@ -80,25 +111,12 @@ Driver::operate()
         if (uop->rx.executed)
             continue;
 
-        // check if operands are available:
-        const bool all_available = std::all_of(uop->qubits.begin(), uop->qubits.end(),
-                                        [this] (auto q) { return current_cycle() >= program_qubit_available_cycle_[q]; });
-        if (!all_available)
+        // 2a. execute:
+        const bool success = execute_instruction(uop);
+        if (!success)
             continue;
 
-        uop->first_ready_cycle = current_cycle();
-
-        // 3. add instruction to `syndrome_history_`
-        auto result = syndrome_history_->add_events_for_instructions(uop, current_cycle());
-        uop->rx.executed = true;
-        // 3a. update qubit availability cycle:
-        const auto avail_cycle = current_cycle() + _inst_latency(uop->type, code_distance);
-        for (auto q : uop->qubits)
-            program_qubit_available_cycle_[q] = avail_cycle;
-        for (auto q : result.ancilla)
-            anc_available_cycle_[q] = avail_cycle;
-
-        // 4. if the instruction is a clifford, then we can retire it
+        // 2b. if the instruction is a clifford, then we can retire it
         // immediately.
         if (_can_retire_immediately(uop->type))
         {
@@ -107,67 +125,11 @@ Driver::operate()
         }
     }
 
-    // 5. handle decoding in `syndrome_history_`
+    // 3. handle decoding in `syndrome_history_`
     if (current_cycle() >= decoder_avail_next_cycle_)
-    {
-        // TODO: we need to also handle limited amounts of decoders.
-        // This assumes that we have `decoder_count` decoders per program
-        // qubit.
-        std::unordered_set<HistoryEvent*> visited;  // avoid double counting
-        visited.reserve(program_qubits());
-        for (qubit_type q = 0; q < syndrome_history_->max_qubits; q++)
-        {
-            // amount of windows decoded depends on `decoder_count` = 2*decoder_count,
-            const size_t max_windows = 2*decoder_count; 
-            size_t windows_decoded{0};
-            while (windows_decoded < max_windows)
-            {
-                if (syndrome_history_->front(q) == nullptr)
-                    break;
-                auto* e = syndrome_history_->front(q);
-                if (current_cycle() < e->cycle_available || visited.count(e) > 0)
-                    break;
-                visited.insert(e);
+        decode_qubit_histories();
 
-                const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
-                const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
-
-                // Nothing left to decode for `e`. Two cases:
-                //  - a Pauli correction: non-blocking, so advance the decoder
-                //    front past it (it resolves later via the predecessor
-                //    cascade) and keep decoding this qubit -- no window spent.
-                //  - otherwise a CondBasisMeas still waiting on undecoded
-                //    predecessors, the sole blocking event: stop this qubit.
-                if (volume_to_decode == 0)
-                {
-                    if (e->is_pauli_correction() && syndrome_history_->can_decode_ooo())
-                    {
-                        for (auto a : syndrome_history_->retire_front_event(q))
-                            anc_available_cycle_.erase(a);
-                        continue;
-                    }
-                    break;
-                }
-
-                e->volume_decoded += volume_to_decode;
-                if (e->is_fully_decoded())
-                {
-                    // Retiring `e` may cascade resolution through the predecessor
-                    // graph and free several ancillas at once (not just `q`'s).
-                    // Drop the lifetime-tracking entry for every freed ancilla:
-                    // leaving a stale entry would keep charging it idle cycles,
-                    // inflating the duration of whatever event later reuses it.
-                    for (auto a : syndrome_history_->retire_front_event(q))
-                        anc_available_cycle_.erase(a);
-                }
-                windows_decoded += volume_to_decode;
-            }
-        }
-        auto tr = dec_traits.pwd_reaction_time();
-        decoder_avail_next_cycle_ = current_cycle() + tr;
-    }
-
-    // 6. end of cycle
+    // 4. end of cycle
     for (qubit_type q = 0; q < program_qubits_; q++)
         if (current_cycle() >= program_qubit_available_cycle_[q])
             syndrome_history_->add_idle(q, 1);
@@ -248,6 +210,98 @@ Driver::fetch_into_dag()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+Driver::execute_instruction(inst_ptr inst)
+{
+    if (is_software_instruction(inst->type) || inst->type == Instruction::Type::H)
+    {
+        inst->first_ready_cycle = current_cycle();  // we need this line to avoid segfaults later.
+        return true;
+    }
+    // check if operands are available:
+    const bool all_available = std::all_of(inst->qubits.begin(), inst->qubits.end(),
+                                    [this] (auto q) { return current_cycle() >= program_qubit_available_cycle_[q]; });
+    if (!all_available)
+        return false;
+
+    // if this operation requires routing, then handle it:
+    const bool routing_space_locked = handle_routing(inst);
+    if (!routing_space_locked)
+        return false;
+
+    inst->first_ready_cycle = current_cycle();
+
+    // add instruction to `syndrome_history_`
+    auto result = syndrome_history_->add_events_for_instructions(inst, current_cycle());
+    inst->rx.executed = true;
+    // update qubit availability cycle:
+    const auto avail_cycle = current_cycle() + _inst_latency(inst->type, code_distance);
+    for (auto q : inst->qubits)
+        program_qubit_available_cycle_[q] = avail_cycle;
+    for (auto q : result.ancilla)
+        anc_available_cycle_[q] = avail_cycle;
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+Driver::decode_qubit_histories()
+{
+    // TODO: we need to also handle limited amounts of decoders.
+    // This assumes that we have `decoder_count` decoders per program
+    // qubit.
+    std::unordered_set<HistoryEvent*> visited;  // avoid double counting
+    visited.reserve(program_qubits());
+    for (qubit_type q = 0; q < syndrome_history_->max_qubits; q++)
+    {
+        // amount of windows decoded depends on `decoder_count` = 2*decoder_count,
+        const size_t max_windows = 2*decoder_count; 
+        size_t windows_decoded{0};
+        while (windows_decoded < max_windows)
+        {
+            if (syndrome_history_->front(q) == nullptr)
+                break;
+            auto* e = syndrome_history_->front(q);
+            if (current_cycle() < e->cycle_available || visited.count(e) > 0)
+                break;
+            visited.insert(e);
+
+            const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
+            const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
+
+            // Nothing left to decode for `e`. Two cases:
+            //  --> this is a pauli correction, so advance decoder
+            //  --> this is a blocked conditional basis measurement, so do not advance
+            if (volume_to_decode == 0)
+            {
+                if (e->is_pauli_correction() && syndrome_history_->can_decode_ooo())
+                {
+                    for (auto a : syndrome_history_->retire_front_event(q))
+                        anc_available_cycle_.erase(a);
+                    continue;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            e->volume_decoded += volume_to_decode;
+            if (e->is_fully_decoded())
+                for (auto a : syndrome_history_->retire_front_event(q))
+                    anc_available_cycle_.erase(a);
+            windows_decoded += volume_to_decode;
+        }
+    }
+    auto tr = dec_traits.pwd_reaction_time();
+    decoder_avail_next_cycle_ = current_cycle() + tr;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 Driver::retire_instruction(inst_ptr inst)
 {
@@ -264,13 +318,74 @@ Driver::retire_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+Driver::handle_routing(inst_ptr inst)
+{
+    const size_t d{code_distance};
+
+    if (is_cx_like_instruction(inst->type))
+    {
+        auto q0 = inst->qubits[0],
+             q1 = inst->qubits[1];
+        if (!routing_->test_resources_between(q0, q1, current_cycle(), current_cycle()+2*d))
+            return false;
+        routing_->lock_resources_between(q0, q1, current_cycle(), current_cycle()+2*d);
+        // set distance between q0 and q1: 
+        const size_t p = routing_->patch_distance(q0, q1) + 2;  // add two for the src/dst themselves
+        inst->rx.routing_space_consumed = p;
+        s_cx_routing_overhead.add(p);
+    }
+    else if (is_s_like_instruction(inst->type))
+    {
+        auto q = inst->qubits[0];
+        if (!routing_->test_local_resource(q, current_cycle(), current_cycle()+d))
+            return false;
+        routing_->lock_local_resource(q, current_cycle(), current_cycle()+d);
+    }
+    else if (is_t_like_instruction(inst->type))
+    {
+        using namespace sim::routing;
+
+        auto q = inst->qubits[0];
+        const bool lhs = routing_->test_resources_between(q, MCB_LEFT_ENTRY, current_cycle(), current_cycle()+d),
+                   rhs = routing_->test_resources_between(q, MCB_RIGHT_ENTRY, current_cycle(), current_cycle()+d);
+        // select between `MCB_LEFT_ENTRY` and `MCB_RIGHT_ENTRY`: whichever is free
+        if (!lhs && !rhs)
+            return false;
+        // compute patch distance to `MCB_LEFT_ENTRY` and `MCB_RIGHT_ENTRY`. In case of `lhs && rhs`,
+        // choose smaller patch distance.
+        const auto p_lhs = routing_->patch_distance(q, MCB_LEFT_ENTRY),
+                    p_rhs = routing_->patch_distance(q, MCB_RIGHT_ENTRY);
+        int64_t dst;
+        size_t p; // patch_distance
+        if (lhs && (!rhs || p_lhs < p_rhs))
+        {
+            dst = MCB_LEFT_ENTRY;
+            p = p_lhs;
+        }
+        else
+        {
+            dst = MCB_RIGHT_ENTRY;
+            p = p_rhs;
+        }
+        routing_->lock_resources_between(q, dst, current_cycle(), current_cycle()+d);
+        p += 2;
+        inst->rx.routing_space_consumed = p;
+        s_t_routing_overhead.add(p);
+    }
+    return true;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 Driver::update_stats(inst_ptr inst)
 {
     s_inst_done++;
     auto latency = (current_cycle() - *inst->first_ready_cycle);
     if (is_t_like_instruction(inst->type))
-        t_latency.add(latency);
+        s_t_latency.add(latency);
 }
 
 ////////////////////////////////////////////////////////////
@@ -278,6 +393,18 @@ Driver::update_stats(inst_ptr inst)
 
 namespace
 {
+
+size_t
+_num_routing_channels(size_t n)
+{
+    return (n+CHANNEL_CAPACITY-1)/CHANNEL_CAPACITY;
+}
+
+size_t
+_channel_width(size_t n)
+{
+    return CHANNEL_CAPACITY/2;
+}
 
 bool
 _can_retire_immediately(Instruction::Type t)

@@ -67,8 +67,12 @@ main(int argc, char* argv[])
             driver->print_progress(std::cout);
     }
 
+    std::cout << "\n\nFINAL_STATS----------------------------------------\n";
+
     print_stat_line(std::cout, "IPdC", driver->ipc() * code_distance);
-    driver->t_latency.dump(std::cout);
+    driver->s_t_latency.dump(std::cout);
+    driver->s_cx_routing_overhead.dump(std::cout);
+    driver->s_t_routing_overhead.dump(std::cout);
 
     delete driver;
     return 0;

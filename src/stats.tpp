@@ -62,6 +62,8 @@ TEMPL_CLASS::add(U _x)
 TEMPL_PARAMS void
 TEMPL_CLASS::dump(std::ostream& ostrm, size_t indent_level) const
 {
+    if (total() == 0)
+        return;
     std::string ind;
     ind.reserve(4*indent_level);
     for (size_t i = 0; i < 4*indent_level; i++)
@@ -69,6 +71,7 @@ TEMPL_CLASS::dump(std::ostream& ostrm, size_t indent_level) const
 
 
     ostrm << ind << name << "\n";
+    print_stat_line(ostrm, ind + "    COUNT", total());
     print_stat_line(ostrm, ind + "    MEAN", mean());
     print_stat_line(ostrm, ind + "    STD", std());
     print_stat_line(ostrm, ind + "    MIN", min());

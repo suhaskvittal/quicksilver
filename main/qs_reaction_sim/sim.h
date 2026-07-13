@@ -12,6 +12,8 @@
 #include "decoder_traits.h"
 #include "generic_io.h"
 #include "sim/operable.h"
+#include "sim/routing.h"
+#include "sim/routing/multi_channel_bus.h"
 #include "stats.h"
 
 #include <memory>
@@ -30,6 +32,16 @@ class Driver : public sim::Operable
 public:
     using inst_ptr = Instruction*;
 
+    /*
+     * Routing data type:
+     * */
+    struct routing_type : public sim::routing::MultiChannelBus<routing_type>
+    {
+        using sim::routing::MultiChannelBus<routing_type>::id_type;
+        
+        routing_type(size_t n);
+    };
+
     const DecoderTraits dec_traits;
     const DecodingMethod dec_method;
     const size_t decoder_count,
@@ -41,7 +53,10 @@ public:
     uint64_t s_inst_done{0},
              s_inst_read{0};
 
-    stats::Histogram<uint64_t> t_latency{"T_LATENCY", 0, 1000, 10};
+    stats::Histogram<uint64_t> s_t_latency{"T_LATENCY", 0, 1000, 10};
+
+    stats::Histogram<size_t> s_cx_routing_overhead{"CX_ROUTING_OVERHEAD", 0, 32, 8},
+                             s_t_routing_overhead{"T_ROUTING_OVERHEAD", 0, 32, 8};
 private:
     /*
      * Stream for workload:
@@ -75,7 +90,7 @@ private:
     /*
      * Routing logic:
      * */
-
+    std::unique_ptr<routing_type> routing_;
 public:
     Driver(std::string trace_file, 
             DecoderTraits,
@@ -96,7 +111,11 @@ public:
     size_t program_qubits() const { return program_qubits_; }
 private:
     void fetch_into_dag();
+    bool execute_instruction(inst_ptr);
+    void decode_qubit_histories();
     void retire_instruction(inst_ptr);
+
+    bool handle_routing(inst_ptr);
 
     void update_stats(inst_ptr);
 };
