@@ -29,7 +29,8 @@ Driver::Driver(std::string trace_file,
                 DecodingMethod m,
                 size_t _decoder_count,
                 size_t _code_distance)
-    :dec_traits(dec),
+    :sim::Operable("ReactionSim", /* does not matter: */ 1),
+    dec_traits(dec),
     dec_method(m),
     decoder_count(_decoder_count),
     code_distance(_code_distance)
@@ -85,6 +86,8 @@ Driver::operate()
         if (!all_available)
             continue;
 
+        uop->first_ready_cycle = current_cycle();
+
         // 3. add instruction to `syndrome_history_`
         auto result = syndrome_history_->add_events_for_instructions(uop);
         uop->rx.executed = true;
@@ -137,12 +140,15 @@ Driver::operate()
                 e->volume_decoded += volume_to_decode;
                 if (e->is_fully_decoded())
                 {
-                    if (e->type == HistoryEvent::CondBasisMeas)
-                        anc_available_cycle_.erase(q);
-                    syndrome_history_->retire_front_event(q);
+                    // Retiring `e` may cascade resolution through the predecessor
+                    // graph and free several ancillas at once (not just `q`'s).
+                    // Drop the lifetime-tracking entry for every freed ancilla:
+                    // leaving a stale entry would keep charging it idle cycles,
+                    // inflating the duration of whatever event later reuses it.
+                    for (auto a : syndrome_history_->retire_front_event(q))
+                        anc_available_cycle_.erase(a);
                 }
                 windows_decoded += volume_to_decode;
-                progress += volume_to_decode;
             }
         }
         auto tr = dec_traits.pwd_reaction_time();
@@ -156,9 +162,42 @@ Driver::operate()
     for (auto [q, c] : anc_available_cycle_)
         if (current_cycle() >= c)
             syndrome_history_->add_idle(q, 1);
-    current_cycle_++;
-
     return progress;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+Driver::print_progress(std::ostream& ostrm) const
+{
+    ostrm << "DAG front layer:";
+    for (auto* inst : dag_->get_front_layer())
+        ostrm << "\n\t" << *inst;
+    ostrm << "\nSyndrome history front layer:";
+
+    std::vector<qubit_type> qubit_print_list(program_qubits());
+    std::iota(qubit_print_list.begin(), qubit_print_list.end(), 0);
+    for (const auto& [q, __unused] : anc_available_cycle_)
+        qubit_print_list.push_back(q);
+    for (auto q : qubit_print_list)
+    {
+        auto* e = syndrome_history_->front(q);
+        if (e != nullptr && e->type != HistoryEvent::Idle)
+        {
+            ostrm << "\n\tq" << q << " : " << *e;
+            for (auto* f : e->predecessors)
+                ostrm << "\n\t\tpred: " << *f;
+        }
+    }
+    ostrm << "\nIPdC = " << ipc()*code_distance 
+            << "\n";
+}
+
+void
+Driver::print_deadlock_info(std::ostream& ostrm) const
+{
+    print_progress(ostrm);
 }
 
 ////////////////////////////////////////////////////////////
@@ -196,13 +235,26 @@ Driver::fetch_into_dag()
 void
 Driver::retire_instruction(inst_ptr inst)
 {
-    s_inst_done++;
+    update_stats(inst->uop_count() > 0 ? inst->current_uop() : inst);
+
     const bool destroy_inst = (inst->uop_count() == 0) || inst->retire_current_uop();
     if (destroy_inst)
     {
         dag_->remove_instruction_from_front_layer(inst);
         delete inst;
     }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+Driver::update_stats(inst_ptr inst)
+{
+    s_inst_done++;
+    auto latency = current_cycle() - *inst->first_ready_cycle;
+    if (is_t_like_instruction(inst->type))
+        t_latency.add(latency);
 }
 
 ////////////////////////////////////////////////////////////

@@ -11,6 +11,8 @@
 #include "dag.h"
 #include "decoder_traits.h"
 #include "generic_io.h"
+#include "sim/operable.h"
+#include "stats.h"
 
 #include <memory>
 #include <string>
@@ -23,7 +25,7 @@ namespace rs
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class Driver
+class Driver : public sim::Operable
 {
 public:
     using inst_ptr = Instruction*;
@@ -38,6 +40,8 @@ public:
      * */
     uint64_t s_inst_done{0},
              s_inst_read{0};
+
+    stats::Histogram<uint64_t> t_latency{"T_LATENCY", 0, 1000, 10};
 private:
     /*
      * Stream for workload:
@@ -66,7 +70,6 @@ private:
     std::vector<cycle_type> program_qubit_available_cycle_;
     std::unordered_map<qubit_type, cycle_type> anc_available_cycle_;
 
-    cycle_type current_cycle_{0};
     cycle_type decoder_avail_next_cycle_{0};
 public:
     Driver(std::string trace_file, 
@@ -76,15 +79,21 @@ public:
             size_t code_distance);
     ~Driver();
 
-    long operate();
+    long operate() override;
 
-    double ipc() const { return fpdiv(s_inst_done, current_cycle_); }
-    cycle_type current_cycle() const { return current_cycle_; }
+    void print_progress(std::ostream&) const;
+    void print_deadlock_info(std::ostream&) const;
 
+    bool eof() const { return generic_strm_eof(trace_strm_); }
+    bool trace_exhausted() const { return eof() && dag_->inst_count() == 0; }
+
+    double ipc() const { return fpdiv(s_inst_done, current_cycle()); }
     size_t program_qubits() const { return program_qubits_; }
 private:
     void fetch_into_dag();
     void retire_instruction(inst_ptr);
+
+    void update_stats(inst_ptr);
 };
 
 ////////////////////////////////////////////////////////////

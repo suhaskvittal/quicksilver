@@ -23,6 +23,8 @@ namespace
 
 constexpr size_t MAX_ANCILLA{128};
 
+constexpr std::string_view _event_to_string(HistoryEvent::Type);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -107,10 +109,20 @@ History::History(size_t n, size_t d, DecodingMethod m)
 
 History::~History()
 {
-    while (event_count_ > 0 && !front_layer_.empty())
+    // `front_layer` in this code segment is NOT the same `front_layer_`
+    // in the class.
+    std::vector<HistoryEvent*> front_layer;
+    for (qubit_type q = 0; q < max_qubits; q++)
+    {
+        auto* e = front(q);
+        if (e != nullptr && e->predecessors.empty())
+            front_layer.push_back(e);
+    }
+
+    while (event_count_ > 0 && !front_layer.empty())
     {
         std::vector<HistoryEvent*> next_front_layer;
-        for (auto* e : front_layer_)
+        for (auto* e : front_layer)
         {
             if (e->predecessors.empty())
             {
@@ -129,14 +141,14 @@ History::~History()
                 next_front_layer.push_back(e);
             }
         }
-        front_layer_ = std::move(next_front_layer);
+        front_layer = std::move(next_front_layer);
     }
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
+std::vector<qubit_type>
 History::retire_front_event(qubit_type q)
 {
     auto* e = front_layer_[q];
@@ -148,7 +160,7 @@ History::retire_front_event(qubit_type q)
     // if we cannot decode OoO (SWD), then check that all predecessors are retired
     if (!can_decode_ooo() && !e->predecessors.empty())
         std::cerr << "History::retire_front_event:: attempted to retire out-of-order with pending predecessors" << _die{};
-    
+
     // `e` has finished decoding: it leaves the front layer. Front promotion
     // is per-qubit, so advance every qubit `e` currently fronts to its
     // dependent. Resolution, by contrast, follows the full predecessor graph
@@ -156,8 +168,10 @@ History::retire_front_event(qubit_type q)
     // last predecessor is removed by another event's `resolve_event`.
     advance_front_past(e);
 
+    std::vector<qubit_type> freed;
     if (e->predecessors.empty())
-        resolve_event(e);
+        resolve_event(e, freed);
+    return freed;
 }
 
 ////////////////////////////////////////////////////////////
@@ -190,7 +204,10 @@ History::add_idle(qubit_type q, cycle_type duration)
     // measurement, or known basis measurement, then we can increment
     // the duration.
     auto* e = back_layer_[q];
-    if (e == nullptr || e->type == HistoryEvent::PauliProductMeas)
+    const bool cannot_append_idle = (e == nullptr)
+                                    || (e->type == HistoryEvent::PauliProductMeas)
+                                    || e->is_pauli_correction();
+    if (cannot_append_idle)
     {
         HistoryEvent* idle = HistoryEvent::init_idle(q);
         idle->duration = duration;
@@ -256,7 +273,7 @@ History::push_back_event(HistoryEvent* e)
 ////////////////////////////////////////////////////////////
 
 void
-History::resolve_event(HistoryEvent* e)
+History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
 {
     if (!e->predecessors.empty())
         std::cerr << "History::resolve_event: attempted to resolve event with pending predecessors" << _die{};
@@ -283,7 +300,7 @@ History::resolve_event(HistoryEvent* e)
         if (e_it != f->predecessors.end())
             f->predecessors.erase(e_it);
         if (f->is_fully_decoded() && f->predecessors.empty())
-            resolve_event(f);
+            resolve_event(f, freed);
     }
 
     for (qubit_type q : e->qubits)
@@ -296,7 +313,15 @@ History::resolve_event(HistoryEvent* e)
     // or conditional-basis) is the last event on that ancilla and resolves after
     // its PPM, so returning the ancilla to the pool here is safe to reuse.
     if (e->type == HistoryEvent::KnownBasisMeas || e->type == HistoryEvent::CondBasisMeas)
+    {
         ancilla_pool_.push_back(e->qubits.front());
+        // Only conditional-basis (T-like) ancillas are lifetime-tracked by the
+        // Driver (`anc_available_cycle_`); a known-basis ancilla is never entered
+        // there. Report only the former in `freed` so the caller drops exactly
+        // the entries it holds -- and does not need a stale-entry no-op for KBM.
+        if (e->type == HistoryEvent::CondBasisMeas)
+            freed.push_back(e->qubits.front());
+    }
 
     delete e;
     event_count_--;
@@ -368,6 +393,43 @@ History::add_t_like_instruction(inst_ptr inst)
     push_back_events({ppm, ma, cq});
     return {.ancilla = {a}};
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::ostream&
+operator<<(std::ostream& ostrm, const HistoryEvent& e)
+{
+    ostrm << _event_to_string(e.type)
+            << " [";
+    for (size_t i = 0; i < e.qubits.size(); i++)
+    {
+        if (i > 0)
+            ostrm << ", ";
+        ostrm << e.qubits[i];
+    }
+    ostrm << "] volume decoded = " << e.volume_decoded << "/" << e.spacetime_volume()
+        << ", pred = " << e.predecessors.size() << ", dep = " << e.dependent.size();
+    return ostrm;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+constexpr std::string_view
+_event_to_string(HistoryEvent::Type t)
+{
+    constexpr std::string_view STR[]
+    {
+        "Idle", "PauliProductMeas", "CondBasisMeas", "KnownBasisMeas", "BlockingCorrection", "NonblockingCorrection"
+    };
+    return STR[static_cast<size_t>(t)];
+}
+
+} // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

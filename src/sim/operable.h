@@ -44,7 +44,7 @@ private:
      * is set.
      * */
     double leap_{0.0};
-    double clock_scale_;
+    double clock_scale_{0.0};
 
     cycle_type cycles_with_no_progress_{0};
 public:

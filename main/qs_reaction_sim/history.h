@@ -45,8 +45,8 @@ struct HistoryEvent
 
     std::vector<qubit_type> qubits;
 
-    std::vector<HistoryEvent*> predecessors,
-                               dependent;
+    std::vector<HistoryEvent*> predecessors{},
+                               dependent{};
 
     /*
      * Initialization functions:
@@ -121,7 +121,13 @@ public:
     HistoryEvent* front(qubit_type q) const { return front_layer_[q]; }
     HistoryEvent* back(qubit_type q) const { return back_layer_[q]; }
 
-    void retire_front_event(qubit_type);
+    /*
+     * Retires the fully-decoded front event on `q`, cascading resolution
+     * through the predecessor graph. Returns the conditional-basis (T-like)
+     * ancillas freed during this call -- the only ancillas the Driver
+     * lifetime-tracks -- so it can drop their `anc_available_cycle_` entries.
+     * */
+    std::vector<qubit_type> retire_front_event(qubit_type);
 
     void add_idle(qubit_type, cycle_type duration);
     event_add_result_type add_events_for_instructions(inst_ptr);
@@ -145,14 +151,21 @@ private:
      * dependents, cascades into any dependent that has now become resolvable
      * (fully decoded with no remaining predecessors -- which also covers
      * zero-volume corrections), clears the back layer, and frees the event.
+     * Any conditional-basis ancilla returned to the pool (by this event or by
+     * a cascaded resolution) is appended to `freed`.
      * */
     void advance_front_past(HistoryEvent*);
-    void resolve_event(HistoryEvent*);
+    void resolve_event(HistoryEvent*, std::vector<qubit_type>& freed);
 
     event_add_result_type add_cx_like_instruction(inst_ptr);
     event_add_result_type add_s_like_instruction(inst_ptr);
     event_add_result_type add_t_like_instruction(inst_ptr);
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::ostream& operator<<(std::ostream&, const HistoryEvent&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
