@@ -27,11 +27,25 @@ REACTION_TIME = 10
 BASELINE_FOOTPRINT = 5000
 
 '''
-    CaT = reduced factory readout latency. The readout-latency fraction is the
-    portion of the readout latency that is retained, so fractions of
-    0.8/0.7/0.6/0.5 correspond to readout-latency reductions of 20/30/40/50%.
+    CaT = reduced factory readout latency. Each system is defined by its base
+    readout latency (in ns) and the retained readout-latency fraction (the
+    reduction is 1 - fraction). For every system we emit a `baseline_<sys>`
+    reference at the same readout latency with no reduction (fraction 1.0) and a
+    `cat_<sys>` run with the reduction; the per-system speedup is reference/CaT.
+
+        system  readout latency   reduction   fraction
+        A       1 us              10%         0.9
+        B       2 us              20%         0.8
+        C       500 ns            20%         0.8
+        D       500 ns            40%         0.6
 '''
-CAT_FRACTIONS = [0.8, 0.7, 0.6, 0.5]
+CAT_SYSTEMS = [
+    # (name, base readout latency in ns, retained readout-latency fraction)
+    ('sysA', 1000, 0.9),
+    ('sysB', 2000, 0.8),
+    ('sysC',  500, 0.7),
+    ('sysD',  500, 0.6),
+]
 
 '''
     Magic-state footprint multipliers for the footprint-sensitivity sweep.
@@ -53,10 +67,6 @@ OCLK_WORKLOADS = [
 ##############################################
 ##############################################
 
-def reduction_tag(frac: float) -> str:
-    # 0.8 -> 'r20', 0.7 -> 'r30', ...
-    return f'r{round((1.0-frac)*100)}'
-
 def get_num_program_qubits(workload_file_path: str) -> int:
     # the trace header stores the program qubit count as a little-endian uint32.
     with lzma.open(workload_file_path, 'rb') as f:
@@ -71,13 +81,15 @@ def total_inst(workload_file_path: str) -> int:
     except FileNotFoundError:
         return 1_000_000_000
 
-def make_kwargs(readout_fraction=None) -> dict:
+def make_kwargs(base_ro_latency=None, readout_fraction=None) -> dict:
     kw = {
         '--regime': REGIME,
         '--reaction-time': REACTION_TIME,
     }
+    if base_ro_latency is not None:
+        kw['--oc-base-ro-latency'] = base_ro_latency
     if readout_fraction is not None:
-        kw['--factory-readout-latency-fraction'] = readout_fraction
+        kw['--oc-ro-latency-fraction'] = readout_fraction
     return kw
 
 ##############################################
@@ -92,49 +104,50 @@ if experiment == 'compile_eif':
                              inst_limit=COMPILE_INST_COUNT,
                              scheduler_id=0)
 
-# Set 1: baseline system.
+# Set 1: per-system baseline references (same readout latency, no reduction).
 if experiment == 'sim_baseline':
     for w in OCLK_WORKLOADS:
-        run_quicksilver(w, PROJECT, 'baseline', 'eif',
-                        inst_limit=SIM_INST_COUNT,
-                        active_set_capacity=COMPUTE_CAPACITY,
-                        total_program_inst=total_inst(w),
-                        print_progress=PRINT_PROGRESS,
-                        factory_budget=BASELINE_FOOTPRINT,
-                        kwargs=make_kwargs())
-
-# Set 2: CaT system (reduced factory readout latency).
-if experiment == 'sim_cat':
-    for w in OCLK_WORKLOADS:
-        for frac in CAT_FRACTIONS:
-            run_quicksilver(w, PROJECT, f'cat_{reduction_tag(frac)}', 'eif',
+        for (sys, latency, frac) in CAT_SYSTEMS:
+            run_quicksilver(w, PROJECT, f'baseline_{sys}', 'eif',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=COMPUTE_CAPACITY,
                             total_program_inst=total_inst(w),
                             print_progress=PRINT_PROGRESS,
                             factory_budget=BASELINE_FOOTPRINT,
-                            kwargs=make_kwargs(readout_fraction=frac))
+                            kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=1.0))
 
-# Set 3: magic-state footprint sensitivity (baseline + all CaT configs).
-if experiment == 'sim_footprint':
+# Set 2: CaT systems (reduced readout latency).
+if experiment == 'sim_cat':
     for w in OCLK_WORKLOADS:
-        for mult in FOOTPRINT_MULTIPLIERS:
-            footprint = int(BASELINE_FOOTPRINT*mult)  # 2500, 7500, 10000
-            run_quicksilver(w, PROJECT, f'baseline_msf{footprint}', 'eif',
+        for (sys, latency, frac) in CAT_SYSTEMS:
+            run_quicksilver(w, PROJECT, f'cat_{sys}', 'eif',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=COMPUTE_CAPACITY,
                             total_program_inst=total_inst(w),
                             print_progress=PRINT_PROGRESS,
-                            factory_budget=footprint,
-                            kwargs=make_kwargs())
-            for frac in CAT_FRACTIONS:
-                run_quicksilver(w, PROJECT, f'cat_{reduction_tag(frac)}_msf{footprint}', 'eif',
+                            factory_budget=BASELINE_FOOTPRINT,
+                            kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=frac))
+
+# Set 3: magic-state footprint sensitivity (per-system reference + CaT).
+if experiment == 'sim_footprint':
+    for w in OCLK_WORKLOADS:
+        for mult in FOOTPRINT_MULTIPLIERS:
+            footprint = int(BASELINE_FOOTPRINT*mult)  # 2500, 7500, 10000
+            for (sys, latency, frac) in CAT_SYSTEMS:
+                run_quicksilver(w, PROJECT, f'baseline_{sys}_msf{footprint}', 'eif',
                                 inst_limit=SIM_INST_COUNT,
                                 active_set_capacity=COMPUTE_CAPACITY,
                                 total_program_inst=total_inst(w),
                                 print_progress=PRINT_PROGRESS,
                                 factory_budget=footprint,
-                                kwargs=make_kwargs(readout_fraction=frac))
+                                kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=1.0))
+                run_quicksilver(w, PROJECT, f'cat_{sys}_msf{footprint}', 'eif',
+                                inst_limit=SIM_INST_COUNT,
+                                active_set_capacity=COMPUTE_CAPACITY,
+                                total_program_inst=total_inst(w),
+                                print_progress=PRINT_PROGRESS,
+                                factory_budget=footprint,
+                                kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=frac))
 
 # Set 4: no memory subsystem (compute subsystem = number of program qubits).
 # At full capacity the schedule has no load/store traffic, so we simulate the
@@ -142,20 +155,22 @@ if experiment == 'sim_footprint':
 if experiment == 'sim_nomem':
     for w in OCLK_WORKLOADS:
         nq = get_num_program_qubits(w)
-        run_quicksilver(w, PROJECT, 'baseline_nomem', 'eif',
-                        inst_limit=SIM_INST_COUNT,
-                        active_set_capacity=nq,
-                        total_program_inst=total_inst(w),
-                        print_progress=PRINT_PROGRESS,
-                        factory_budget=BASELINE_FOOTPRINT,
-                        use_compiled_binary=False,
-                        kwargs=make_kwargs())
-        for frac in CAT_FRACTIONS:
-            run_quicksilver(w, PROJECT, f'cat_{reduction_tag(frac)}_nomem', 'eif',
+        for (sys, latency, frac) in CAT_SYSTEMS:
+            # per-system reference: same readout latency, no reduction
+            run_quicksilver(w, PROJECT, f'baseline_{sys}_nomem', 'eif',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=nq,
                             total_program_inst=total_inst(w),
                             print_progress=PRINT_PROGRESS,
                             factory_budget=BASELINE_FOOTPRINT,
                             use_compiled_binary=False,
-                            kwargs=make_kwargs(readout_fraction=frac))
+                            kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=1.0))
+            # CaT: reduced readout latency
+            run_quicksilver(w, PROJECT, f'cat_{sys}_nomem', 'eif',
+                            inst_limit=SIM_INST_COUNT,
+                            active_set_capacity=nq,
+                            total_program_inst=total_inst(w),
+                            print_progress=PRINT_PROGRESS,
+                            factory_budget=BASELINE_FOOTPRINT,
+                            use_compiled_binary=False,
+                            kwargs=make_kwargs(base_ro_latency=latency, readout_fraction=frac))

@@ -40,9 +40,14 @@ int main(int argc, char* argv[])
     uint64_t unrolled_insts{0};
 
     uint64_t t_gates_from_rz{0};
+    uint64_t t_gates_from_rz_corr{0};
     uint64_t t_gates_from_ccx{0};
 
     uint64_t inst_count{0};
+
+    double theta_min = std::numeric_limits<double>::max(),
+           theta_max = 0.0;
+
     while (!generic_strm_eof(istrm)) 
     {
         if (inst_count % print_progress == 0)
@@ -73,9 +78,33 @@ int main(int argc, char* argv[])
         }
         else if (is_rotation_instruction(inst->type))
         {
+            double _x = std::abs(convert_fpa_to_float(inst->angle));
+            double x{_x};
+            for (double q : {2.0, 1.75, 1.5, 1.25, 1.0, 0.75, 0.5, 0.25})
+                if (std::abs(_x - q*M_PI) < x)
+                    x = std::abs(_x - q*M_PI);
+            if (x < 1e-11)
+            {
+                if (_x < M_PI / 8)
+                    std::cout << "skipping Rz(" << std::scientific << std::setprecision(8) << _x << ")\n";
+                delete inst;
+                continue;
+            }
+
             const size_t n = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return is_t_like_instruction(t); });
             t_gates += n;
             t_gates_from_rz += n;
+
+            // this has a correction, then update `t_gates_from_rz_corr`
+            if (GL_USE_RDR_ISA)
+            {
+                const size_t n_corr = std::count_if(inst->corr_urotseq_array[0].begin(), inst->corr_urotseq_array[0].end(), 
+                                                        [] (auto t) { return is_t_like_instruction(t); });
+                t_gates_from_rz_corr += n_corr;
+            }
+
+            theta_min = std::min(theta_min, x);
+            theta_max = std::max(theta_max, x);
         }
         else if (is_cx_like_instruction(inst->type))
         {
@@ -108,6 +137,7 @@ int main(int argc, char* argv[])
     double t_fraction_ccx = mean(t_gates_from_ccx, unrolled_insts);
     double cx_fraction = mean(cx_cz_gates, unrolled_insts);
     double mem_fraction = mean(mem_accesses, unrolled_insts);
+    double corr_ratio = mean(t_gates_from_rz_corr, t_gates_from_rz);
 
     print_stat_line(std::cout, "NUM_QUBITS",          num_qubits);
     print_stat_line(std::cout, "T_GATES",             t_gates);
@@ -122,4 +152,9 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "T_GATE_CCX_%", 100*t_fraction_ccx);
     print_stat_line(std::cout, "CX_GATE_%",    100*cx_fraction);
     print_stat_line(std::cout, "MEM_%",        100*mem_fraction);
+
+    print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO", corr_ratio);
+    print_stat_line(std::cout, "THETA_MIN", theta_min);
+    print_stat_line(std::cout, "THETA_MAX", theta_max);
 }
+

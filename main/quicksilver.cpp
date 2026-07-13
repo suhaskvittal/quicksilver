@@ -98,7 +98,8 @@ main(int argc, char* argv[])
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
-    double oc_factory_readout_latency_fraction;
+    int64_t oc_base_ro_latency;
+    double oc_ro_latency_fraction;
 
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
@@ -160,13 +161,18 @@ main(int argc, char* argv[])
         /*
          * These are parameters for reducing readout latency
          * */
-        .optional("", "--factory-readout-latency-fraction", 
-                    "Percentage of readout latency to retain", 
-                    oc_factory_readout_latency_fraction, 1.0)
+        .optional("", "--oc-base-ro-latency", "Manually set ro latency (general)", oc_base_ro_latency, -1)
+        .optional("", "--oc-ro-latency-fraction", "Readout latency fraction for OC", oc_ro_latency_fraction, 0.9)
 
         .parse(argc, argv);
 
     sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+
+    if (oc_base_ro_latency >= 0)
+    {
+        compute_cycle_time_ns = 400 + oc_base_ro_latency;
+        memory_cycle_time_ns = 600 + oc_base_ro_latency;
+    }
 
     /* Parse trace string and do jit compilation if neeeded */
 
@@ -195,7 +201,8 @@ main(int argc, char* argv[])
     /* initialize magic state factories */
 
     auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
-    ms_specs.back().cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_factory_readout_latency_fraction*800 ));
+    if (oc_base_ro_latency >= 0)
+        ms_specs.back().cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_ro_latency_fraction*oc_base_ro_latency ));
     auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
 
     /* initialize memory subsystem */

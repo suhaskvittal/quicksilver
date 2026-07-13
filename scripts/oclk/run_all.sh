@@ -13,7 +13,7 @@ case "$MODE" in
         ;;
     sim)
         EXPERIMENTS=(
-            sim_baseline
+#           sim_baseline
             sim_cat
             sim_footprint
             sim_nomem

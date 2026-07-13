@@ -3,6 +3,7 @@
  *  date:   5 January 2026
  * */
 
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 
@@ -11,9 +12,16 @@ print_stat_line(std::ostream& out, std::string_view name, T value)
 {
     out << std::setw(64) << std::left << name;
     if constexpr (std::is_floating_point<T>::value)
-        out << std::setw(12) << std::right << std::fixed << std::setprecision(3) << value;
+    {
+        if (std::abs(value) < 1e-2)
+            out << std::setw(12) << std::right << std::scientific << std::setprecision(5) << value;
+        else
+            out << std::setw(12) << std::right << std::fixed << std::setprecision(3) << value;
+    }
     else
+    {
         out << std::setw(12) << std::right << value;
+    }
     out << "\n";
 }
 
