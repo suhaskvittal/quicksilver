@@ -11,7 +11,7 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-LZMA_FILE::LZMA_FILE(FILE* _file_istrm)
+LZMAFile::LZMAFile(FILE* _file_istrm)
     :file_istrm(_file_istrm)
 {
     lzma_strm = LZMA_STREAM_INIT;
@@ -21,14 +21,14 @@ LZMA_FILE::LZMA_FILE(FILE* _file_istrm)
     read_chunk_from_file();
 }
 
-LZMA_FILE::~LZMA_FILE()
+LZMAFile::~LZMAFile()
 {
     if (is_open)
         close();
 }
 
 size_t
-LZMA_FILE::read(void* buf, size_t size)
+LZMAFile::read(void* buf, size_t size)
 {
     lzma_strm.next_out = (uint8_t*)buf;
     lzma_strm.avail_out = size;
@@ -51,13 +51,13 @@ LZMA_FILE::read(void* buf, size_t size)
 }
 
 bool
-LZMA_FILE::eof() const
+LZMAFile::eof() const
 {
     return lzma_strm.avail_in == 0 && feof(file_istrm);
 }
 
 void
-LZMA_FILE::close()
+LZMAFile::close()
 {
     fclose(file_istrm);
     lzma_end(&lzma_strm);
@@ -65,7 +65,7 @@ LZMA_FILE::close()
 }
 
 void
-LZMA_FILE::read_chunk_from_file()
+LZMAFile::read_chunk_from_file()
 {
     size_t bytes_read = fread(lzma_buf, 1, LZMA_BUF_SIZE, file_istrm);
     lzma_strm.next_in = (uint8_t*)lzma_buf;
@@ -85,7 +85,7 @@ generic_strm_open(generic_strm_type& strm, std::string file_path, std::string mo
     else if (file_path.find(".xz") != std::string::npos)
     {
         FILE* file_istrm = fopen(file_path.c_str(), mode.c_str());
-        strm = new LZMA_FILE(file_istrm);
+        strm = new LZMAFile(file_istrm);
     }
     else
     {
@@ -99,12 +99,12 @@ generic_strm_open(generic_strm_type& strm, std::string file_path, std::string mo
 size_t
 generic_strm_read(generic_strm_type& strm, void* buf, size_t size)
 {
-    if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::FILE))
+    if (strm.index() == static_cast<int>(GenericStrmTypeID::FILE))
         return fread(buf, 1, size, std::get<FILE*>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::GZ))
         return gzread(std::get<gzFile>(strm), buf, size);
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ))
-        return std::get<LZMA_FILE*>(strm)->read(buf, size);
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::XZ))
+        return std::get<LZMAFile*>(strm)->read(buf, size);
     else
         throw std::runtime_error("generic_strm_eof: invalid stream type: " + std::to_string(strm.index()));
 }
@@ -112,11 +112,11 @@ generic_strm_read(generic_strm_type& strm, void* buf, size_t size)
 void
 generic_strm_write(generic_strm_type& strm, void* buf, size_t size)
 {
-    if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::FILE))
+    if (strm.index() == static_cast<int>(GenericStrmTypeID::FILE))
         fwrite(buf, 1, size, std::get<FILE*>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::GZ))
         gzwrite(std::get<gzFile>(strm), buf, size);
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::XZ))
         throw std::runtime_error("writing to LZMA file is not supported");
 }
 
@@ -126,23 +126,23 @@ generic_strm_write(generic_strm_type& strm, void* buf, size_t size)
 void
 generic_strm_close(generic_strm_type& strm)
 {
-    if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::FILE))
+    if (strm.index() == static_cast<int>(GenericStrmTypeID::FILE))
         fclose(std::get<FILE*>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::GZ))
         gzclose(std::get<gzFile>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ))
-        std::get<LZMA_FILE*>(strm)->close();
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::XZ))
+        std::get<LZMAFile*>(strm)->close();
 }
 
 bool
 generic_strm_eof(const generic_strm_type& strm)
 {
-    if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::FILE))
+    if (strm.index() == static_cast<int>(GenericStrmTypeID::FILE))
         return feof(std::get<FILE*>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::GZ))
         return gzeof(std::get<gzFile>(strm));
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ))
-        return std::get<LZMA_FILE*>(strm)->eof();
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::XZ))
+        return std::get<LZMAFile*>(strm)->eof();
     else
         throw std::runtime_error("generic_strm_eof: invalid stream type: " + std::to_string(strm.index()));
 }
@@ -153,11 +153,11 @@ generic_strm_eof(const generic_strm_type& strm)
 void
 generic_strm_seek(generic_strm_type& strm, size_t offset, int whence)
 {
-    if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::FILE))
+    if (strm.index() == static_cast<int>(GenericStrmTypeID::FILE))
         fseek(std::get<FILE*>(strm), offset, whence);
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::GZ))
         gzseek(std::get<gzFile>(strm), offset, whence);
-    else if (strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ))
+    else if (strm.index() == static_cast<int>(GenericStrmTypeID::XZ))
         throw std::runtime_error("seeking in LZMA file is not supported");
     else
         throw std::runtime_error("generic_strm_eof: invalid stream type: " + std::to_string(strm.index()));
@@ -169,7 +169,7 @@ generic_strm_seek(generic_strm_type& strm, size_t offset, int whence)
 bool
 generic_strm_is_for_compressed_file(const generic_strm_type& strm)
 {
-    return strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::GZ) || strm.index() == static_cast<int>(GENERIC_STRM_TYPE_ID::XZ);
+    return strm.index() == static_cast<int>(GenericStrmTypeID::GZ) || strm.index() == static_cast<int>(GenericStrmTypeID::XZ);
 }
 
 ////////////////////////////////////////////////////////////

@@ -15,13 +15,13 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-OPERABLE::OPERABLE(std::string_view _name, double _freq_khz)
+Operable::Operable(std::string_view _name, double _freq_khz)
     :name(_name),
     freq_khz(_freq_khz)
 {}
 
 void
-OPERABLE::tick()
+Operable::tick()
 {
     if (leap_ < 1.0)
     {
@@ -49,26 +49,8 @@ OPERABLE::tick()
     }
 }
 
-cycle_type
-OPERABLE::current_cycle() const
-{
-    return current_cycle_;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-double
-compute_freq_khz(uint64_t p_ns)
-{
-    return 1e6 / static_cast<double>(p_ns);
-}
-
-cycle_type
-convert_cycles_between_frequencies(cycle_type cycles, double original_freq_khz, double new_freq_khz)
-{
-    return static_cast<cycle_type>(std::ceil(cycles * new_freq_khz / original_freq_khz));
-}
 
 uint64_t
 convert_cycles_to_time_ns(cycle_type c, double f)
@@ -80,14 +62,18 @@ convert_cycles_to_time_ns(cycle_type c, double f)
 cycle_type
 convert_time_ns_to_cycles(uint64_t t_ns, double f)
 {
-    return static_cast<cycle_type>(std::ceil((t_ns*1e-9) * (f*1e3)));
+    // cycles = time_s * freq_hz = (t_ns * 1e-9) * (f * 1e3) = t_ns * f / 1e6.
+    // Dividing by the exactly-representable 1e6 (instead of multiplying by the
+    // inexact 1e-6) keeps a whole number of cycles exact, so ceil() does not
+    // spuriously over-provision by one cycle for some inputs.
+    return static_cast<cycle_type>(std::ceil(static_cast<double>(t_ns) * f / 1e6));
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-coordinate_clock_scale(std::vector<OPERABLE*> operables)
+coordinate_clock_scale(std::vector<Operable*> operables)
 {
     std::vector<double> freq_array(operables.size());
     std::transform(operables.begin(), operables.end(), freq_array.begin(), [] (auto* op) { return op->freq_khz; });
@@ -100,7 +86,7 @@ coordinate_clock_scale(std::vector<OPERABLE*> operables)
 ////////////////////////////////////////////////////////////
 
 void
-fast_forward_all_operables_to_time_ns(std::vector<OPERABLE*> operables, uint64_t target_time_ns)
+fast_forward_all_operables_to_time_ns(std::vector<Operable*> operables, uint64_t target_time_ns)
 {
     for (auto* op : operables)
         op->current_cycle_ = convert_time_ns_to_cycles(target_time_ns, op->freq_khz);

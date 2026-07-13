@@ -14,7 +14,7 @@ namespace sim
 namespace configuration
 {
 
-struct ED_SPECIFICATION;  // forward-declaration (see `sim/configuration/allocator/impl.h`)
+struct EDSpecification;  // forward-declaration (see `sim/configuration/allocator/impl.h`)
                           
 namespace ed
 {
@@ -37,12 +37,12 @@ namespace ed
  * 2 = [2,1,2]_x * [2,1,2]_y * [2,1,2]_x * [[4,2,2]]  -- output error is 4.5e-12    * found using code
  * 3 = [[17,9,4]] * [[25,18,3]]                        -- output error is 7.4e-11    * found using code
  * */
-std::vector<ED_SPECIFICATION> protocol_0(int64_t ll_buffer_capacity);
-std::vector<ED_SPECIFICATION> protocol_1(int64_t ll_buffer_capacity);
-std::vector<ED_SPECIFICATION> protocol_2(int64_t ll_buffer_capacity);
-std::vector<ED_SPECIFICATION> protocol_3(int64_t ll_buffer_capacity);
-std::vector<ED_SPECIFICATION> protocol_4(int64_t ll_buffer_capacity);
-std::vector<ED_SPECIFICATION> protocol_5(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_0(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_1(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_2(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_3(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_4(int64_t ll_buffer_capacity);
+std::vector<EDSpecification> protocol_5(int64_t ll_buffer_capacity);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

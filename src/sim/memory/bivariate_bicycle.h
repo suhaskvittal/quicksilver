@@ -15,15 +15,15 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class BB_MEMORY : public MEMORY_LEVEL
+class BBMemory : public MemoryLevel
 {
 public:
-    using typename MEMORY_LEVEL::storage_type;
+    using typename MemoryLevel::storage_type;
 
-    struct routing_type : public routing::MULTI_CHANNEL_BUS<routing_type>
+    struct routing_type : public routing::MultiChannelBus<routing_type>
     {
         routing_type(size_t c, size_t w)
-            :MULTI_CHANNEL_BUS(c, w)
+            :MultiChannelBus(c, w)
         {}
     };
 
@@ -40,14 +40,14 @@ private:
      * */
     std::vector<cycle_type> adapters_;
 public:
-    BB_MEMORY(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
+    BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
-    cycle_type next_ready_cycle_for_load(QUBIT*) const override;
-    double log_fidelity(CLIENT*, double, double, double) const override;
+    cycle_type next_ready_cycle_for_load(Qubit*) const override;
+    double log_fidelity(Client*, double, double, double) const override;
 private:
-    MEMORY_ACCESS_RESULT load_impl(size_t idx, storage_type&, QUBIT*) override;
-    MEMORY_ACCESS_RESULT store_impl(size_t idx, storage_type&, QUBIT*) override;
-    MEMORY_ACCESS_RESULT coupled_load_store_impl(size_t idx, storage_type&, QUBIT* ld, QUBIT* st) override;
+    MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) override;
+    MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
+    MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
 
     cycle_type get_latency_of_surgery_operation(size_t idx) const;
 };

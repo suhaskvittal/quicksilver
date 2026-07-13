@@ -25,7 +25,7 @@ uint32_t _read_qubits_and_copy_to_ostrm(generic_strm_type& istrm, generic_strm_t
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-IO_UTILITY::IO_UTILITY(generic_strm_type& _istrm, generic_strm_type& _ostrm)
+IOUtility::IOUtility(generic_strm_type& _istrm, generic_strm_type& _ostrm)
     :num_qubits(_read_qubits_and_copy_to_ostrm(_istrm, _ostrm)),
     istrm(_istrm),
     ostrm(_ostrm)
@@ -33,7 +33,7 @@ IO_UTILITY::IO_UTILITY(generic_strm_type& _istrm, generic_strm_type& _ostrm)
     outgoing_buffer_.reserve(OUTGOING_CAPACITY);
 }
 
-IO_UTILITY::~IO_UTILITY()
+IOUtility::~IOUtility()
 {
     for (auto* inst : outgoing_buffer_)
     {
@@ -46,7 +46,7 @@ IO_UTILITY::~IO_UTILITY()
 ////////////////////////////////////////////////////////////
 
 void
-IO_UTILITY::read_instructions(DAG* d, size_t max_capacity)
+IOUtility::read_instructions(DAG* d, size_t max_capacity)
 {
     while (d->inst_count() < max_capacity && !generic_strm_eof(istrm))
     {
@@ -57,7 +57,7 @@ IO_UTILITY::read_instructions(DAG* d, size_t max_capacity)
 }
 
 void
-IO_UTILITY::write_instruction(inst_ptr inst)
+IOUtility::write_instruction(inst_ptr inst)
 {
     outgoing_buffer_.push_back(inst);
     if (outgoing_buffer_.size() >= OUTGOING_CAPACITY)
@@ -68,7 +68,7 @@ IO_UTILITY::write_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 void
-IO_UTILITY::drain_outgoing_buffer()
+IOUtility::drain_outgoing_buffer()
 {
     auto begin = outgoing_buffer_.begin(),
          end = outgoing_buffer_.begin() + OUTGOING_CAPACITY/2;

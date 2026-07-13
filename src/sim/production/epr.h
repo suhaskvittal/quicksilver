@@ -16,7 +16,7 @@ namespace producer
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class ENT_DISTILLATION : public PRODUCER_BASE
+class EntDistillation : public ProducerBase
 {
 public:
     /*
@@ -46,7 +46,7 @@ private:
      * */
     double error_probability_{0.0};
 public:
-    ENT_DISTILLATION(double freq_khz,
+    EntDistillation(double freq_khz,
                         double output_error_prob,
                         size_t buffer_capacity,
                         size_t input_count,

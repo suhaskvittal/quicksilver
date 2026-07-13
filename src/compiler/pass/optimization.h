@@ -20,7 +20,7 @@ namespace optimization
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct result_type
+struct Result
 {
     /*
      * Amount of progress: definition of progress is up-to
@@ -39,8 +39,8 @@ struct result_type
      * This is a utility operator for aggregating results
      * from multiple passes:
      * */
-    result_type&
-    operator+=(result_type r)
+    Result&
+    operator+=(Result r)
     {
         progress += r.progress;
         s_gates_removed += r.s_gates_removed;
@@ -55,7 +55,7 @@ struct result_type
  * Pass declarations go here:
  * */
 
-result_type cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& istrm);
+Result cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& istrm);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -64,28 +64,28 @@ result_type cancel_and_coalesce(generic_strm_type& ostrm, generic_strm_type& ist
  * `run()` is a template function that generalizes the
  * common body observed in optimization passes.
  *
- * `INIT_CALLBACK` will be given a `IO_UTILITY` reference to initialize
+ * `InitCallback` will be given a `IOUtility` reference to initialize
  * any data with.
  *
- * `LOOP_CALLBACK` is called every loop iteration. The following is passed in:
- *      (1) the output `result_type`
+ * `LoopCallback` is called every loop iteration. The following is passed in:
+ *      (1) the output `Result`
  *      (2) the DAG
- *      (3) the IO_UTILITY
+ *      (3) the IOUtility
  *  If it returns true, then the loop is terminated early.
  *
- * `EXIT_CALLBACK` is called before the function exits to clean up any resources.
- * Like `INIT_CALLBACK`, `IO_UTILITY` is passed in case the pass needs to writeGkkjjkk
+ * `ExitCallback` is called before the function exits to clean up any resources.
+ * Like `InitCallback`, `IOUtility` is passed in case the pass needs to writeGkkjjkk
  * before exiting.
  *
  * Generally, the expectation is that the passes (declared above) will just
  * call `run` inside their body.
  * */
-template <class INIT_CALLBACK, class LOOP_CALLBACK, class EXIT_CALLBACK>
-result_type run(generic_strm_type& ostrm, 
+template <class InitCallback, class LoopCallback, class ExitCallback>
+Result run(generic_strm_type& ostrm, 
                     generic_strm_type& istrm,
-                    const INIT_CALLBACK&,
-                    const LOOP_CALLBACK&,
-                    const EXIT_CALLBACK&,
+                    const InitCallback&,
+                    const LoopCallback&,
+                    const ExitCallback&,
                     size_t dag_inst_capacity=8192);
 
 ////////////////////////////////////////////////////////////

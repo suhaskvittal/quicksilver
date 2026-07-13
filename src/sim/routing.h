@@ -27,7 +27,7 @@ namespace routing
  * code patch used for routing. This is a resource that can be locked
  * for some given amount of time.
  * */
-class RESOURCE
+class Resource
 {
 public:
     constexpr static size_t RANGE_LIMIT{8};
@@ -39,8 +39,8 @@ public:
 private:
     std::vector<range_type> usage_{};
 public:
-    RESOURCE();
-    RESOURCE(const RESOURCE&) =default;
+    Resource();
+    Resource(const Resource&) =default;
 
     /*
      * Locks the routing resource for the given time interval and throws

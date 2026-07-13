@@ -17,19 +17,19 @@ namespace prog
 namespace
 {
 
-using fpa_type = INSTRUCTION::fpa_type;
-using urotseq_type = INSTRUCTION::urotseq_type;
+using fpa_type = Instruction::fpa_type;
+using urotseq_type = Instruction::urotseq_type;
 
 constexpr size_t LUT_COUNT_PER_SIGN{12};
 constexpr size_t LUT_COUNT{2*LUT_COUNT_PER_SIGN};
 
-struct lut_entry
+struct LUTEntry
 {
     double       angle{};
     urotseq_type urotseq;
 };
 
-using lut_type = std::vector<lut_entry>;
+using lut_type = std::vector<LUTEntry>;
 using lut_array = std::array<lut_type, LUT_COUNT>;
 
 /*
@@ -50,7 +50,7 @@ lut_type _read_lut_from_file(generic_strm_type&);
 /*
  * Performs a binary search and returns the closest LUT entry (in terms of value) to the given angle.
  * */
-const lut_entry& _search_for_nearest_entry_in_lut(const lut_type&, const fpa_type&);
+const LUTEntry& _search_for_nearest_entry_in_lut(const lut_type&, const fpa_type&);
 
 /*
  * Returns the LUT index for the given angle.
@@ -138,7 +138,7 @@ namespace
 lut_type
 _read_lut_from_file(generic_strm_type& strm)
 {
-    constexpr size_t UROTSEQ_CAPACITY{256};
+    constexpr size_t UROTSEQ_CAPACITY{512};
 
     lut_type out;
     out.reserve(1024);
@@ -162,12 +162,12 @@ _read_lut_from_file(generic_strm_type& strm)
 
         generic_strm_read(strm, urotseq_bytes, sizeof(uint8_t)*urotseq_byte_count);
 
-        // use data to build `lut_entry`
+        // use data to build `LUTEntry`
         urotseq_type urotseq(urotseq_byte_count);
         std::transform(urotseq_bytes, urotseq_bytes+urotseq_byte_count, urotseq.begin(), 
-                        [] (uint8_t b) { return static_cast<INSTRUCTION::TYPE>(b); });
+                        [] (uint8_t b) { return static_cast<Instruction::Type>(b); });
 
-        lut_entry e{angle, urotseq};
+        LUTEntry e{angle, urotseq};
         // assert that `out` remains sorted if we add `e`
         assert(out.empty() || std::abs(out.back().angle) < std::abs(e.angle));
         out.push_back(e);
@@ -179,7 +179,7 @@ _read_lut_from_file(generic_strm_type& strm)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-const lut_entry&
+const LUTEntry&
 _search_for_nearest_entry_in_lut(const lut_type& lut, const fpa_type& angle)
 {
     const double f = std::abs(convert_fpa_to_float(angle));
@@ -229,7 +229,7 @@ _get_lut_array_idx(const fpa_type& angle)
     {
         double lower_bound = std::pow(10.0, -idx),
                upper_bound = (idx == 0) ? 2*M_PI : std::pow(10.0, -idx+1);
-        if (f > lower_bound && f < upper_bound)
+        if (f >= lower_bound && f < upper_bound)
             return is_negative ? idx+(LUT_COUNT/2) : idx;
         else
             idx++;

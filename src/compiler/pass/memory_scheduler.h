@@ -9,6 +9,7 @@
 #include "dag.h"
 #include "generic_io.h"
 #include "compiler/pass/util.h"
+#include "stats.h"
 
 #include <memory>
 #include <unordered_set>
@@ -35,12 +36,12 @@ using active_set_type = std::unordered_set<qubit_type>;
 ////////////////////////////////////////////////////////////
 
 /*
- * `config_type` allows the user to control
+ * `Config` allows the user to control
  * execution knobs, such as verbosity or active set
  * size.
  * */
 
-struct config_type
+struct Config
 {
     int64_t active_set_capacity{12};
     int64_t inst_compile_limit{15'000'000};
@@ -54,16 +55,16 @@ struct config_type
 };
 
 /*
- * `stats_type` contains relevant compilation
+ * `Stats` contains relevant compilation
  * statistics. Feel free to add your own.
  * */
 
-struct stats_type
+struct Stats
 {
     uint64_t unrolled_inst_done{0};
     uint64_t memory_accesses{0};
     uint64_t scheduler_epochs{0};
-    uint64_t total_unused_bandwidth{0};
+    stats::Histogram<uint64_t> unused_bandwidth{"UNUSED_BANDWIDTH", 0, 32, 8};
 };
 
 ////////////////////////////////////////////////////////////
@@ -79,17 +80,17 @@ struct stats_type
  * This function must take in:
  *  (1) the current active set of qubits (i.e., `const active_set_type&`)
  *  (2) a reference to the DAG (i.e., `const dag_ptr&`)
- *  (3) the configuration (`config_type`)
+ *  (3) the configuration (`Config`)
  *
- * And return `result_type`, which is defined here.
+ * And return `Result`, which is defined here.
  *
- * For constructing `result_type`, it is recommended to create
+ * For constructing `Result`, it is recommended to create
  * a "target active set" (essentially, what you want to have
  * in the active set) and call `transform_active_set` which
  * will handle memory instruction generation for you.
  * */
 
-struct result_type
+struct Result
 {
     /*
      * This is the list of load/store instructions generated during
@@ -118,7 +119,7 @@ struct result_type
  * in the active set. This function converts between the
  * current active set and desired active set.
  * */
-result_type transform_active_set(const active_set_type& current, const active_set_type& target);
+Result transform_active_set(const active_set_type& current, const active_set_type& target);
 
 /*
  * Returns true if all of the instruction's args are in `active_set`
@@ -137,12 +138,12 @@ bool instruction_is_ready(inst_ptr, const active_set_type&);
  *
  * The user must provide a scheduler implementation that
  * has an `emit_memory_instructions` method with signature:
- *   result_type emit_memory_instructions(const active_set_type&,
+ *   Result emit_memory_instructions(const active_set_type&,
  *                                        const dag_ptr&,
- *                                        config_type)
+ *                                        Config)
  * */
-template <class SCHEDULER_IMPL>
-stats_type run(generic_strm_type& ostrm, generic_strm_type& istrm, const SCHEDULER_IMPL&, config_type);
+template <class SchedulerImpl>
+Stats run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl&, Config);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

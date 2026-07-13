@@ -15,10 +15,10 @@ namespace memory_scheduler
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-result_type
+Result
 transform_active_set(const active_set_type& current, const active_set_type& target)
 {
-    result_type out{};
+    Result out{};
     out.active_set = current;  // create copy of `current` -- we will edit this
     out.unused_bandwidth = current.size() - target.size();  // BW >= 0
 
@@ -32,7 +32,7 @@ transform_active_set(const active_set_type& current, const active_set_type& targ
                         [&target] (qubit_type q) { return !target.count(q); });
         if (it == out.active_set.end())
             std::cerr << "memory_scheduler::transform_active_set: could not find victim" << _die{};
-        inst_ptr m = new INSTRUCTION{INSTRUCTION::TYPE::COUPLED_LOAD_STORE, {q, *it}};
+        inst_ptr m = new Instruction{Instruction::Type::COUPLED_LOAD_STORE, {q, *it}};
         out.memory_accesses.push_back(m);
 
         out.active_set.erase(it);

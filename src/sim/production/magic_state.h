@@ -16,7 +16,7 @@ namespace producer
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class T_DISTILLATION : public PRODUCER_BASE
+class TDistillation : public ProducerBase
 {
 public:
     /*
@@ -43,7 +43,7 @@ private:
      * */
     cycle_type cycle_available_{0};
 public:
-    T_DISTILLATION(double freq_khz,
+    TDistillation(double freq_khz,
                     double output_error_prob,
                     size_t buffer_capacity,
                     size_t initial_input_count,
@@ -59,7 +59,7 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class T_CULTIVATION : public PRODUCER_BASE
+class TCultivation : public ProducerBase
 {
 public:
     /*
@@ -78,7 +78,7 @@ private:
     size_t step_{0};
     size_t failure_round_;
 public:
-    T_CULTIVATION(double freq_khz,
+    TCultivation(double freq_khz,
                     double output_error_prob,
                     size_t buffer_capacity,
                     double probability_of_success,

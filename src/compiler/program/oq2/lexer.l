@@ -16,14 +16,14 @@
 
 // redefine `YY_DECL`
 #undef  YY_DECL
-#define YY_DECL     int OQ2_LEXER::yylex(yy::parser::value_type* yylval)
+#define YY_DECL     int OQ2Lexer::yylex(yy::parser::value_type* yylval)
 
 using token = yy::parser::token;
 
 %}
 
 %option c++
-%option yyclass="OQ2_LEXER"
+%option yyclass="OQ2Lexer"
 %option noyywrap
 %option yylineno
 

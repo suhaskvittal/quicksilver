@@ -22,7 +22,7 @@
 namespace
 {
 
-using urotseq_type = INSTRUCTION::urotseq_type;
+using urotseq_type = Instruction::urotseq_type;
 
 /*
  * Writes a single LUT entry to the stream in the binary format

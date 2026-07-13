@@ -17,7 +17,7 @@ namespace
 {
 
 /*
- * These are indices into the `EXPRESSION::generic_value_type` variant.
+ * These are indices into the `Expression::generic_value_type` variant.
  * */
 constexpr size_t INT_IDX{0},
                  FLOAT_IDX{1},
@@ -29,9 +29,9 @@ constexpr size_t INT_IDX{0},
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO::VALUE_INFO(const generic_value_type& value)
+ValueInfo::ValueInfo(const generic_value_type& value)
 {
-    state = STATE::DEFAULT;
+    state = State::DEFAULT;
     if (value.index() == INT_IDX)
     {
         int64_t x = std::get<INT_IDX>(value);
@@ -43,11 +43,11 @@ VALUE_INFO::VALUE_INFO(const generic_value_type& value)
             // get logarithm using ffsll
             ssize_t log2 = ffsll(*(long long*)&x) - 1;
             power_of_two_exponent = log2;
-            state = STATE::POWER_OF_TWO_IS_VALID;
+            state = State::POWER_OF_TWO_IS_VALID;
         }
         else
         {
-            state = STATE::IS_INTEGRAL;
+            state = State::IS_INTEGRAL;
         }
         
         // set the integer value regardless
@@ -67,7 +67,7 @@ VALUE_INFO::VALUE_INFO(const generic_value_type& value)
         {
             floating_point = M_PI;
             fixed_point.set(fpa_type::NUM_BITS - 1, true);
-            state = STATE::CAN_USE_FIXED_POINT;
+            state = State::CAN_USE_FIXED_POINT;
         }
         else if (ident == "e" || ident == "E")
         {
@@ -108,7 +108,7 @@ VALUE_INFO::VALUE_INFO(const generic_value_type& value)
             }
 
             fixed_point = fpa_type(words);
-            state = STATE::CAN_USE_FIXED_POINT;
+            state = State::CAN_USE_FIXED_POINT;
         }
         else
         {
@@ -117,7 +117,7 @@ VALUE_INFO::VALUE_INFO(const generic_value_type& value)
     }
     else if (value.index() == EXPR_IDX)
     {
-        VALUE_INFO v = evaluate_expression(*std::get<EXPR_IDX>(value));
+        ValueInfo v = evaluate_expression(*std::get<EXPR_IDX>(value));
         *this = v;
     }
 }
@@ -125,15 +125,15 @@ VALUE_INFO::VALUE_INFO(const generic_value_type& value)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO
-VALUE_INFO::init_as_one()
+ValueInfo
+ValueInfo::init_as_one()
 {
-    VALUE_INFO v;
+    ValueInfo v;
 
     v.power_of_two_exponent = 0;
     v.integral_value = 1;
     v.floating_point = 1.0;
-    v.state = STATE::ONE;
+    v.state = State::ONE;
 
     return v;
 }
@@ -141,8 +141,8 @@ VALUE_INFO::init_as_one()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO::fpa_type
-VALUE_INFO::readout_fixed_point_angle() const
+ValueInfo::fpa_type
+ValueInfo::readout_fixed_point_angle() const
 {
     return can_use_fixed_point() ? fixed_point
                                  : convert_float_to_fpa<fpa_type::NUM_BITS>(floating_point);
@@ -151,19 +151,19 @@ VALUE_INFO::readout_fixed_point_angle() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO&
-VALUE_INFO::operator+=(VALUE_INFO v)
+ValueInfo&
+ValueInfo::operator+=(ValueInfo v)
 {
-    if (state == STATE::ZERO)
+    if (state == State::ZERO)
     {
         *this = v;
     }
-    else if (v.state != STATE::ZERO)
+    else if (v.state != State::ZERO)
     {
         if (can_use_fixed_point() && v.can_use_fixed_point())
             fpa::add_inplace(fixed_point, v.fixed_point);
         else
-            state = STATE::DEFAULT;
+            state = State::DEFAULT;
 
         // always need to update floating point:
         floating_point += v.floating_point;
@@ -172,31 +172,31 @@ VALUE_INFO::operator+=(VALUE_INFO v)
     return *this;
 }
 
-VALUE_INFO&
-VALUE_INFO::operator-=(VALUE_INFO v)
+ValueInfo&
+ValueInfo::operator-=(ValueInfo v)
 {
-    if (state == STATE::ZERO)
+    if (state == State::ZERO)
     {
         *this = v.negated();
     }
-    else if (v.state != STATE::ZERO)
+    else if (v.state != State::ZERO)
     {
         if (can_use_fixed_point() && v.can_use_fixed_point())
             fpa::sub_inplace(fixed_point, v.fixed_point);
         else
-            state = STATE::DEFAULT;
+            state = State::DEFAULT;
 
         floating_point -= v.floating_point;
     }
     return *this;
 }
 
-VALUE_INFO&
-VALUE_INFO::operator*=(VALUE_INFO v)
+ValueInfo&
+ValueInfo::operator*=(ValueInfo v)
 {
-    if (state == STATE::ZERO || v.state == STATE::ZERO)
+    if (state == State::ZERO || v.state == State::ZERO)
     {
-        *this = VALUE_INFO{};
+        *this = ValueInfo{};
         return *this;
     }
 
@@ -212,7 +212,7 @@ VALUE_INFO::operator*=(VALUE_INFO v)
     {
         fixed_point = v.fixed_point;
         fixed_point.lshft(power_of_two_exponent);
-        state = STATE::CAN_USE_FIXED_POINT;
+        state = State::CAN_USE_FIXED_POINT;
     }
     else if (is_power_of_two() && v.is_power_of_two())
     {
@@ -220,7 +220,7 @@ VALUE_INFO::operator*=(VALUE_INFO v)
     }
     else
     {
-        state = STATE::DEFAULT;
+        state = State::DEFAULT;
     }
 
     is_negated ^= v.is_negated;
@@ -229,14 +229,14 @@ VALUE_INFO::operator*=(VALUE_INFO v)
     return *this;
 }
 
-VALUE_INFO&
-VALUE_INFO::operator/=(VALUE_INFO v)
+ValueInfo&
+ValueInfo::operator/=(ValueInfo v)
 {
-    if (state == STATE::ZERO)
+    if (state == State::ZERO)
         return *this;
-    if (v.state == STATE::ONE)
+    if (v.state == State::ONE)
         return *this;
-    if (v.state == STATE::ZERO)
+    if (v.state == State::ZERO)
         throw std::runtime_error("Division by zero");
 
     if (can_use_fixed_point() && v.is_power_of_two())
@@ -244,7 +244,7 @@ VALUE_INFO::operator/=(VALUE_INFO v)
     else if (is_power_of_two() && v.is_power_of_two())
         power_of_two_exponent -= v.power_of_two_exponent;
     else
-        state = STATE::DEFAULT;
+        state = State::DEFAULT;
 
     is_negated ^= v.is_negated;
 
@@ -252,20 +252,20 @@ VALUE_INFO::operator/=(VALUE_INFO v)
     return *this;
 }
 
-VALUE_INFO&
-VALUE_INFO::operator^=(VALUE_INFO v)
+ValueInfo&
+ValueInfo::operator^=(ValueInfo v)
 {
-    if (state == STATE::ZERO)
+    if (state == State::ZERO)
         return *this;
 
     if (v.is_power_of_two() && v.power_of_two_exponent == 0)
         return *this;
 
-    if (v.state == STATE::ZERO)
+    if (v.state == State::ZERO)
     {
         generic_value_type x;
         x.emplace<INT_IDX>(1);
-        *this = VALUE_INFO(x);
+        *this = ValueInfo(x);
     }
     else
     {
@@ -274,7 +274,7 @@ VALUE_INFO::operator^=(VALUE_INFO v)
         else if (is_power_of_two() && v.is_integral())
             power_of_two_exponent *= v.integral_value;
         else
-            state = STATE::DEFAULT;
+            state = State::DEFAULT;
     }
 
     floating_point = std::pow(floating_point, v.floating_point);
@@ -284,16 +284,16 @@ VALUE_INFO::operator^=(VALUE_INFO v)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-VALUE_INFO
-VALUE_INFO::negated() const
+ValueInfo
+ValueInfo::negated() const
 {
-    VALUE_INFO v = *this;
+    ValueInfo v = *this;
     v.is_negated = !v.is_negated;
     return v;
 }
 
 void
-VALUE_INFO::consume_negated()
+ValueInfo::consume_negated()
 {
     if (is_negated)
     {
@@ -308,28 +308,28 @@ VALUE_INFO::consume_negated()
 ////////////////////////////////////////////////////////////
 
 bool
-VALUE_INFO::can_use_fixed_point() const
+ValueInfo::can_use_fixed_point() const
 {
-    return state == STATE::ZERO || state == STATE::CAN_USE_FIXED_POINT;
+    return state == State::ZERO || state == State::CAN_USE_FIXED_POINT;
 }
 
 bool
-VALUE_INFO::is_power_of_two() const
+ValueInfo::is_power_of_two() const
 {
-    return state == STATE::ONE || state == STATE::POWER_OF_TWO_IS_VALID;
+    return state == State::ONE || state == State::POWER_OF_TWO_IS_VALID;
 }
 
 bool
-VALUE_INFO::is_integral() const
+ValueInfo::is_integral() const
 {
-    return is_power_of_two() || state == STATE::IS_INTEGRAL;
+    return is_power_of_two() || state == State::IS_INTEGRAL;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 std::string
-VALUE_INFO::to_string() const
+ValueInfo::to_string() const
 {
     std::stringstream ss;
 
@@ -346,26 +346,26 @@ VALUE_INFO::to_string() const
     if (is_negated)
         ss << "-";
 
-    if (state == STATE::POWER_OF_TWO_IS_VALID)
+    if (state == State::POWER_OF_TWO_IS_VALID)
     {
         if (power_of_two_exponent <= 13)
             ss << (1L << power_of_two_exponent);
         else
             ss << "2^" << power_of_two_exponent;
     }
-    else if (state == STATE::IS_INTEGRAL)
+    else if (state == State::IS_INTEGRAL)
     {
         ss << integral_value;
     }
-    else if (state == STATE::CAN_USE_FIXED_POINT)
+    else if (state == State::CAN_USE_FIXED_POINT)
     {
         ss << fpa::to_string(fixed_point);
     }
-    else if (state == STATE::DEFAULT)
+    else if (state == State::DEFAULT)
     {
         ss << floating_point;
     }
-    else if (state == STATE::ONE)
+    else if (state == State::ONE)
     {
         ss << "1";
     }
@@ -378,43 +378,6 @@ VALUE_INFO::to_string() const
 
     return ss.str();
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-VALUE_INFO
-operator+(VALUE_INFO a, VALUE_INFO b)
-{
-    return a += b;
-}
-
-VALUE_INFO
-operator-(VALUE_INFO a, VALUE_INFO b)
-{
-    return a -= b;
-}
-
-VALUE_INFO
-operator*(VALUE_INFO a, VALUE_INFO b)
-{
-    return a *= b;
-}
-
-
-VALUE_INFO
-operator/(VALUE_INFO a, VALUE_INFO b)
-{
-    return a /= b;
-}
-
-VALUE_INFO
-operator^(VALUE_INFO a, VALUE_INFO b)
-{
-    return a ^= b;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 }   // namespace prog
 }   // namespace compiler

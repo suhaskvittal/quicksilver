@@ -32,11 +32,11 @@ constexpr ssize_t MIN_LOOKAHEAD{16};
 constexpr ssize_t MAX_LOOKAHEAD{512};
 constexpr ssize_t LOOKAHEAD_DELTA{8};
 
-using inst_ptr = ROTATION_DIRECTED_RUNAHEAD::inst_ptr;
-using request_type = ROTATION_DIRECTED_RUNAHEAD::request_type;
+using inst_ptr = RotationDirectedRunahead::inst_ptr;
+using request_type = RotationDirectedRunahead::request_type;
 
-template <class ITER>
-ITER _find_request_for_instruction(ITER begin, ITER end, inst_ptr);
+template <class Iter>
+Iter _find_request_for_instruction(Iter begin, Iter end, inst_ptr);
 
 /*
  * Updates the estimated time to a rotation (second parameter). If
@@ -56,7 +56,7 @@ RUNAHEAD_RESULT _update_time_to_rotation(const inst_ptr,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs)
+RotationDirectedRunahead::RotationDirectedRunahead(ComputeSubsystem* cs)
     :compute_subsystem_(cs),
     lookahead_depth_(GL_RDR_LOOKAHEAD_DEPTH)
 {
@@ -68,7 +68,7 @@ ROTATION_DIRECTED_RUNAHEAD::ROTATION_DIRECTED_RUNAHEAD(COMPUTE_SUBSYSTEM* cs)
 ////////////////////////////////////////////////////////////
 
 long
-ROTATION_DIRECTED_RUNAHEAD::operate()
+RotationDirectedRunahead::operate()
 {
     long progress{0};
 
@@ -147,8 +147,7 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 
     /* 4. update cycle-level stats */
 
-    s_completion_buffer_occu_sum += completion_buffer_.size();
-    s_completion_buffer_occu_ticks++;
+    s_completion_buffer_occu.add(completion_buffer_.size());
 
     return progress;
 }
@@ -157,9 +156,9 @@ ROTATION_DIRECTED_RUNAHEAD::operate()
 ////////////////////////////////////////////////////////////
 
 void
-ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
+RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
 {
-    if (from->rdr_has_been_visited)
+    if (from->rdr.visited)
         return;
 
 #if defined(RDR_DEBUG)
@@ -202,6 +201,8 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
     std::cout << ">>>>>>>>>>\n";
 #endif
     c->dag()->for_each_instruction_in_layer_order(
+                    start_layer,
+                    end_layer,
                     [this, c, cov, tml, degree, &time_to_rotation, &request_count, &install_count] 
                     (inst_ptr x, size_t layer)
                     {
@@ -231,9 +232,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
                             install_count++;
                         }
                         request_count++;
-                    },
-                    start_layer,
-                    end_layer);
+                    });
 
     if (install_count == 0 && !GL_RDR_FIXED_LOOKAHEAD)
     {
@@ -249,7 +248,7 @@ ROTATION_DIRECTED_RUNAHEAD::do_runahead(CLIENT* c, inst_ptr from)
 ////////////////////////////////////////////////////////////
 
 bool
-ROTATION_DIRECTED_RUNAHEAD::is_done(inst_ptr inst)
+RotationDirectedRunahead::is_done(inst_ptr inst)
 {
     auto b_it = completion_buffer_.find(inst);
     if (b_it != completion_buffer_.end())
@@ -263,8 +262,8 @@ ROTATION_DIRECTED_RUNAHEAD::is_done(inst_ptr inst)
     return false;
 }
 
-ROTATION_DIRECTED_RUNAHEAD::APPLY_MAGIC_STATE_RESULT
-ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
+RotationDirectedRunahead::ApplyMagicStateResult
+RotationDirectedRunahead::apply_magic_state(inst_ptr inst, Qubit* q)
 {
     const bool needs_correction = (GL_RNG() & 1) == 0;
 
@@ -313,11 +312,11 @@ ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
 #endif
 
         s_requests_used++;
-        return needs_correction ? APPLY_MAGIC_STATE_RESULT::NEEDS_CORRECTION : APPLY_MAGIC_STATE_RESULT::GOOD;
+        return needs_correction ? ApplyMagicStateResult::NEEDS_CORRECTION : ApplyMagicStateResult::GOOD;
     }
     else
     {
-        return APPLY_MAGIC_STATE_RESULT::ROUTING_CONTENTION;
+        return ApplyMagicStateResult::ROUTING_CONTENTION;
     }
 }
 
@@ -325,7 +324,7 @@ ROTATION_DIRECTED_RUNAHEAD::apply_magic_state(inst_ptr inst, QUBIT* q)
 ////////////////////////////////////////////////////////////
 
 bool
-ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
+RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 {
     // first search for request amongst `active_requests_`
     auto a_it = _find_request_for_instruction(active_requests_.begin(), active_requests_.end(), inst);
@@ -401,29 +400,23 @@ ROTATION_DIRECTED_RUNAHEAD::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ssize_t
-ROTATION_DIRECTED_RUNAHEAD::lookahead_depth() const
+double
+RotationDirectedRunahead::coverage() const
 {
-    return lookahead_depth_;
+    return fpdiv(s_requests_completed, s_requests_submitted);
 }
 
 double
-ROTATION_DIRECTED_RUNAHEAD::coverage() const
+RotationDirectedRunahead::timeliness() const
 {
-    return mean(s_requests_completed, s_requests_submitted);
-}
-
-double
-ROTATION_DIRECTED_RUNAHEAD::timeliness() const
-{
-    return mean(s_requests_completed - s_requests_interrupted, s_requests_completed);
+    return fpdiv(s_requests_completed - s_requests_interrupted, s_requests_completed);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-ROTATION_DIRECTED_RUNAHEAD::retire_request(request_type& r)
+RotationDirectedRunahead::retire_request(request_type& r)
 {
     r.inst->reset_uops();
     r.done = true;
@@ -435,7 +428,7 @@ ROTATION_DIRECTED_RUNAHEAD::retire_request(request_type& r)
 ////////////////////////////////////////////////////////////
 
 void
-ROTATION_DIRECTED_RUNAHEAD::allocate_free_qubit(QUBIT* q)
+RotationDirectedRunahead::allocate_free_qubit(Qubit* q)
 {
     assert(request_queue_.size() > 0);
 
@@ -458,10 +451,10 @@ ROTATION_DIRECTED_RUNAHEAD::allocate_free_qubit(QUBIT* q)
 ////////////////////////////////////////////////////////////
 
 void
-ROTATION_DIRECTED_RUNAHEAD::enqueue_request(request_type&& r)
+RotationDirectedRunahead::enqueue_request(request_type&& r)
 {
     request_queue_.push_back(r);
-    r.inst->rdr_is_pending = true;
+    r.inst->rdr.pending = true;
     s_requests_submitted++;
 }
 
@@ -469,7 +462,7 @@ ROTATION_DIRECTED_RUNAHEAD::enqueue_request(request_type&& r)
 ////////////////////////////////////////////////////////////
 
 cycle_type
-ROTATION_DIRECTED_RUNAHEAD::current_cycle() const
+RotationDirectedRunahead::current_cycle() const
 {
     return compute_subsystem_->current_cycle();
 }
@@ -478,12 +471,12 @@ ROTATION_DIRECTED_RUNAHEAD::current_cycle() const
 ////////////////////////////////////////////////////////////
 
 void
-ROTATION_DIRECTED_RUNAHEAD::update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time)
+RotationDirectedRunahead::update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time)
 {
     // update stats
-    s_request_uop_sum += uops;
-    s_request_completion_cycles_sum += rz_prep_time;
-    s_post_completion_idle_time_sum += rz_idle_time;
+    s_request_latency.add(rz_prep_time);
+    s_request_latency_norm_uop.add(fpdiv(rz_prep_time, uops));
+    s_post_completion_idle_time.add(rz_idle_time);
 }
 
 ////////////////////////////////////////////////////////////
@@ -495,8 +488,8 @@ namespace
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class ITER> ITER
-_find_request_for_instruction(ITER begin, ITER end, inst_ptr inst)
+template <class Iter> Iter
+_find_request_for_instruction(Iter begin, Iter end, inst_ptr inst)
 {
     return std::find_if(begin, end, [inst] (const auto& r) { return r.inst == inst; });
 }
@@ -530,14 +523,13 @@ _update_time_to_rotation(const inst_ptr inst,
     good_rotation &= (GL_RDR_COST_SCALE*(1.0/cov)*(1.0/tml)*cost < time_to_rotation[inst->qubits[0]]);
     if (good_rotation)
     {
-        if (!inst->rdr_is_pending && !inst->rdr_has_been_visited)
+        if (!inst->rdr.pending && !inst->rdr.visited)
             out = RUNAHEAD_RESULT::GOOD;
         else
             out = RUNAHEAD_RESULT::VISITED;
     }
-
 #if defined(RDR_DEBUG)
-    if (is_rotation_instruction(inst->type) && !inst->rdr_is_pending && !inst->rdr_has_been_visited)
+    if (is_rotation_instruction(inst->type) && !inst->rdr.pending && !inst->rdr.visited)
     {
         std::cout << "inst = " << *inst 
                     << ", cost = " << cost 

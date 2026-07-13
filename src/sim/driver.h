@@ -24,28 +24,28 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class DRIVER : public OPERABLE
+class Driver : public Operable
 {
 public:
-    using inst_ptr = CLIENT::inst_ptr;
+    using inst_ptr = Client::inst_ptr;
 
     /*
-     * Information about a CLIENT's context:
+     * Information about a Client's context:
      * */
     struct context_type
     {
-        std::vector<QUBIT*> active_qubits;
+        std::vector<Qubit*> active_qubits;
         cycle_type          cycle_saved{};
     };
 
     /*
      * Stall monitor:
-     *  `STALL_TYPE` contains the stalls tracked by the compute subsystem. Feel free
+     *  `Stall` contains the stalls tracked by the compute subsystem. Feel free
      *      to add to this type if you want new stats.
-     *  `STALL_MONITOR` tracks where these stalls occur.
+     *  `StallMonitor` tracks where these stalls occur.
      * */
-    enum class STALL_TYPE { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
-    using stall_monitor_type = STALL_MONITOR<static_cast<size_t>(STALL_TYPE::SIZE), STALL_TYPE>;
+    enum class Stall { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
+    using stall_monitor_type = StallMonitor<static_cast<size_t>(Stall::SIZE), Stall>;
 
     /*
      * Fidelity output type
@@ -73,7 +73,7 @@ public:
     uint64_t s_context_switches{0};
     uint64_t s_rotation_instructions{0};
 private:
-    std::vector<CLIENT*> clients_;
+    std::vector<Client*> clients_;
 
     /*
      * Only a subset of clients can execute on the
@@ -84,8 +84,8 @@ private:
      * `last_used_client_idx_` is used to ensure
      * fairness when executing instructions.
      * */
-    std::vector<CLIENT*> active_clients_;
-    std::deque<CLIENT*>  inactive_clients_;
+    std::vector<Client*> active_clients_;
+    std::deque<Client*>  inactive_clients_;
     size_t               last_used_client_idx_{0};
 
     /*
@@ -96,29 +96,29 @@ private:
      *      over everything else.
      * */
     std::vector<context_type>              client_context_table_;
-    std::vector<std::pair<QUBIT*, QUBIT*>> context_switch_memory_access_buffer_;
+    std::vector<std::pair<Qubit*, Qubit*>> context_switch_memory_access_buffer_;
 
-    COMPUTE_SUBSYSTEM* compute_subsystem_;
-    std::vector<PRODUCER_BASE*> t_factories_;
-    std::vector<MEMORY_LEVEL*> memory_subsystem_;
+    ComputeSubsystem* compute_subsystem_;
+    std::vector<ProducerBase*> t_factories_;
+    std::vector<MemoryLevel*> memory_subsystem_;
 
     /*
      * Rotation directed runahead logic (RDR):
      * */
-    driver::ROTATION_DIRECTED_RUNAHEAD* rdr_{nullptr};
+    driver::RotationDirectedRunahead* rdr_{nullptr};
 
     /*
      * `stall_monitor_` manages statistics related to stalls
      * */
     stall_monitor_type stall_monitor_;
 public:
-    DRIVER(std::vector<std::string> client_trace_files, 
+    Driver(std::vector<std::string> client_trace_files, 
             size_t concurrent_clients,
             uint64_t simulation_instructions,
-            COMPUTE_SUBSYSTEM*,
-            std::vector<PRODUCER_BASE*> top_level_t_factories,
-            std::vector<MEMORY_LEVEL*>);
-    ~DRIVER();
+            ComputeSubsystem*,
+            std::vector<ProducerBase*> top_level_t_factories,
+            std::vector<MemoryLevel*>);
+    ~Driver();
 
     void print_progress(std::ostream&) const override;
     void print_deadlock_info(std::ostream&) const override;
@@ -129,7 +129,7 @@ public:
      * This function should be called at the end of the simulation to cleanup any
      * stats.
      * */
-    void stop_simulation();
+    void stop_simulation() { stall_monitor_.commit_contents(); }
 
     /*
      * Estimates application fidelity for given client. As the simulator does not
@@ -138,10 +138,10 @@ public:
      * */
     fidelity_data_type application_fidelity(int client_id, uint64_t scale_to_inst, double p) const;
 
-    COMPUTE_SUBSYSTEM* compute_subsystem() const;
-    const std::vector<CLIENT*>& clients() const;
-    const stall_monitor_type& stall_monitor() const;
-    driver::ROTATION_DIRECTED_RUNAHEAD* rdr() const;
+    ComputeSubsystem* compute_subsystem() const { return compute_subsystem_; }
+    const std::vector<Client*>& clients() const { return clients_; }
+    const stall_monitor_type& stall_monitor() const { return stall_monitor_; }
+    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
 protected:
     long operate() override;
 private:
@@ -154,16 +154,16 @@ private:
      * If the output is not {nullptr, *},
      * `do_context_switch()` is called.
      * */
-    std::pair<CLIENT*, CLIENT*> context_switch_condition() const;
-    void                        do_context_switch(CLIENT* incoming, CLIENT* outgoing);
+    std::pair<Client*, Client*> context_switch_condition() const { return std::make_pair(nullptr, nullptr); }
+    void                        do_context_switch(Client* incoming, Client* outgoing);
 
     /*
-     * This is a wrapper for `CLIENT::retire_instruction` that
+     * This is a wrapper for `Client::retire_instruction` that
      * handles stats before retiring the instruction.
      * */
-    void retire_instruction(CLIENT*, inst_ptr, cycle_type instruction_latency);
+    void retire_instruction(Client*, inst_ptr, cycle_type instruction_latency);
 
-    long fetch_and_execute_instructions_from_client(CLIENT*);
+    long fetch_and_execute_instructions_from_client(Client*);
 
     /*
      * Updates instruction stats when it is iterated through the `front_layer` in 
@@ -175,7 +175,7 @@ private:
      * that any logic does not assume that this is the first call for the
      * input instruction.
      * */
-    void update_instruction_stats_on_fetch(inst_ptr, const std::vector<QUBIT*>& operands);
+    void update_instruction_stats_on_fetch(inst_ptr, const std::vector<Qubit*>& operands);
 
     /*
      * This function is only called once per uop (or once total if the instruction
@@ -190,15 +190,15 @@ private:
      * Returns true if the instruction, with the given operands, is ready for execution
      * in the current cycle.
      * */
-    bool is_instruction_ready(inst_ptr, const std::vector<QUBIT*>& operands) const;
+    bool is_instruction_ready(inst_ptr, const std::vector<Qubit*>& operands) const;
 
     /*
      * RDR implementation -------------------------------------------------------------
      * */
 
-    enum class RDR_LOOKUP_RESULT { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
+    enum class RDRLookupResult { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
 
-    bool rdr_handle_instruction(CLIENT*, inst_ptr, QUBIT*);
+    bool rdr_handle_instruction(Client*, inst_ptr, Qubit*);
 };
 
 ////////////////////////////////////////////////////////////

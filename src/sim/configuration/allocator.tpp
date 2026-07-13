@@ -16,15 +16,15 @@ namespace configuration
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-#define TEMPL_PARAMS  template <class SPEC_TYPE, class ALLOCATOR, class QUBIT_ESTIMATOR, class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR>
+#define TEMPL_PARAMS  template <class Spec, class Allocator, class QubitEstimator, class BandwidthEstimator, class ConsumptionEstimator>
 
-TEMPL_PARAMS ALLOCATION
+TEMPL_PARAMS Allocation
 throughput_aware_allocation(size_t b, 
-                            std::vector<SPEC_TYPE> specs, 
-                            const ALLOCATOR& f_alloc,
-                            const QUBIT_ESTIMATOR& f_est_qubit_count,
-                            const BANDWIDTH_ESTIMATOR& f_est_bandwidth,
-                            const CONSUMPTION_ESTIMATOR& f_est_consumption)
+                            std::vector<Spec> specs, 
+                            const Allocator& f_alloc,
+                            const QubitEstimator& f_est_qubit_count,
+                            const BandwidthEstimator& f_est_bandwidth,
+                            const ConsumptionEstimator& f_est_consumption)
 {
     constexpr bool verbose{true};
 
@@ -151,7 +151,7 @@ throughput_aware_allocation(size_t b,
     while (remaining >= pq_min_required);
 
     /* 5. Actually do the allocations on the heap and return */
-    ALLOCATION out{};
+    Allocation out{};
     out.producers.resize(specs.size());
     for (size_t i = 0; i < counts.size(); i++)
     {
@@ -174,11 +174,11 @@ throughput_aware_allocation(size_t b,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class SPEC_TYPE, class BANDWIDTH_ESTIMATOR, class CONSUMPTION_ESTIMATOR> double
-estimate_throughput_of_allocation(const std::vector<SPEC_TYPE>& specs,
+template <class Spec, class BandwidthEstimator, class ConsumptionEstimator> double
+estimate_throughput_of_allocation(const std::vector<Spec>& specs,
                                     const std::vector<size_t>& counts,
-                                    const BANDWIDTH_ESTIMATOR& f_bandwidth_est,
-                                    const CONSUMPTION_ESTIMATOR& f_consumption_est)
+                                    const BandwidthEstimator& f_bandwidth_est,
+                                    const ConsumptionEstimator& f_consumption_est)
 {
     double prod_rate = counts[0] * f_bandwidth_est(specs[0], -1.0);
     for (size_t i = 1; i < specs.size(); i++)

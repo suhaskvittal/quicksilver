@@ -49,19 +49,19 @@ using namespace compiler::prog;
 namespace
 {
 
-using fpa_type = INSTRUCTION::fpa_type;
-using urotseq_type = INSTRUCTION::urotseq_type;
+using fpa_type = Instruction::fpa_type;
+using urotseq_type = Instruction::urotseq_type;
 
-constexpr static INSTRUCTION::TYPE SELF_INVERSES[]
+constexpr static Instruction::Type SELF_INVERSES[]
 {
-    INSTRUCTION::TYPE::H,
-    INSTRUCTION::TYPE::X,
-    INSTRUCTION::TYPE::Y,
-    INSTRUCTION::TYPE::Z,
-    INSTRUCTION::TYPE::CX,
-    INSTRUCTION::TYPE::CZ,
-    INSTRUCTION::TYPE::CCX,
-    INSTRUCTION::TYPE::CCZ
+    Instruction::Type::H,
+    Instruction::Type::X,
+    Instruction::Type::Y,
+    Instruction::Type::Z,
+    Instruction::Type::CX,
+    Instruction::Type::CZ,
+    Instruction::Type::CCX,
+    Instruction::Type::CCZ
 };
 
 /*
@@ -70,7 +70,7 @@ constexpr static INSTRUCTION::TYPE SELF_INVERSES[]
  * */
 template <class T> using subst_map_type = std::unordered_map<std::string, T>;
 
-std::string _qasm_inst_to_string(const compiler::prog::QASM_INST_INFO&);
+std::string _qasm_inst_to_string(const compiler::prog::QASMInstInfo&);
 
 /*
  * `_make_substitution_map` creates a dictionary mapping entries in `names`
@@ -90,20 +90,20 @@ subst_map_type<T> _make_substitution_map(const std::vector<std::string>& names,
  * For example, if `X = pi/2` and the expression is `2*X+3`, then `_parameter_substitution`
  * will update this to be `2*(pi/2)+3`
  * */
-void _parameter_substitution(EXPRESSION&, const subst_map_type<EXPRESSION>&);
-void _argument_substitution(compiler::prog::QASM_OPERAND&, const subst_map_type<compiler::prog::QASM_OPERAND>&);
+void _parameter_substitution(Expression&, const subst_map_type<Expression>&);
+void _argument_substitution(compiler::prog::QASMOperand&, const subst_map_type<compiler::prog::QASMOperand>&);
 
 /*
  * Checks if two maps have the same key. If so, the programs exits with an error.
  * `dupli_name` is only needed for the error message.
  * */
-template <class MAP_TYPE>
-void _scan_and_die_on_conflict(const MAP_TYPE&, const MAP_TYPE&, std::string_view dupli_name);
+template <class Map>
+void _scan_and_die_on_conflict(const Map&, const Map&, std::string_view dupli_name);
 
 /*
  * Computes a hashtable containing gates and their inverses. For example, T <--> TDG.
  * */
-std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE> _make_inverse_map();
+std::unordered_map<Instruction::Type, Instruction::Type> _make_inverse_map();
 
 const auto GATE_INVERSE_MAP{_make_inverse_map()};
 
@@ -113,7 +113,7 @@ const auto GATE_INVERSE_MAP{_make_inverse_map()};
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::stats_type::merge(const stats_type& other)
+ProgramInfo::stats_type::merge(const stats_type& other)
 {
     total_gate_count += other.total_gate_count;
     software_gate_count += other.software_gate_count;
@@ -128,23 +128,23 @@ PROGRAM_INFO::stats_type::merge(const stats_type& other)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::PROGRAM_INFO(generic_strm_type* ostrm_p, uint64_t _inst_limit)
+ProgramInfo::ProgramInfo(generic_strm_type* ostrm_p, uint64_t _inst_limit)
     :inst_limit(_inst_limit), ostrm_p_(ostrm_p)
 {}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO
-PROGRAM_INFO::from_file(std::string input_file)
+ProgramInfo
+ProgramInfo::from_file(std::string input_file)
 {
-    PROGRAM_INFO prog{nullptr};
+    ProgramInfo prog{nullptr};
 
     generic_strm_type istrm;
     generic_strm_open(istrm, input_file, "rb");
 
     std::istringstream _tmp{};
-    OQ2_LEXER lexer(_tmp, &istrm);
+    OQ2Lexer lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, "");
     [[ maybe_unused ]] int retcode = parser();
 
@@ -158,26 +158,26 @@ PROGRAM_INFO::from_file(std::string input_file)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::stats_type
-PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, uint64_t inst_limit)
+ProgramInfo::stats_type
+ProgramInfo::read_from_file_and_write_to_binary(std::string input_file, std::string output_file, uint64_t inst_limit)
 {
     generic_strm_type ostrm;
     generic_strm_open(ostrm, output_file, "wb");
 
-    PROGRAM_INFO prog(&ostrm, inst_limit);
+    ProgramInfo prog(&ostrm, inst_limit);
 
     // get the dirname of `input_file`
     std::string dirname = input_file.substr(0, input_file.find_last_of('/'));
 
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] reading file: " << input_file << ", new relative path: " << dirname << "\n";
+    std::cout << "[ ProgramInfo ] reading file: " << input_file << ", new relative path: " << dirname << "\n";
 #endif
 
     generic_strm_type istrm;
     generic_strm_open(istrm, input_file, "rb");
 
     std::istringstream _tmp{};
-    OQ2_LEXER lexer(_tmp, &istrm);
+    OQ2Lexer lexer(_tmp, &istrm);
     yy::parser parser(lexer, prog, dirname);
     try
     {
@@ -186,7 +186,7 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
     }
     catch (const std::runtime_error& e)
     {
-        std::cout << "[ PROGRAM_INFO ] " << e.what() << ", stopping at "
+        std::cout << "[ ProgramInfo ] " << e.what() << ", stopping at "
                   << prog.final_stats.unrolled_inst_count << " unrolled instructions\n";
     }
 
@@ -199,10 +199,10 @@ PROGRAM_INFO::read_from_file_and_write_to_binary(std::string input_file, std::st
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
+ProgramInfo::add_instruction(QASMInstInfo&& qasm_inst)
 {
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] qasm_inst: " << _qasm_inst_to_string(qasm_inst) << "\n";
+    std::cout << "[ ProgramInfo ] qasm_inst: " << _qasm_inst_to_string(qasm_inst) << "\n";
 #endif
 
     // Handle gate aliases
@@ -221,7 +221,7 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
     auto basis_gate_it = std::find(std::begin(BASIS_GATES), std::end(BASIS_GATES), qasm_inst.gate_name);
     if (basis_gate_it != std::end(BASIS_GATES))
     {
-        auto type = static_cast<INSTRUCTION::TYPE>(std::distance(std::begin(BASIS_GATES), basis_gate_it));
+        auto type = static_cast<Instruction::Type>(std::distance(std::begin(BASIS_GATES), basis_gate_it));
         add_basis_gate_instruction(std::move(qasm_inst), type);
     }
     else
@@ -234,13 +234,13 @@ PROGRAM_INFO::add_instruction(QASM_INST_INFO&& qasm_inst)
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::declare_register(REGISTER&& reg)
+ProgramInfo::declare_register(Register&& reg)
 {
     auto it = registers_.find(reg.name);
     if (it != registers_.end())
         throw std::runtime_error("register already declared: " + reg.name);
 
-    if (reg.type == REGISTER::TYPE::QUBIT)
+    if (reg.type == Register::Type::Qubit)
     {
         reg.id_offset = num_qubits_declared_;
         num_qubits_declared_ += reg.width;
@@ -258,12 +258,12 @@ PROGRAM_INFO::declare_register(REGISTER&& reg)
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::declare_gate(GATE_DEFINITION&& gate_def)
+ProgramInfo::declare_gate(GateDefinition&& gate_def)
 {
 #if !defined(ALLOW_GATE_DECL_OVERRIDES)
     auto it = user_defined_gates_.find(gate_def.name);
     if (it != user_defined_gates_.end())
-        std::cerr << "PROGRAM_INFO::declare_gate: gate already declared: " << gate_def.name << _die{};
+        std::cerr << "ProgramInfo::declare_gate: gate already declared: " << gate_def.name << _die{};
 #endif
 
     user_defined_gates_.insert({gate_def.name, std::move(gate_def)});
@@ -273,20 +273,20 @@ PROGRAM_INFO::declare_gate(GATE_DEFINITION&& gate_def)
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::merge(PROGRAM_INFO&& other)
+ProgramInfo::merge(ProgramInfo&& other)
 {
     // merge stats:
     other.final_stats.merge(other.compute_statistics_for_current_instructions());
     final_stats.merge(other.final_stats);
 
-    std::cout << "[ PROGRAM_INFO ] post merge counts:"
+    std::cout << "[ ProgramInfo ] post merge counts:"
         << "\tvirtual inst = " << other.final_stats.virtual_inst_count
         << "\tunrolled inst = " << other.final_stats.unrolled_inst_count
         << "\n";
 
     // merge data structures (`registers_` and `user_defined_gates_`):
 #if defined(PROGRAM_INFO_VERBOSE)
-    std::cout << "[ PROGRAM_INFO ] merging registers and user-defined gates from external file\n";
+    std::cout << "[ ProgramInfo ] merging registers and user-defined gates from external file\n";
 #endif
     
     // first check for name conflicts:
@@ -314,22 +314,13 @@ PROGRAM_INFO::merge(PROGRAM_INFO&& other)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t
-PROGRAM_INFO::dead_gate_elimination()
-{
-    return dead_gate_elim_pass();
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 void
-PROGRAM_INFO::flush_and_clear_instructions()
+ProgramInfo::flush_and_clear_instructions()
 {
-    std::cout << "[ PROGRAM_INFO ] flushing instructions to file\n";
+    std::cout << "[ ProgramInfo ] flushing instructions to file\n";
     // first, do optimizations:
     [[ maybe_unused ]] size_t num_gates_removed = dead_gate_elimination();
-    std::cout << "[ PROGRAM_INFO ] done with optimizations, removed " << num_gates_removed << " gates\n";
+    std::cout << "[ ProgramInfo ] done with optimizations, removed " << num_gates_removed << " gates\n";
 
     // update stats first while we have `instructions_`
     auto curr_stats = compute_statistics_for_current_instructions();
@@ -338,9 +329,9 @@ PROGRAM_INFO::flush_and_clear_instructions()
     if (final_stats.unrolled_inst_count >= inst_limit)
         throw std::runtime_error("instruction limit reached");
 
-    std::cout << "[ PROGRAM_INFO ] rotation count: " << final_stats.rotation_count
-                << "\n[ PROGRAM_INFO ] unrolled instruction count: " << final_stats.unrolled_inst_count
-                << "\n[ PROGRAM_INFO ] virtual instruction count: " << final_stats.virtual_inst_count 
+    std::cout << "[ ProgramInfo ] rotation count: " << final_stats.rotation_count
+                << "\n[ ProgramInfo ] unrolled instruction count: " << final_stats.unrolled_inst_count
+                << "\n[ ProgramInfo ] virtual instruction count: " << final_stats.virtual_inst_count 
                 << "\n";
 
     // write to file:
@@ -368,7 +359,7 @@ PROGRAM_INFO::flush_and_clear_instructions()
 ////////////////////////////////////////////////////////////
 
 qubit_type
-PROGRAM_INFO::get_qubit_id_from_operand(const compiler::prog::QASM_OPERAND& operand) const
+ProgramInfo::get_qubit_id_from_operand(const compiler::prog::QASMOperand& operand) const
 {
     // get register:
     auto it = registers_.find(operand.name);
@@ -381,7 +372,7 @@ PROGRAM_INFO::get_qubit_id_from_operand(const compiler::prog::QASM_OPERAND& oper
     // verify that the offset is within the register:
     if (operand.index >= 0 && operand.index >= r.width)
     {
-        std::cerr << "PROGRAM_INFO::get_qubit_id_from_operand: operand idx out of bounds: "
+        std::cerr << "ProgramInfo::get_qubit_id_from_operand: operand idx out of bounds: "
                     << operand.name << "[" << operand.index << "]" << _die{};
     }
 
@@ -392,7 +383,7 @@ PROGRAM_INFO::get_qubit_id_from_operand(const compiler::prog::QASM_OPERAND& oper
 ////////////////////////////////////////////////////////////
 
 fpa_type
-PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& angle_expr)
+ProgramInfo::process_rotation_gate(Instruction::Type type, const Expression& angle_expr)
 {
     // Given our basis gates, there can only be one parameter for rotation gates.
     fpa_type rotation = evaluate_expression(angle_expr).readout_fixed_point_angle();
@@ -408,8 +399,8 @@ PROGRAM_INFO::process_rotation_gate(INSTRUCTION::TYPE type, const EXPRESSION& an
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type, 
-                                      const std::vector<compiler::prog::QASM_OPERAND>& args, 
+ProgramInfo::add_scalar_instruction(Instruction::Type type, 
+                                      const std::vector<compiler::prog::QASMOperand>& args, 
                                       fpa_type rotation)
 {
     // convert operands to qubits:
@@ -418,7 +409,7 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
                 [this] (const auto& x) { return this->get_qubit_id_from_operand(x); });
 
     auto urotseq = is_rotation_instruction(type) ? rotation_manager_lookup(rotation) : urotseq_type{};
-    inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
+    inst_ptr inst{new Instruction{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
 
 #if defined(PROGRAM_INFO_VERBOSE)
     std::cout << "\tevaluated as: " << *inst << "\n";
@@ -431,7 +422,7 @@ PROGRAM_INFO::add_scalar_instruction(INSTRUCTION::TYPE type,
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, compiler::prog::QASM_INST_INFO& qasm_inst, fpa_type rotation,
+ProgramInfo::add_vector_instruction(Instruction::Type type, compiler::prog::QASMInstInfo& qasm_inst, fpa_type rotation,
                                       size_t width, const std::vector<bool>& v_op_vec, const std::vector<size_t>& v_op_width)
 {
 #if defined(PROGRAM_INFO_VERBOSE)
@@ -456,7 +447,7 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, compiler::prog::QAS
         }
 
         // create and push the instruction:
-        inst_ptr inst{new INSTRUCTION{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
+        inst_ptr inst{new Instruction{type, qubits.begin(), qubits.end(), rotation, urotseq.begin(), urotseq.end()}};
 
 #if defined(PROGRAM_INFO_VERBOSE)
         std::cout << "\t\t( " << i << " ) " << *inst << "\n";
@@ -470,12 +461,12 @@ PROGRAM_INFO::add_vector_instruction(INSTRUCTION::TYPE type, compiler::prog::QAS
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::expand_user_defined_gate(compiler::prog::QASM_INST_INFO&& qasm_inst)
+ProgramInfo::expand_user_defined_gate(compiler::prog::QASMInstInfo&& qasm_inst)
 {
     // check for gate definition:
     auto gate_it = user_defined_gates_.find(qasm_inst.gate_name);
     if (gate_it == user_defined_gates_.end())
-        std::cerr << "PROGRAM_INFO::expand_user_defined_gate: gate not defined " << qasm_inst.gate_name << _die{};
+        std::cerr << "ProgramInfo::expand_user_defined_gate: gate not defined " << qasm_inst.gate_name << _die{};
 
     // get gate definition:
     const auto& gate_def = gate_it->second;
@@ -486,7 +477,7 @@ PROGRAM_INFO::expand_user_defined_gate(compiler::prog::QASM_INST_INFO&& qasm_ins
     auto arg_subst_map = _make_substitution_map(gate_def.args, qasm_inst.args, _qasm_inst_to_string(qasm_inst));
     for (const auto& q_inst : gate_def.body)
     {
-        QASM_INST_INFO inst = q_inst;
+        QASMInstInfo inst = q_inst;
         for (auto& p : inst.params)
             _parameter_substitution(p, param_subst_map);
         for (auto& x : inst.args)
@@ -499,10 +490,10 @@ PROGRAM_INFO::expand_user_defined_gate(compiler::prog::QASM_INST_INFO&& qasm_ins
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::add_basis_gate_instruction(compiler::prog::QASM_INST_INFO&& qasm_inst, INSTRUCTION::TYPE type)
+ProgramInfo::add_basis_gate_instruction(compiler::prog::QASMInstInfo&& qasm_inst, Instruction::Type type)
 {
     if (inst_read_ % GL_PRINT_PROGRESS == 0)
-        std::cout << "[ PROGRAM_INFO ] read " << inst_read_ << " instructions\n";
+        std::cout << "[ ProgramInfo ] read " << inst_read_ << " instructions\n";
     inst_read_++;
 
     // Handle rotations
@@ -522,9 +513,9 @@ PROGRAM_INFO::add_basis_gate_instruction(compiler::prog::QASM_INST_INFO&& qasm_i
         const auto& operand = qasm_inst.args[i];
         auto it = registers_.find(operand.name);
         if (it == registers_.end())
-            std::cerr << "PROGRAM_INFO::add_basis_gate_instruction: register not found: " << operand.name << _die{};
+            std::cerr << "ProgramInfo::add_basis_gate_instruction: register not found: " << operand.name << _die{};
 
-        v_op_vec[i] = (it->second.width > 1) && (operand.index == compiler::prog::QASM_OPERAND::NO_INDEX);
+        v_op_vec[i] = (it->second.width > 1) && (operand.index == compiler::prog::QASMOperand::NO_INDEX);
         v_op_width[i] = it->second.width;
     }
 
@@ -551,7 +542,7 @@ PROGRAM_INFO::add_basis_gate_instruction(compiler::prog::QASM_INST_INFO&& qasm_i
 ////////////////////////////////////////////////////////////
 
 void
-PROGRAM_INFO::cancel_adjacent_rotations()
+ProgramInfo::cancel_adjacent_rotations()
 {
     size_t i{1};
     while (i < instructions_.size())
@@ -575,7 +566,7 @@ PROGRAM_INFO::cancel_adjacent_rotations()
 }
 
 void
-PROGRAM_INFO::cancel_inverse_gate_pairs()
+ProgramInfo::cancel_inverse_gate_pairs()
 {
     size_t i{1};
     while (i < instructions_.size())
@@ -607,7 +598,7 @@ PROGRAM_INFO::cancel_inverse_gate_pairs()
 ////////////////////////////////////////////////////////////
 
 size_t
-PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
+ProgramInfo::dead_gate_elim_pass(size_t prev_gates_removed)
 {
     size_t num_gates_before = instructions_.size();
 
@@ -639,8 +630,8 @@ PROGRAM_INFO::dead_gate_elim_pass(size_t prev_gates_removed)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PROGRAM_INFO::stats_type
-PROGRAM_INFO::compute_statistics_for_current_instructions() const
+ProgramInfo::stats_type
+ProgramInfo::compute_statistics_for_current_instructions() const
 {
     stats_type out{};
 
@@ -678,7 +669,7 @@ namespace
 ////////////////////////////////////////////////////////////
 
 std::string
-_qasm_inst_to_string(const QASM_INST_INFO& inst)
+_qasm_inst_to_string(const QASMInstInfo& inst)
 {
     std::stringstream ss;
     std::stringstream gate_param_ss;
@@ -703,7 +694,7 @@ _qasm_inst_to_string(const QASM_INST_INFO& inst)
         if (i > 0)
             ss << ", ";
         ss << inst.args[i].name;
-        if (inst.args[i].index != compiler::prog::QASM_OPERAND::NO_INDEX)
+        if (inst.args[i].index != compiler::prog::QASMOperand::NO_INDEX)
             ss << "[" << inst.args[i].index << "]";
     }
 
@@ -734,7 +725,7 @@ _make_substitution_map(const std::vector<std::string>& names,
 ////////////////////////////////////////////////////////////
 
 void
-_parameter_substitution(EXPRESSION& param, const subst_map_type<EXPRESSION>& subst_map)
+_parameter_substitution(Expression& param, const subst_map_type<Expression>& subst_map)
 {
     for (auto& entry : param.terms)
     {
@@ -746,7 +737,7 @@ _parameter_substitution(EXPRESSION& param, const subst_map_type<EXPRESSION>& sub
                 {
                     auto it = subst_map.find(std::get<std::string>(val));
                     if (it != subst_map.end())
-                        val.emplace<expr_ptr>(new EXPRESSION{it->second});
+                        val.emplace<expr_ptr>(new Expression{it->second});
                 }
             }
         }
@@ -757,8 +748,8 @@ _parameter_substitution(EXPRESSION& param, const subst_map_type<EXPRESSION>& sub
 ////////////////////////////////////////////////////////////
 
 void
-_argument_substitution(compiler::prog::QASM_OPERAND& arg,
-                        const subst_map_type<compiler::prog::QASM_OPERAND>& subst_map) 
+_argument_substitution(compiler::prog::QASMOperand& arg,
+                        const subst_map_type<compiler::prog::QASMOperand>& subst_map) 
 {
     auto it = subst_map.find(arg.name);
     if (it != subst_map.end())
@@ -768,8 +759,8 @@ _argument_substitution(compiler::prog::QASM_OPERAND& arg,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class MAP_TYPE> void
-_scan_and_die_on_conflict(const MAP_TYPE& x, const MAP_TYPE& y, std::string_view dupli_name)
+template <class Map> void
+_scan_and_die_on_conflict(const Map& x, const Map& y, std::string_view dupli_name)
 {
     auto it = std::find_if(y.begin(), y.end(), [&x] (const auto& e) { return x.find(e.first) != x.end(); });
     if (it != y.end())
@@ -782,23 +773,23 @@ _scan_and_die_on_conflict(const MAP_TYPE& x, const MAP_TYPE& y, std::string_view
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE>
+std::unordered_map<Instruction::Type, Instruction::Type>
 _make_inverse_map()
 {
-    std::unordered_map<INSTRUCTION::TYPE, INSTRUCTION::TYPE> inv_map;
+    std::unordered_map<Instruction::Type, Instruction::Type> inv_map;
     inv_map.reserve(std::size(SELF_INVERSES) + 8);
     for (size_t i = 0; i < std::size(SELF_INVERSES); ++i)
         inv_map[SELF_INVERSES[i]] = SELF_INVERSES[i];
 
-    auto add_rel = [&inv_map] (INSTRUCTION::TYPE a, INSTRUCTION::TYPE b)
+    auto add_rel = [&inv_map] (Instruction::Type a, Instruction::Type b)
                     {
                         inv_map[a] = b;
                         inv_map[b] = a;
                     };
 
-    add_rel(INSTRUCTION::TYPE::S, INSTRUCTION::TYPE::SDG);
-    add_rel(INSTRUCTION::TYPE::SX, INSTRUCTION::TYPE::SXDG);
-    add_rel(INSTRUCTION::TYPE::T, INSTRUCTION::TYPE::TDG);
+    add_rel(Instruction::Type::S, Instruction::Type::SDG);
+    add_rel(Instruction::Type::SX, Instruction::Type::SXDG);
+    add_rel(Instruction::Type::T, Instruction::Type::TDG);
 
     return inv_map;
 }

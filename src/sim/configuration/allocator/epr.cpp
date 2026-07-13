@@ -20,10 +20,10 @@ namespace configuration
 namespace
 {
 
-PRODUCER_BASE* _alloc(ED_SPECIFICATION);
-size_t         _physical_qubit_count(ED_SPECIFICATION);
-double         _bandwidth(ED_SPECIFICATION, double);
-double         _consumption_rate(ED_SPECIFICATION, double);
+ProducerBase* _alloc(EDSpecification);
+size_t         _physical_qubit_count(EDSpecification);
+double         _bandwidth(EDSpecification, double);
+double         _consumption_rate(EDSpecification, double);
 
 size_t _compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_inner_min);
 
@@ -32,8 +32,8 @@ size_t _compute_inner_code_distance(size_t d_required, size_t d_outer, size_t d_
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ALLOCATION
-allocate_entanglement_distillation_units(size_t b, std::vector<ED_SPECIFICATION> specs)
+Allocation
+allocate_entanglement_distillation_units(size_t b, std::vector<EDSpecification> specs)
 {
     return throughput_aware_allocation(b, specs, _alloc, _physical_qubit_count, _bandwidth, _consumption_rate);
 }
@@ -44,12 +44,12 @@ allocate_entanglement_distillation_units(size_t b, std::vector<ED_SPECIFICATION>
 namespace
 {
 
-PRODUCER_BASE*
-_alloc(ED_SPECIFICATION s)
+ProducerBase*
+_alloc(EDSpecification s)
 {
     const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
-    return new producer::ENT_DISTILLATION(freq_khz,
+    return new producer::EntDistillation(freq_khz,
                                             s.output_error_rate,
                                             s.buffer_capacity,
                                             s.input_count,
@@ -59,7 +59,7 @@ _alloc(ED_SPECIFICATION s)
 }
 
 size_t
-_physical_qubit_count(ED_SPECIFICATION s)
+_physical_qubit_count(EDSpecification s)
 {
     const size_t d_target = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);
     const size_t idx = inner_surface_code_distance_for_target_logical_error_rate(s.output_error_rate, s.dx, GL_PHYSICAL_ERROR_RATE);
@@ -84,7 +84,7 @@ _physical_qubit_count(ED_SPECIFICATION s)
 }
 
 double
-_bandwidth(ED_SPECIFICATION s, double input_error_rate)
+_bandwidth(EDSpecification s, double input_error_rate)
 {
     if (input_error_rate < 0.0)
         input_error_rate = 10*GL_PHYSICAL_ERROR_RATE;
@@ -105,7 +105,7 @@ _bandwidth(ED_SPECIFICATION s, double input_error_rate)
 }
 
 double
-_consumption_rate(ED_SPECIFICATION s, double input_error_rate)
+_consumption_rate(EDSpecification s, double input_error_rate)
 {
     const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     const size_t dm = surface_code_distance_for_target_logical_error_rate(s.output_error_rate, GL_PHYSICAL_ERROR_RATE);

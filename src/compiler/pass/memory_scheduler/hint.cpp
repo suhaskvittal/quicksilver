@@ -29,13 +29,13 @@ namespace
 /*
  * CST = Compute Set Tree
  *
- * A `CST_NODE` is used by HINT to represent a possible
- * scheduling decision. A `CST_NODE` contains a set of qubits,
+ * A `CSTNode` is used by HINT to represent a possible
+ * scheduling decision. A `CSTNode` contains a set of qubits,
  * the amount of compute possible with that set as the
  * active set, and the number of memory instructions
  * required to load those qubits into the active set.
  * */
-struct CST_NODE
+struct CSTNode
 {
     using score_type = int32_t;
 
@@ -47,7 +47,7 @@ struct CST_NODE
      * CST nodes can only have one child since it is an
      * inverted tree (many parents, single child).
      * */
-    CST_NODE* child{nullptr};
+    CSTNode* child{nullptr};
 
     /*
      * `frozen` is set to handle dependencies, for example.
@@ -62,18 +62,18 @@ struct CST_NODE
  * A qubit in the current active set has 0 memory cost, and any are not have
  * 1 memory cost.
  * */
-std::vector<CST_NODE*> _cst_init(const active_set_type&, size_t qubit_count);
+std::vector<CSTNode*> _cst_init(const active_set_type&, size_t qubit_count);
 
 /*
  * Updates the CST by creating a new node or updating the values in an existing node.
  * */
-void _cst_update(std::vector<CST_NODE*>&, inst_ptr, config_type conf);
+void _cst_update(std::vector<CSTNode*>&, inst_ptr, Config conf);
 
 /*
  * Traverses the CST by using the `child` pointer in each node. Returns the
  * deepest node from the starting node (deepest node has null child)
  * */
-CST_NODE* _cst_traverse(CST_NODE*);
+CSTNode* _cst_traverse(CSTNode*);
 
 /*
  * Returns the best active set that maximizes compute intensity.
@@ -84,24 +84,24 @@ CST_NODE* _cst_traverse(CST_NODE*);
  * `_cst_find_best_active_set_complex` also tries combining disjoint
  * active sets to fill the active set capacity.
  * */
-active_set_type _cst_find_best_active_set_simple(const std::vector<CST_NODE*>&);
-active_set_type _cst_find_best_active_set_complex(const std::vector<CST_NODE*>&, size_t active_set_capacity);
+active_set_type _cst_find_best_active_set_simple(const std::vector<CSTNode*>&);
+active_set_type _cst_find_best_active_set_complex(const std::vector<CSTNode*>&, size_t active_set_capacity);
 
-double _cst_score(const CST_NODE*);
+double _cst_score(const CSTNode*);
 double _cst_score(int32_t compute_count, int32_t memory_count);
 
 /*
- * Deallocates all `CST_NODE` pointers.
+ * Deallocates all `CSTNode` pointers.
  * */
-void _cst_free(std::vector<CST_NODE*>&&);
+void _cst_free(std::vector<CSTNode*>&&);
 
 /*
  * Generic DFS function for a CST.
  * The loop callback is called on the first visit to a node.
  * The exit callback is called on all visited nodes (after the DFS completes).
  * */
-template <class LOOP_CALLBACK, class EXIT_CALLBACK>
-void _cst_generic_dfs(const std::vector<CST_NODE*>&, const LOOP_CALLBACK&, const EXIT_CALLBACK&);
+template <class LoopCallback, class ExitCallback>
+void _cst_generic_dfs(const std::vector<CSTNode*>&, const LoopCallback&, const ExitCallback&);
 
 /*
  * Returns the compute score for the instruction.
@@ -113,15 +113,15 @@ size_t _score_instruction(inst_ptr);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-result_type
-hint(const active_set_type& active_set, const dag_ptr& dag, config_type conf)
+Result
+hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
 {
     // build the CST:
     auto entry_points = _cst_init(active_set, dag->qubit_count);
     dag->for_each_instruction_in_layer_order(
-            [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); },
             0,
-            conf.hint_lookahead_depth
+            conf.hint_lookahead_depth,
+            [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); }
     );
 
     active_set_type best_active_set = conf.hint_use_complex_selection
@@ -144,14 +144,14 @@ namespace
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<CST_NODE*>
+std::vector<CSTNode*>
 _cst_init(const active_set_type& active_set, size_t qubit_count)
 {
-    std::vector<CST_NODE*> entry(qubit_count);
+    std::vector<CSTNode*> entry(qubit_count);
     for (qubit_type i = 0; i < qubit_count; i++)
     {
-        CST_NODE::score_type memory_score = active_set.count(i) ? 0 : 1;
-        entry[i] = new CST_NODE{active_set_type{i}, 0, memory_score};
+        CSTNode::score_type memory_score = active_set.count(i) ? 0 : 1;
+        entry[i] = new CSTNode{active_set_type{i}, 0, memory_score};
     }
     return entry;
 }
@@ -160,10 +160,10 @@ _cst_init(const active_set_type& active_set, size_t qubit_count)
 ////////////////////////////////////////////////////////////
 
 void
-_cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type conf)
+_cst_update(std::vector<CSTNode*>& entry_points, inst_ptr inst, Config conf)
 {
     // identify the deepest nodes in the CST that contain the arguments of `inst`
-    std::unordered_set<CST_NODE*> deepest_nodes;
+    std::unordered_set<CSTNode*> deepest_nodes;
     deepest_nodes.reserve(get_inst_qubit_count(inst->type));
     bool any_frozen{false};
     for (auto it = inst->q_begin(); it != inst->q_end(); it++)
@@ -188,13 +188,13 @@ _cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type con
     if (deepest_nodes.size() == 1)
     {
         // simple case -- just update the sole node:
-        CST_NODE* x = *deepest_nodes.begin();
+        CSTNode* x = *deepest_nodes.begin();
         x->compute_count += _score_instruction(inst);
     }
     else
     {
         // need to aggregate all `deepest_nodes` into one combined node:
-        CST_NODE* y = new CST_NODE{};
+        CSTNode* y = new CSTNode{};
         for (auto* x : deepest_nodes)
         {
             y->qubits.insert(x->qubits.begin(), x->qubits.end());
@@ -221,8 +221,8 @@ _cst_update(std::vector<CST_NODE*>& entry_points, inst_ptr inst, config_type con
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CST_NODE*
-_cst_traverse(CST_NODE* x)
+CSTNode*
+_cst_traverse(CSTNode* x)
 {
     while (x->child != nullptr)
         x = x->child;
@@ -233,13 +233,13 @@ _cst_traverse(CST_NODE* x)
 ////////////////////////////////////////////////////////////
 
 active_set_type
-_cst_find_best_active_set_simple(const std::vector<CST_NODE*>& entry_points)
+_cst_find_best_active_set_simple(const std::vector<CSTNode*>& entry_points)
 {
-    CST_NODE* best_cst_node{nullptr};
+    CSTNode* best_cst_node{nullptr};
     double best_score;
 
     _cst_generic_dfs(entry_points,
-                    [&best_cst_node, &best_score] (CST_NODE* x)
+                    [&best_cst_node, &best_score] (CSTNode* x)
                     {
                         double score = _cst_score(x);
                         bool update = best_cst_node == nullptr
@@ -251,7 +251,7 @@ _cst_find_best_active_set_simple(const std::vector<CST_NODE*>& entry_points)
                             best_score = score;
                         }
                     },
-                    [] (CST_NODE*) {});
+                    [] (CSTNode*) {});
     return best_cst_node->qubits;
 }
 
@@ -259,19 +259,19 @@ _cst_find_best_active_set_simple(const std::vector<CST_NODE*>& entry_points)
 ////////////////////////////////////////////////////////////
 
 active_set_type
-_cst_find_best_active_set_complex(const std::vector<CST_NODE*>& entry_points, size_t active_set_capacity)
+_cst_find_best_active_set_complex(const std::vector<CSTNode*>& entry_points, size_t active_set_capacity)
 {
     // 1. Collect all nodes via DFS and categorize by active set size.
-    std::vector<std::vector<CST_NODE*>> nodes_by_size(active_set_capacity);
+    std::vector<std::vector<CSTNode*>> nodes_by_size(active_set_capacity);
 
     _cst_generic_dfs(entry_points,
-                    [&nodes_by_size, active_set_capacity] (CST_NODE* x)
+                    [&nodes_by_size, active_set_capacity] (CSTNode* x)
                     {
                         size_t idx = x->qubits.size() - 1;
                         if (idx < active_set_capacity)
                             nodes_by_size[idx].push_back(x);
                     },
-                    [] (CST_NODE*) {});
+                    [] (CSTNode*) {});
 
     // 2. Search for the best active set.
     //    For an active set of size `k`, we also try combining with
@@ -329,7 +329,7 @@ _cst_find_best_active_set_complex(const std::vector<CST_NODE*>& entry_points, si
 ////////////////////////////////////////////////////////////
 
 double
-_cst_score(const CST_NODE* x)
+_cst_score(const CSTNode* x)
 {
     return _cst_score(x->compute_count, x->memory_count);
 }
@@ -346,21 +346,21 @@ _cst_score(int32_t compute_count, int32_t memory_count)
 ////////////////////////////////////////////////////////////
 
 void
-_cst_free(std::vector<CST_NODE*>&& entry_points)
+_cst_free(std::vector<CSTNode*>&& entry_points)
 {
     _cst_generic_dfs(entry_points,
-                    [] (CST_NODE*) {},
-                    [] (CST_NODE* x) { delete x; });
+                    [] (CSTNode*) {},
+                    [] (CSTNode* x) { delete x; });
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class LOOP_CALLBACK, class EXIT_CALLBACK> void
-_cst_generic_dfs(const std::vector<CST_NODE*>& entry_points, const LOOP_CALLBACK& loopf, const EXIT_CALLBACK& exitf)
+template <class LoopCallback, class ExitCallback> void
+_cst_generic_dfs(const std::vector<CSTNode*>& entry_points, const LoopCallback& loopf, const ExitCallback& exitf)
 {
-    std::unordered_set<CST_NODE*> visited;
-    std::vector<CST_NODE*> dfss(entry_points);
+    std::unordered_set<CSTNode*> visited;
+    std::vector<CSTNode*> dfss(entry_points);
     while (!dfss.empty())
     {
         auto* x = dfss.back();

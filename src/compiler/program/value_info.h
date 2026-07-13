@@ -19,11 +19,11 @@ namespace prog
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct VALUE_INFO
+struct ValueInfo
 {
-    using fpa_type = PROGRAM_INFO::fpa_type;
+    using fpa_type = ProgramInfo::fpa_type;
     
-    enum class STATE 
+    enum class State 
     {
         DEFAULT,
         ZERO,
@@ -38,23 +38,23 @@ struct VALUE_INFO
     fpa_type  fixed_point{};
     int64_t   integral_value{0};
     double    floating_point{0.0};
-    STATE     state{STATE::ZERO};
+    State     state{State::ZERO};
 
-    VALUE_INFO() =default;
-    VALUE_INFO(const VALUE_INFO&) =default;
-    VALUE_INFO(const generic_value_type&);
+    ValueInfo() =default;
+    ValueInfo(const ValueInfo&) =default;
+    ValueInfo(const generic_value_type&);
 
-    static VALUE_INFO init_as_one();
+    static ValueInfo init_as_one();
 
     fpa_type readout_fixed_point_angle() const;
 
-    VALUE_INFO& operator+=(VALUE_INFO);
-    VALUE_INFO& operator-=(VALUE_INFO);
-    VALUE_INFO& operator*=(VALUE_INFO);
-    VALUE_INFO& operator/=(VALUE_INFO);
-    VALUE_INFO& operator^=(VALUE_INFO);
+    ValueInfo& operator+=(ValueInfo);
+    ValueInfo& operator-=(ValueInfo);
+    ValueInfo& operator*=(ValueInfo);
+    ValueInfo& operator/=(ValueInfo);
+    ValueInfo& operator^=(ValueInfo);
 
-    VALUE_INFO negated() const;
+    ValueInfo negated() const;
     void consume_negated();
 
     bool can_use_fixed_point() const;
@@ -64,11 +64,11 @@ struct VALUE_INFO
     std::string to_string() const;
 };
 
-VALUE_INFO operator+(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator-(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator*(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator/(VALUE_INFO, VALUE_INFO);
-VALUE_INFO operator^(VALUE_INFO, VALUE_INFO);
+inline ValueInfo operator+(ValueInfo a, ValueInfo b) { return a += b; }
+inline ValueInfo operator-(ValueInfo a, ValueInfo b) { return a -= b; }
+inline ValueInfo operator*(ValueInfo a, ValueInfo b) { return a *= b; }
+inline ValueInfo operator/(ValueInfo a, ValueInfo b) { return a /= b; }
+inline ValueInfo operator^(ValueInfo a, ValueInfo b) { return a ^= b; }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

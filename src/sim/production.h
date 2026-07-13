@@ -18,7 +18,7 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class PRODUCER_BASE : public OPERABLE
+class ProducerBase : public Operable
 {
 public:
     const double output_error_probability;
@@ -29,7 +29,7 @@ public:
      * by this producer. If empty, then it should be assumed
      * that this is a first-level production (state-injection).
      * */
-    std::vector<PRODUCER_BASE*> previous_level;
+    std::vector<ProducerBase*> previous_level;
 
     /*
      * Statistics:
@@ -46,7 +46,7 @@ protected:
      * */
     size_t buffer_occupancy_{0};
 public:
-    PRODUCER_BASE(std::string_view name, 
+    ProducerBase(std::string_view name, 
                     double freq_khz, 
                     double output_error_prob,
                     size_t buffer_capacity,
@@ -60,7 +60,7 @@ public:
 
     void print_deadlock_info(std::ostream&) const override;
 
-    size_t buffer_occupancy() const;
+    size_t buffer_occupancy() const { return buffer_occupancy_; }
 protected:
     long operate() override;
 

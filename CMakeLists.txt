@@ -126,8 +126,6 @@ set(SIM_FILES
     src/sim/production/epr.cpp
     src/sim/production/magic_state.cpp
     src/sim/routing.cpp
-#   src/sim/rotation_subsystem.cpp
-    src/sim/stats.cpp
     src/sim.cpp)
 
 ###################################################
@@ -237,6 +235,19 @@ target_link_libraries(qs_convert_to_rdr_isa PRIVATE qs_common)
 ###################################################
 ###################################################
 
+# Synthesis comparison: Rz(x) vs Rz(2x) T-gate counts (qs_compare_syntheses)
+
+add_executable(qs_compare_syntheses main/qs_compare_syntheses.cpp
+                                     src/compiler/program/rotation_manager.cpp)
+target_include_directories(qs_compare_syntheses PRIVATE "src")
+target_compile_options(qs_compare_syntheses PRIVATE ${COMPILE_OPTIONS})
+target_compile_definitions(qs_compare_syntheses PRIVATE
+    -DROTATION_SYNTHESIS_LUT_FOLDER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/rotation_data")
+target_link_libraries(qs_compare_syntheses PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Static program report (qs_report)
 
 add_executable(qs_report main/qs_report.cpp)
@@ -257,6 +268,18 @@ target_link_libraries(qs_throughput_estimator PRIVATE qs_simulator)
 ###################################################
 ###################################################
 
+# Reaction-time decoder simulator (qs_reaction_sim)
+
+add_executable(qs_reaction_sim main/qs_reaction_sim.cpp
+                               main/qs_reaction_sim/history.cpp
+                               main/qs_reaction_sim/sim.cpp)
+target_include_directories(qs_reaction_sim PRIVATE "src" "main")
+target_compile_options(qs_reaction_sim PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_reaction_sim PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Main simulator (quicksilver)
 
 add_executable(quicksilver main/quicksilver.cpp
@@ -267,6 +290,31 @@ add_executable(quicksilver main/quicksilver.cpp
 target_include_directories(quicksilver PRIVATE "src")
 target_compile_options(quicksilver PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(quicksilver PRIVATE qs_simulator)
+
+###################################################
+###################################################
+
+# Validation tests (CTest). Enable with -DBUILD_TESTING=ON (default ON via CTest).
+
+include(CTest)
+
+if (BUILD_TESTING)
+    # One executable per module under test. Each links `qs_simulator`
+    # (which transitively brings in `qs_common`) and registers as one `add_test`.
+    function(qs_add_test name)
+        add_executable(${name} tests/${name}.cpp)
+        target_include_directories(${name} PRIVATE "src" "tests")
+        target_compile_options(${name} PRIVATE ${COMPILE_OPTIONS})
+        target_link_libraries(${name} PRIVATE qs_simulator)
+        add_test(NAME ${name} COMMAND ${name})
+    endfunction()
+
+    qs_add_test(test_resource_estimation)
+    qs_add_test(test_memory_level)
+    qs_add_test(test_operable)
+    qs_add_test(test_routing)
+    qs_add_test(test_stall_monitor)
+endif()
 
 ###################################################
 ###################################################

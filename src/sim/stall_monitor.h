@@ -6,6 +6,8 @@
 #ifndef SIM_STALL_MONITOR_h
 #define SIM_STALL_MONITOR_h
 
+#include "globals.h"   // cycle_type
+
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -26,8 +28,8 @@ namespace sim
  *
  * Example of how to instantiate this class:
  *  ```
- *      enum class STALL_TYPE { RESOURCE=0, MEMORY=1, SIZE=2 };
- *      STALL_MONITOR<static_cast<int>(STALL_TYPE::SIZE), STALL_TYPE> sm;
+ *      enum class Stall { Resource=0, MEMORY=1, SIZE=2 };
+ *      StallMonitor<static_cast<int>(Stall::SIZE), Stall> sm;
  *  ```
  *
  * Obviously, given that the above is rather verbose, we recommend
@@ -35,7 +37,7 @@ namespace sim
  * */
 
 template <size_t N, class T>
-class STALL_MONITOR
+class StallMonitor
 {
 public:
     /*
@@ -76,7 +78,7 @@ private:
     stall_stats_type isolated_stalls_{};
     uint64_t         total_cycles_with_stalls_{0};
 public:
-    STALL_MONITOR(size_t max_ranges);
+    StallMonitor(size_t max_ranges);
 
     /*
      * This should be called at the end of simulation, as this

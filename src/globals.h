@@ -7,7 +7,8 @@
 #define GLOBALS_h
 
 #include <cstdint>
-#include <iosfwd>
+#include <iomanip>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -20,7 +21,6 @@ using cycle_type =     uint64_t;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
 
 /*
  * Modifies the instruction representation for RPC (Rotation Pre-Computation)
@@ -42,36 +42,6 @@ extern int64_t GL_USE_RDR_ISA;
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-namespace sim
-{
-
-struct QUBIT
-{
-    qubit_type     qubit_id{-1};
-    client_id_type client_id{-1};
-
-    /*
-     * This is the earliest cycle when the qubit is available
-     * for some operation.
-     * */
-    cycle_type cycle_available{0};
-
-    /*
-     * These are used for calculating stats
-     * */
-    bool last_operation_was_memory_access{false};
-
-    bool        operator==(const QUBIT&) const;
-    std::string to_string() const;
-};
-
-std::ostream& operator<<(std::ostream&, const QUBIT&);
-
-}  // namespace sim
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 struct _die {};
 
 std::ostream& operator<<(std::ostream&, _die);
@@ -79,18 +49,37 @@ std::ostream& operator<<(std::ostream&, _die);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class T> 
-void print_stat_line(std::ostream&, std::string_view, T);
+template <class T> void 
+print_stat_line(std::ostream& ostrm, std::string_view name, T value)
+{
+    ostrm << std::setw(64) << std::left << name;
+    if constexpr (std::is_floating_point<T>::value)
+    {
+        if (std::abs(value) < 1e-2)
+            ostrm << std::setw(12) << std::right << std::scientific << std::setprecision(5) << value;
+        else
+            ostrm << std::setw(12) << std::right << std::fixed << std::setprecision(3) << value;
+    }
+    else
+    {
+        ostrm << std::setw(12) << std::right << value;
+    }
+    ostrm << "\n";
+}
 
-template <class T, class U>
-constexpr double mean(T, U);
+template <class T, class U> constexpr double
+fpdiv(T x, U y) 
+{ 
+    return static_cast<double>(x) / static_cast<double>(y);
+}
 
-template <class T>
-constexpr T sqr(T);
+template <class T> constexpr T 
+sqr(T x) 
+{ 
+    return x*x;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
-
-#include "globals.tpp"
 
 #endif  // GLOBALS_h

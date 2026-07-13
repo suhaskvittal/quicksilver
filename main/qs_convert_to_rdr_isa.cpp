@@ -48,7 +48,7 @@ main(int argc, char* argv[])
     {
         // read with RPC disabled so we don't try to read corr_urotseq data:
         GL_USE_RDR_ISA = 0;
-        INSTRUCTION* inst = read_instruction_from_stream(istrm);
+        Instruction* inst = read_instruction_from_stream(istrm);
         if (inst == nullptr)
             break;
 

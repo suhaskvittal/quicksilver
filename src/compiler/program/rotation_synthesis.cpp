@@ -18,12 +18,12 @@ namespace prog
 namespace
 {
 
-using urotseq_type = INSTRUCTION::urotseq_type;
-using fpa_type = INSTRUCTION::fpa_type;
+using urotseq_type = Instruction::urotseq_type;
+using fpa_type = Instruction::fpa_type;
 using amp_type = std::complex<double>;
 using state_type = std::array<amp_type, 2>;
 
-enum BASIS_TYPE { X, Z, NONE };
+enum Basis { X, Z, NONE };
 
 /*
  * Flips the basis of all gates sandwiched by two H gates. For example, H*T*S*H --> TX*SX
@@ -44,17 +44,17 @@ void _consolidate_and_reduce_subsequences(urotseq_type&);
  * This function overwrites the data starting from `begin` inplace (by modifying the gate types).
  * Then, it returns an iterator right after the last modified entry.
  * */
-void _consolidate_gate(BASIS_TYPE, int8_t rotation_sum, urotseq_type::iterator begin, urotseq_type::iterator end);
+void _consolidate_gate(Basis, int8_t rotation_sum, urotseq_type::iterator begin, urotseq_type::iterator end);
 
 /*
  * Returns the basis (X or Z or None) for the given gate.
  * */
-constexpr BASIS_TYPE _get_basis_type(INSTRUCTION::TYPE g);
+constexpr Basis _get_basis_type(Instruction::Type g);
 
 /*
  * Flips the basis of the given gate. For example, T --> TX or vice versa.
  * */
-constexpr INSTRUCTION::TYPE _flip_basis(INSTRUCTION::TYPE g);
+constexpr Instruction::Type _flip_basis(Instruction::Type g);
 
 /*
  * `_get_rotation_value` quantizes the "rotation" of `g` to a 3-bit value.
@@ -62,12 +62,12 @@ constexpr INSTRUCTION::TYPE _flip_basis(INSTRUCTION::TYPE g);
  * 2 = pi/2 rotation (S-like gates)
  * 4 = pi rotations (X or Z)
  * */
-constexpr int8_t _get_rotation_value(INSTRUCTION::TYPE g);
+constexpr int8_t _get_rotation_value(Instruction::Type g);
 
 /*
  * These `_apply_*()` functions are helpers for `validate_urotseq()`
  * */
-void _apply_gate(state_type&, INSTRUCTION::TYPE);
+void _apply_gate(state_type&, Instruction::Type);
 void _apply_h_gate(state_type&);
 void _apply_z_rotation(state_type&, int8_t rotation_sum);  // degree: 1 = T, 2 = S, 4 = Z
 
@@ -86,7 +86,7 @@ urotseq_type
 synthesize_rotation(const fpa_type& rotation, ssize_t precision, bool verbose)
 {
     // call gridsynth:
-    std::string fpa_str = fpa::to_string(rotation, fpa::STRING_FORMAT::GRIDSYNTH_CPP);
+    std::string fpa_str = fpa::to_string(rotation, fpa::StringFormat::GRIDSYNTH_CPP);
     std::string epsilon = "1e-" + std::to_string(precision);
 
     auto [gates_str, t_ms] = gridsynth::gridsynth_gates(
@@ -109,15 +109,15 @@ synthesize_rotation(const fpa_type& rotation, ssize_t precision, bool verbose)
     for (char c : gates_str)
     {
         if (c == 'H')
-            out.push_back(INSTRUCTION::TYPE::H);
+            out.push_back(Instruction::Type::H);
         else if (c == 'T')
-            out.push_back(INSTRUCTION::TYPE::T);
+            out.push_back(Instruction::Type::T);
         else if (c == 'X')
-            out.push_back(INSTRUCTION::TYPE::X);
+            out.push_back(Instruction::Type::X);
         else if (c == 'Z')
-            out.push_back(INSTRUCTION::TYPE::Z);
+            out.push_back(Instruction::Type::Z);
         else if (c == 'S')
-            out.push_back(INSTRUCTION::TYPE::S);
+            out.push_back(Instruction::Type::S);
     }
 
     _flip_h_subsequences(out);
@@ -172,19 +172,19 @@ namespace
 void
 _flip_h_subsequences(urotseq_type& urotseq)
 {
-    size_t h_count = std::count(urotseq.begin(), urotseq.end(), INSTRUCTION::TYPE::H);
+    size_t h_count = std::count(urotseq.begin(), urotseq.end(), Instruction::Type::H);
 
     auto begin = urotseq.begin();
     // while there are at least two H gates, flip the subsequence between them:
     while (h_count >= 2)
     {
-        auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
-        auto h_end = std::find(h_begin+1, urotseq.end(), INSTRUCTION::TYPE::H);
+        auto h_begin = std::find(begin, urotseq.end(), Instruction::Type::H);
+        auto h_end = std::find(h_begin+1, urotseq.end(), Instruction::Type::H);
         std::for_each(h_begin+1, h_end, [](auto& g) { g = _flip_basis(g); });
 
         // set the H gates to nil -- we will remove all NIL gates at the end:
-        *h_begin = INSTRUCTION::TYPE::NIL;
-        *h_end = INSTRUCTION::TYPE::NIL;
+        *h_begin = Instruction::Type::NIL;
+        *h_end = Instruction::Type::NIL;
 
         begin = h_end+1;
         h_count -= 2;
@@ -193,13 +193,13 @@ _flip_h_subsequences(urotseq_type& urotseq)
     if (h_count == 1)
     {
         // the last H gate can be propagated to the end by flipping everything between:
-        auto h_begin = std::find(begin, urotseq.end(), INSTRUCTION::TYPE::H);
+        auto h_begin = std::find(begin, urotseq.end(), Instruction::Type::H);
         std::for_each(h_begin+1, urotseq.end(), [] (auto& g) { g = _flip_basis(g); });
         std::move(h_begin+1, urotseq.end(), h_begin);
-        urotseq.back() = INSTRUCTION::TYPE::H;
+        urotseq.back() = Instruction::Type::H;
     }
 
-    auto it = std::remove(urotseq.begin(), urotseq.end(), INSTRUCTION::TYPE::NIL);
+    auto it = std::remove(urotseq.begin(), urotseq.end(), Instruction::Type::NIL);
     urotseq.erase(it, urotseq.end());
 }
 
@@ -210,18 +210,18 @@ void
 _consolidate_and_reduce_subsequences(urotseq_type& urotseq)
 {
     // generate a subsequence, stop until we hit an H gate or gate in a different basis:
-    BASIS_TYPE current_basis{BASIS_TYPE::NONE};
+    Basis current_basis{Basis::NONE};
     int8_t current_rotation_sum{0};
     auto seq_begin = urotseq.begin();
     for (auto it = urotseq.begin(); it != urotseq.end(); it++)
     {
         auto g = *it;
-        if (current_basis != BASIS_TYPE::NONE)
+        if (current_basis != Basis::NONE)
         {
             if (_get_basis_type(g) != current_basis)
             {
                 _consolidate_gate(current_basis, current_rotation_sum, seq_begin, it);
-                current_basis = BASIS_TYPE::NONE;
+                current_basis = Basis::NONE;
                 current_rotation_sum = 0;
             }
             else
@@ -231,24 +231,24 @@ _consolidate_and_reduce_subsequences(urotseq_type& urotseq)
             }
         }
 
-        // this is not an else since we may set `current_basis` to `BASIS_TYPE::NONE` in the above if statement
-        if (current_basis == BASIS_TYPE::NONE)
+        // this is not an else since we may set `current_basis` to `Basis::NONE` in the above if statement
+        if (current_basis == Basis::NONE)
         {
-            if (g == INSTRUCTION::TYPE::H)
+            if (g == Instruction::Type::H)
                 continue;  // nothing to be done
 
             current_basis = _get_basis_type(g);
-            assert(current_basis != BASIS_TYPE::NONE);
+            assert(current_basis != Basis::NONE);
             current_rotation_sum = _get_rotation_value(g);
             seq_begin = it;
         }
     }
 
     // if we are still in a subsequence, finish it off:
-    if (current_basis != BASIS_TYPE::NONE)
+    if (current_basis != Basis::NONE)
         _consolidate_gate(current_basis, current_rotation_sum, seq_begin, urotseq.end());
 
-    auto it = std::remove(urotseq.begin(), urotseq.end(), INSTRUCTION::TYPE::NIL);
+    auto it = std::remove(urotseq.begin(), urotseq.end(), Instruction::Type::NIL);
     urotseq.erase(it, urotseq.end());
 }
 
@@ -256,94 +256,94 @@ _consolidate_and_reduce_subsequences(urotseq_type& urotseq)
 ////////////////////////////////////////////////////////////
 
 void
-_consolidate_gate(BASIS_TYPE basis, int8_t rotation_sum, urotseq_type::iterator begin, urotseq_type::iterator end)
+_consolidate_gate(Basis basis, int8_t rotation_sum, urotseq_type::iterator begin, urotseq_type::iterator end)
 {
     if (rotation_sum == 0)
     {
-        std::fill(begin, end, INSTRUCTION::TYPE::NIL);
+        std::fill(begin, end, Instruction::Type::NIL);
         return;
     }
 
-    bool is_z = basis == BASIS_TYPE::Z;
+    bool is_z = basis == Basis::Z;
     if (rotation_sum == 1 || rotation_sum == 5)
-        *begin = is_z ? INSTRUCTION::TYPE::T : INSTRUCTION::TYPE::TX;
+        *begin = is_z ? Instruction::Type::T : Instruction::Type::TX;
     else if (rotation_sum == 2)
-        *begin = is_z ? INSTRUCTION::TYPE::S : INSTRUCTION::TYPE::SX;
+        *begin = is_z ? Instruction::Type::S : Instruction::Type::SX;
     else if (rotation_sum == 4)
-        *begin = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
+        *begin = is_z ? Instruction::Type::Z : Instruction::Type::X;
     else if (rotation_sum == 6)
-        *begin = is_z ? INSTRUCTION::TYPE::SDG : INSTRUCTION::TYPE::SXDG;
+        *begin = is_z ? Instruction::Type::SDG : Instruction::Type::SXDG;
     else if (rotation_sum == 3 || rotation_sum == 7)
-        *begin = is_z ? INSTRUCTION::TYPE::TDG : INSTRUCTION::TYPE::TXDG;
+        *begin = is_z ? Instruction::Type::TDG : Instruction::Type::TXDG;
     begin++;
 
     // if 3 or 5, add an extra pi rotation
     if (rotation_sum == 3 || rotation_sum == 5)
     {
-        *begin = is_z ? INSTRUCTION::TYPE::Z : INSTRUCTION::TYPE::X;
+        *begin = is_z ? Instruction::Type::Z : Instruction::Type::X;
         begin++;
     }
     
     // remainder of sequence is now invalid (so set to NIL to mark for deletion)
-    std::fill(begin, end, INSTRUCTION::TYPE::NIL);
+    std::fill(begin, end, Instruction::Type::NIL);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-constexpr BASIS_TYPE
-_get_basis_type(INSTRUCTION::TYPE g)
+constexpr Basis
+_get_basis_type(Instruction::Type g)
 {
     switch (g)
     {
-    case INSTRUCTION::TYPE::X:
-    case INSTRUCTION::TYPE::SX:
-    case INSTRUCTION::TYPE::SXDG:
-    case INSTRUCTION::TYPE::TX:
-    case INSTRUCTION::TYPE::TXDG:
-        return BASIS_TYPE::X;
+    case Instruction::Type::X:
+    case Instruction::Type::SX:
+    case Instruction::Type::SXDG:
+    case Instruction::Type::TX:
+    case Instruction::Type::TXDG:
+        return Basis::X;
 
-    case INSTRUCTION::TYPE::Z:
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TDG:
-        return BASIS_TYPE::Z;
+    case Instruction::Type::Z:
+    case Instruction::Type::S:
+    case Instruction::Type::SDG:
+    case Instruction::Type::T:
+    case Instruction::Type::TDG:
+        return Basis::Z;
 
     default:
-        return BASIS_TYPE::NONE;
+        return Basis::NONE;
     }
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-constexpr INSTRUCTION::TYPE
-_flip_basis(INSTRUCTION::TYPE g)
+constexpr Instruction::Type
+_flip_basis(Instruction::Type g)
 {
     switch (g)
     {
-    case INSTRUCTION::TYPE::Z:
-        return INSTRUCTION::TYPE::X;
-    case INSTRUCTION::TYPE::S:
-        return INSTRUCTION::TYPE::SX;
-    case INSTRUCTION::TYPE::SDG:
-        return INSTRUCTION::TYPE::SXDG;
-    case INSTRUCTION::TYPE::T:
-        return INSTRUCTION::TYPE::TX;
-    case INSTRUCTION::TYPE::TDG:
-        return INSTRUCTION::TYPE::TXDG;
+    case Instruction::Type::Z:
+        return Instruction::Type::X;
+    case Instruction::Type::S:
+        return Instruction::Type::SX;
+    case Instruction::Type::SDG:
+        return Instruction::Type::SXDG;
+    case Instruction::Type::T:
+        return Instruction::Type::TX;
+    case Instruction::Type::TDG:
+        return Instruction::Type::TXDG;
 
-    case INSTRUCTION::TYPE::X:
-        return INSTRUCTION::TYPE::Z;
-    case INSTRUCTION::TYPE::SX:
-        return INSTRUCTION::TYPE::S;
-    case INSTRUCTION::TYPE::SXDG:
-        return INSTRUCTION::TYPE::SDG;
-    case INSTRUCTION::TYPE::TX:
-        return INSTRUCTION::TYPE::T;
-    case INSTRUCTION::TYPE::TXDG:
-        return INSTRUCTION::TYPE::TDG;
+    case Instruction::Type::X:
+        return Instruction::Type::Z;
+    case Instruction::Type::SX:
+        return Instruction::Type::S;
+    case Instruction::Type::SXDG:
+        return Instruction::Type::SDG;
+    case Instruction::Type::TX:
+        return Instruction::Type::T;
+    case Instruction::Type::TXDG:
+        return Instruction::Type::TDG;
 
     default:
         return g;
@@ -354,25 +354,25 @@ _flip_basis(INSTRUCTION::TYPE g)
 ////////////////////////////////////////////////////////////
 
 constexpr int8_t
-_get_rotation_value(INSTRUCTION::TYPE g)
+_get_rotation_value(Instruction::Type g)
 {
     // the output is r, where g is some rotation of r*pi/4
     switch (g)
     {
-    case INSTRUCTION::TYPE::X:
-    case INSTRUCTION::TYPE::Z:
+    case Instruction::Type::X:
+    case Instruction::Type::Z:
         return 4;
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SX:
+    case Instruction::Type::S:
+    case Instruction::Type::SX:
         return 2;
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::SXDG:
+    case Instruction::Type::SDG:
+    case Instruction::Type::SXDG:
         return 6;
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TX:
+    case Instruction::Type::T:
+    case Instruction::Type::TX:
         return 1;
-    case INSTRUCTION::TYPE::TDG:
-    case INSTRUCTION::TYPE::TXDG:
+    case Instruction::Type::TDG:
+    case Instruction::Type::TXDG:
         return 7;
     default:
         return -1;
@@ -383,15 +383,15 @@ _get_rotation_value(INSTRUCTION::TYPE g)
 ////////////////////////////////////////////////////////////
 
 void
-_apply_gate(state_type& q, INSTRUCTION::TYPE g)
+_apply_gate(state_type& q, Instruction::Type g)
 {
-    if (g == INSTRUCTION::TYPE::H)
+    if (g == Instruction::Type::H)
     {
         _apply_h_gate(q);
         return;
     }
 
-    const bool is_x_basis = _get_basis_type(g) == BASIS_TYPE::X;
+    const bool is_x_basis = _get_basis_type(g) == Basis::X;
     if (is_x_basis)
         _apply_h_gate(q);
     _apply_z_rotation(q, _get_rotation_value(g));

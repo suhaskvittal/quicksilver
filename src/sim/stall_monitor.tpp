@@ -12,7 +12,7 @@
 #include <strings.h>
 
 #define TEMPL_PARAMS    template <size_t N, class T>
-#define TEMPL_CLASS     STALL_MONITOR<N,T>
+#define TemplClass     StallMonitor<N,T>
 
 namespace sim
 {
@@ -21,7 +21,7 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS
-TEMPL_CLASS::STALL_MONITOR(size_t _max_ranges)
+TemplClass::StallMonitor(size_t _max_ranges)
     :max_ranges(_max_ranges)
 {
     ranges_.reserve(_max_ranges);
@@ -31,7 +31,7 @@ TEMPL_CLASS::STALL_MONITOR(size_t _max_ranges)
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS void
-TEMPL_CLASS::commit_contents()
+TemplClass::commit_contents()
 {
     for (const auto& r : ranges_)
         commit_range(r);
@@ -42,7 +42,7 @@ TEMPL_CLASS::commit_contents()
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS void
-TEMPL_CLASS::add_stall_range(T stall_type, cycle_type start, cycle_type end, bool inclusive)
+TemplClass::add_stall_range(T stall_type, cycle_type start, cycle_type end, bool inclusive)
 {
     if (inclusive)
         return add_stall_range(stall_type, start, end+1, false);
@@ -53,7 +53,7 @@ TEMPL_CLASS::add_stall_range(T stall_type, cycle_type start, cycle_type end, boo
     /*
     if (start < committed_up_to_)
     {
-        std::cerr << "STALL_MONITOR::add_stall_range: start cycle is earlier than committed cycle: "
+        std::cerr << "StallMonitor::add_stall_range: start cycle is earlier than committed cycle: "
                     << start << " < " << committed_up_to_ << _die{};
     }
     */
@@ -173,13 +173,13 @@ TEMPL_CLASS::add_stall_range(T stall_type, cycle_type start, cycle_type end, boo
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS uint64_t
-TEMPL_CLASS::isolated_stalls_for(T stall_type) const
+TemplClass::isolated_stalls_for(T stall_type) const
 {
     return isolated_stalls_.at(static_cast<int>(stall_type));
 }
 
 TEMPL_PARAMS uint64_t
-TEMPL_CLASS::cycles_with_stalls() const
+TemplClass::cycles_with_stalls() const
 {
     return total_cycles_with_stalls_;
 }
@@ -188,7 +188,7 @@ TEMPL_CLASS::cycles_with_stalls() const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS void
-TEMPL_CLASS::commit_range(const stall_range& r)
+TemplClass::commit_range(const stall_range& r)
 {
     const uint64_t cycle_count = r.end - r.start;
     // convert to `int` so we can use popcount and ffs
@@ -205,7 +205,7 @@ TEMPL_CLASS::commit_range(const stall_range& r)
 }
 
 TEMPL_PARAMS void
-TEMPL_CLASS::evict_if_needed()
+TemplClass::evict_if_needed()
 {
     while (ranges_.size() > max_ranges)
     {
@@ -221,4 +221,4 @@ TEMPL_CLASS::evict_if_needed()
 } // namespace sim
 
 #undef TEMPL_PARAMS
-#undef TEMPL_CLASS
+#undef TemplClass

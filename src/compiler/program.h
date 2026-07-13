@@ -41,7 +41,7 @@ extern int64_t GL_PRINT_PROGRESS;
  * Represents a qubit or classical bit operand in a QASM instruction.
  * Can reference either a single qubit/bit or an entire register.
  * */
-struct QASM_OPERAND
+struct QASMOperand
 {
     constexpr static ssize_t NO_INDEX{-1};
 
@@ -54,11 +54,11 @@ struct QASM_OPERAND
  * This is eventaully converted into the basis gates
  * we have defined in `instruction.h`
  * */
-struct QASM_INST_INFO
+struct QASMInstInfo
 {
     std::string              gate_name;
-    std::vector<EXPRESSION>  params;
-    std::vector<QASM_OPERAND> args;
+    std::vector<Expression>  params;
+    std::vector<QASMOperand> args;
 
     bool is_conditional{false};
 
@@ -68,27 +68,27 @@ struct QASM_INST_INFO
 /*
  * Register information.
  * */
-struct REGISTER
+struct Register
 {
-    enum class TYPE { QUBIT, BIT };
+    enum class Type { Qubit, Bit };
 
     size_t      id_offset{0};
-    TYPE        type{TYPE::QUBIT};
+    Type        type{Type::Qubit};
     std::string name;
     size_t      width{1};
 };
 
 
 /*
- * `GATE_DEFINITION` stores custom gate
+ * `GateDefinition` stores custom gate
  * definitions, such as those in `qelib1.inc`.
  * */
-struct GATE_DEFINITION
+struct GateDefinition
 {
     std::string name;
     std::vector<std::string> params;
     std::vector<std::string> args;
-    std::vector<QASM_INST_INFO> body;
+    std::vector<QASMInstInfo> body;
 };
 
 }   // namespace prog
@@ -97,7 +97,7 @@ struct GATE_DEFINITION
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class PROGRAM_INFO
+class ProgramInfo
 {
 public:
     /*
@@ -110,10 +110,10 @@ public:
      * */
     constexpr static size_t MAX_INST_BEFORE_FLUSH{4*1024*1024};
 
-    using fpa_type = INSTRUCTION::fpa_type;
-    using register_table = std::unordered_map<std::string, compiler::prog::REGISTER>;
-    using gate_decl_table = std::unordered_map<std::string, compiler::prog::GATE_DEFINITION>;
-    using inst_ptr = std::unique_ptr<INSTRUCTION>;
+    using fpa_type = Instruction::fpa_type;
+    using register_table = std::unordered_map<std::string, compiler::prog::Register>;
+    using gate_decl_table = std::unordered_map<std::string, compiler::prog::GateDefinition>;
+    using inst_ptr = std::unique_ptr<Instruction>;
 
     struct stats_type
     {
@@ -162,8 +162,8 @@ private:
     uint64_t           inst_read_{0};
     bool               has_qubit_count_been_written_{false};
 public:
-    PROGRAM_INFO(generic_strm_type* ostrm_p=nullptr, uint64_t inst_limit=std::numeric_limits<uint64_t>::max());
-    static PROGRAM_INFO from_file(std::string);
+    ProgramInfo(generic_strm_type* ostrm_p=nullptr, uint64_t inst_limit=std::numeric_limits<uint64_t>::max());
+    static ProgramInfo from_file(std::string);
 
     /*
      * Compiles the input qasm file. Returns program statistics for the compilation (i.e., number
@@ -175,16 +175,16 @@ public:
      * These are the public member functions used to build the program representation from
      * the Bison parser (see `src/compiler/program/oq2/parser.y`)
      * */
-    void add_instruction(compiler::prog::QASM_INST_INFO&&);
-    void declare_register(compiler::prog::REGISTER&&);
-    void declare_gate(compiler::prog::GATE_DEFINITION&&);
-    void merge(PROGRAM_INFO&&);
+    void add_instruction(compiler::prog::QASMInstInfo&&);
+    void declare_register(compiler::prog::Register&&);
+    void declare_gate(compiler::prog::GateDefinition&&);
+    void merge(ProgramInfo&&);
 
     /*
      * We implement basic optimizations to eliminate useless gates (via gate cancellation and
      * removal of identity gates).
      * */
-    size_t dead_gate_elimination();  // returns the number of gates removed
+    size_t dead_gate_elimination() { return dead_gate_elim_pass(); }  // returns the number of gates removed
 
     /*
      * Dumps instructions into the output stream at `*ostrm_p_`
@@ -194,23 +194,23 @@ public:
     const std::vector<inst_ptr>& get_instructions() const { return instructions_; }
     size_t                       get_num_qubits() const { return num_qubits_declared_; }
 private:
-    qubit_type get_qubit_id_from_operand(const compiler::prog::QASM_OPERAND&) const;
+    qubit_type get_qubit_id_from_operand(const compiler::prog::QASMOperand&) const;
 
     /*
      * `process_rotation_gate` evaluates the symbolic expression in `angle_expr` and
      * schedules the synthesis for the given rotation. It returns the evaluated
      * expression as a fixed point value.
      * */
-    fpa_type process_rotation_gate(INSTRUCTION::TYPE, const compiler::prog::EXPRESSION& angle_expr);
+    fpa_type process_rotation_gate(Instruction::Type, const compiler::prog::Expression& angle_expr);
 
     /*
      * `add_scalar_instruction` and `add_vector_instruction` update `instructions_` with new
      * instructions. The only difference is that `add_vector_instruction` adds multiple instructions
      * at once (one per vector register width).
      * */
-    void add_scalar_instruction(INSTRUCTION::TYPE, const std::vector<compiler::prog::QASM_OPERAND>&, fpa_type);
-    void add_vector_instruction(INSTRUCTION::TYPE, 
-                                    compiler::prog::QASM_INST_INFO&, 
+    void add_scalar_instruction(Instruction::Type, const std::vector<compiler::prog::QASMOperand>&, fpa_type);
+    void add_vector_instruction(Instruction::Type, 
+                                    compiler::prog::QASMInstInfo&, 
                                     fpa_type, 
                                     size_t width, 
                                     const std::vector<bool>& v_op_vec, 
@@ -220,8 +220,8 @@ private:
      * `expand_user_defined_gate` handles the expansion of user-defined gates (such as those
      * in qelib1.inc)
      * */
-    void expand_user_defined_gate(compiler::prog::QASM_INST_INFO&&);
-    void add_basis_gate_instruction(compiler::prog::QASM_INST_INFO&&, INSTRUCTION::TYPE);
+    void expand_user_defined_gate(compiler::prog::QASMInstInfo&&);
+    void add_basis_gate_instruction(compiler::prog::QASMInstInfo&&, Instruction::Type);
 
     /*
      * These are both helper functions for `dead_gate_elimination`.

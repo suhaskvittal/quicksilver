@@ -32,7 +32,7 @@ void rotation_manager_end();
 /*
  * Searches for the urotseq for the given rotation
  * */
-INSTRUCTION::urotseq_type rotation_manager_lookup(const INSTRUCTION::fpa_type&);
+Instruction::urotseq_type rotation_manager_lookup(const Instruction::fpa_type&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

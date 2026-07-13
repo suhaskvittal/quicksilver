@@ -16,7 +16,7 @@ namespace sim
 namespace
 {
 
-using access_type = REMOTE_STORAGE::ACCESS_TYPE;
+using access_type = RemoteStorage::Access;
 
 /*
  * Returns number of distilled EPR pairs required for the given access type
@@ -28,23 +28,23 @@ constexpr size_t _get_required_epr_pairs_for_access(access_type);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-REMOTE_STORAGE::REMOTE_STORAGE(double freq_khz,
+RemoteStorage::RemoteStorage(double freq_khz,
                                 size_t n,
                                 size_t k,
                                 size_t d,
                                 size_t num_adapters,
                                 cycle_type load_latency,
                                 cycle_type store_latency,
-                                std::vector<PRODUCER_BASE*> dist)
-    :STORAGE(freq_khz, n, k, d, num_adapters, load_latency, store_latency),
+                                std::vector<ProducerBase*> dist)
+    :Storage(freq_khz, n, k, d, num_adapters, load_latency, store_latency),
     top_level_epr_generators_(dist)
 {}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-REMOTE_STORAGE::access_result_type
-REMOTE_STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
+RemoteStorage::access_result_type
+RemoteStorage::do_memory_access(cycle_type access_latency, Access type)
 {
     const size_t epr_required = _get_required_epr_pairs_for_access(type);
     const size_t epr_available = std::transform_reduce(top_level_epr_generators_.begin(),
@@ -65,7 +65,7 @@ REMOTE_STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
             break;
     }
 
-    return STORAGE::do_memory_access(access_latency, type);
+    return Storage::do_memory_access(access_latency, type);
 }
 
 ////////////////////////////////////////////////////////////

@@ -16,7 +16,7 @@ namespace configuration
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct FACTORY_SPECIFICATION
+struct FactorySpecification
 {
     bool is_cultivation{false};
 
@@ -48,7 +48,7 @@ struct FACTORY_SPECIFICATION
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct ED_SPECIFICATION /* entanglement distillation */
+struct EDSpecification /* entanglement distillation */
 {
     /* Defaults are for distillation via a [3, 1, 3]_x code */
     size_t   buffer_capacity{1};
@@ -77,8 +77,8 @@ struct ED_SPECIFICATION /* entanglement distillation */
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ALLOCATION allocate_magic_state_factories(size_t budget, std::vector<FACTORY_SPECIFICATION>);
-ALLOCATION allocate_entanglement_distillation_units(size_t budget, std::vector<ED_SPECIFICATION>);
+Allocation allocate_magic_state_factories(size_t budget, std::vector<FactorySpecification>);
+Allocation allocate_entanglement_distillation_units(size_t budget, std::vector<EDSpecification>);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

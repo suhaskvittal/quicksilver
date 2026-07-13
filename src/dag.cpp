@@ -32,8 +32,8 @@ DAG::~DAG()
         auto* x = dfss.back();
         dfss.pop_back();
 
-        x->pred_count--;
-        if (x->pred_count == 0)
+        x->tmp_pred_count_++;
+        if (x->tmp_pred_count_ == x->predecessors.size())
         {
             // traverse now -- since we will delete `x`
             for (auto* y : x->dependent)
@@ -64,7 +64,7 @@ DAG::add_instruction(inst_ptr inst, bool memoize)
             if (!visited.count(back_instructions_[q]))
             {
                 back_instructions_[q]->dependent.push_back(x);
-                x->pred_count++;
+                x->predecessors.push_back(back_instructions_[q]);
             }
             visited.insert(back_instructions_[q]);
         }
@@ -73,7 +73,7 @@ DAG::add_instruction(inst_ptr inst, bool memoize)
 
     // handle the edge case where there are no predecessors 
     // in `back_instructions_` (so add to `front_layer_`)
-    if (x->pred_count == 0)
+    if (x->predecessors.empty())
         front_layer_[inst] = x;
     inst_count_++;
 
@@ -97,10 +97,12 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
         for (const auto& [inst, node] : front_layer_)
         {
             std::cerr << "\n\tinst = " << *inst 
-                        << ", node pred count = " << node->pred_count
-                        << ", node dependents =";
+                        << "\n\t\tnode predecessors =";
+            for (auto* x : node->predecessors)
+                std::cerr << "\n\t\t\t" << *x->inst;
+            std::cerr << "\n\t\tnode dependents =";
             for (auto* x : node->dependent)
-                std::cerr << "\n\t\t" << *x->inst;
+                std::cerr << "\n\t\t\t" << *x->inst;
         }
         std::cerr << _die{};
     }
@@ -110,9 +112,10 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
     // update `inst` dependents:
     for (auto* dep : head_node->dependent)
     {
-        dep->pred_count--;
-        if (dep->pred_count == 0)
-            front_layer_[dep->inst] = dep;
+        auto p_it = std::find(dep->predecessors.begin(), dep->predecessors.end(), head_node);
+        dep->predecessors.erase(p_it);
+        if (dep->predecessors.empty())
+            front_layer_.insert({dep->inst, dep});
     }
 
     // delete `head_node` from `node_lookup_table_` if it exists there
@@ -139,12 +142,6 @@ std::vector<DAG::inst_ptr>
 DAG::get_front_layer() const
 {
     return get_front_layer_if([] (const auto*) { return true; });
-}
-
-size_t
-DAG::inst_count() const
-{
-    return inst_count_;
 }
 
 ////////////////////////////////////////////////////////////

@@ -17,13 +17,13 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PRODUCER_BASE::PRODUCER_BASE(std::string_view name,
+ProducerBase::ProducerBase(std::string_view name,
                                 double freq_khz,
                                 double _output_error_probability,
                                 size_t _buffer_capacity,
                                 size_t _input_count,
                                 size_t _output_count)
-    :OPERABLE(name, freq_khz),
+    :Operable(name, freq_khz),
     output_error_probability(_output_error_probability),
     buffer_capacity(_buffer_capacity),
     input_count(_input_count),
@@ -31,13 +31,13 @@ PRODUCER_BASE::PRODUCER_BASE(std::string_view name,
 {
     if (output_count > buffer_capacity)
     {
-        std::cerr << "in instantiation of PRODUCER_BASE " << name << ": buffer capacity cannot"
+        std::cerr << "in instantiation of ProducerBase " << name << ": buffer capacity cannot"
                     << " hold all output resource states." << _die{};
     }
 }
 
 void
-PRODUCER_BASE::consume(size_t count)
+ProducerBase::consume(size_t count)
 {
     assert(count <= buffer_occupancy_);
     buffer_occupancy_ -= count;
@@ -45,13 +45,13 @@ PRODUCER_BASE::consume(size_t count)
 }
 
 void
-PRODUCER_BASE::print_deadlock_info(std::ostream& out) const
+ProducerBase::print_deadlock_info(std::ostream& out) const
 {
     out << name << ": buffer occupancy = " << buffer_occupancy_ << " of " << buffer_capacity << "\n";
 }
 
 long
-PRODUCER_BASE::operate()
+ProducerBase::operate()
 {
     if (buffer_occupancy_ + output_count > buffer_capacity || production_step())
         return 1;
@@ -60,16 +60,10 @@ PRODUCER_BASE::operate()
 }
 
 void
-PRODUCER_BASE::install_resource_states()
+ProducerBase::install_resource_states()
 {
     assert(buffer_occupancy_ + output_count <= buffer_capacity);
     buffer_occupancy_ += output_count;
-}
-
-size_t
-PRODUCER_BASE::buffer_occupancy() const
-{
-    return buffer_occupancy_;
 }
 
 ////////////////////////////////////////////////////////////

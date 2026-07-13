@@ -19,7 +19,7 @@ main(int argc, char* argv[])
 {
     std::string                            input_trace_file;
     std::string                            output_trace_file;
-    compiler::pass::memory_scheduler::config_type conf;
+    compiler::pass::memory_scheduler::Config conf;
     int64_t                                scheduler_impl_id;
 
     ARGPARSE()
@@ -41,14 +41,16 @@ main(int argc, char* argv[])
     generic_strm_open(istrm, input_trace_file, "rb");
     generic_strm_open(ostrm, output_trace_file, "wb");
 
-    compiler::pass::memory_scheduler::stats_type stats;
     auto compile_start = std::chrono::high_resolution_clock::now();
-    if (scheduler_impl_id == 0)
-        stats = compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);
-    else if (scheduler_impl_id == 1)
-        stats = compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::hint, conf);
-    else
+    compiler::pass::memory_scheduler::Stats stats = [&]
+    {
+        if (scheduler_impl_id == 0)
+            return compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::eif, conf);
+        else if (scheduler_impl_id == 1)
+            return compiler::pass::memory_scheduler::run(ostrm, istrm, compiler::pass::memory_scheduler::hint, conf);
         std::cerr << "unknown memory scheduler id: " << scheduler_impl_id << _die{};
+        return compiler::pass::memory_scheduler::Stats{};
+    }();
     auto compile_end = std::chrono::high_resolution_clock::now();
 
     generic_strm_close(istrm);
@@ -58,15 +60,14 @@ main(int argc, char* argv[])
     auto compile_duration = std::chrono::duration_cast<std::chrono::microseconds>(compile_end - compile_start);
     double compile_time_seconds = compile_duration.count() / 1000000.0;
 
-    double compute_intensity = mean(stats.unrolled_inst_done, stats.memory_accesses);
-    double mean_unused_bw = mean(stats.total_unused_bandwidth, stats.scheduler_epochs);
+    double compute_intensity = fpdiv(stats.unrolled_inst_done, stats.memory_accesses);
 
     print_stat_line(std::cout, "INST_DONE", stats.unrolled_inst_done);
     print_stat_line(std::cout, "MEMORY_ACCESSES", stats.memory_accesses);
     print_stat_line(std::cout, "SCHEDULING_EPOCHS", stats.scheduler_epochs);
     print_stat_line(std::cout, "COMPUTE_INTENSITY", compute_intensity);
-    print_stat_line(std::cout, "MEAN_UNUSED_BANDWIDTH", mean_unused_bw);
     print_stat_line(std::cout, "COMPILATION_TIME_SECONDS", compile_time_seconds);
+    stats.unused_bandwidth.dump(std::cout);
 }
 
 ////////////////////////////////////////////////////////////

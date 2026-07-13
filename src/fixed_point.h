@@ -15,39 +15,39 @@
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <size_t W, class WORD_TYPE=uint64_t>
-class FIXED_POINT
+template <size_t W, class Word=uint64_t>
+class FixedPoint
 {
 public:
-    using word_type = WORD_TYPE;
+    using word_type = Word;
     using index_pair = std::pair<int, int>;
 
     constexpr static size_t NUM_BITS{W},
-                            BITS_PER_WORD{sizeof(WORD_TYPE)*8},
+                            BITS_PER_WORD{sizeof(Word)*8},
                             NUM_WORDS{W / BITS_PER_WORD};
 private:
-    std::array<WORD_TYPE, NUM_WORDS> backing_array_{};
+    std::array<Word, NUM_WORDS> backing_array_{};
 public:
-    constexpr FIXED_POINT() =default;
-    constexpr FIXED_POINT(const FIXED_POINT&) =default;
-    constexpr FIXED_POINT(WORD_TYPE w) :backing_array_{w} {}
-    constexpr FIXED_POINT(std::array<WORD_TYPE, NUM_WORDS> x) :backing_array_(x) {}
+    constexpr FixedPoint() =default;
+    constexpr FixedPoint(const FixedPoint&) =default;
+    constexpr FixedPoint(Word w) :backing_array_{w} {}
+    constexpr FixedPoint(std::array<Word, NUM_WORDS> x) :backing_array_(x) {}
     
     // this is useful for converting between fixed point widths quickly
-    template <size_t _W> constexpr FIXED_POINT(FIXED_POINT<_W>);
+    template <size_t _W> constexpr FixedPoint(FixedPoint<_W>);
 
-    template <class ITER_TYPE> constexpr FIXED_POINT(ITER_TYPE begin, ITER_TYPE end);
+    template <class IterType> constexpr FixedPoint(IterType begin, IterType end);
 
     // bit-level operations:
     constexpr void set(size_t idx, bool);
     constexpr bool test(size_t idx) const;
 
     // word-level operations:
-    constexpr void set_word(size_t idx, WORD_TYPE);
+    constexpr void set_word(size_t idx, Word);
     constexpr word_type test_word(size_t idx) const;
 
     // bulk word-level operations:
-    template <class XFORM_TYPE> constexpr void transform(const XFORM_TYPE&, size_t from=0, size_t to=NUM_WORDS);
+    template <class Xform> constexpr void transform(const Xform&, size_t from=0, size_t to=NUM_WORDS);
 
     // bit shift operations:
     constexpr void lshft(int);
@@ -66,8 +66,8 @@ public:
 
     std::string to_hex_string() const;
 
-    constexpr bool operator==(const FIXED_POINT&) const;
-    constexpr bool operator!=(const FIXED_POINT&) const;
+    constexpr bool operator==(const FixedPoint&) const;
+    constexpr bool operator!=(const FixedPoint&) const;
 
     constexpr std::array<word_type, NUM_WORDS> get_words() const { return backing_array_; }
     constexpr const std::array<word_type, NUM_WORDS>& get_words_ref() { return backing_array_; }

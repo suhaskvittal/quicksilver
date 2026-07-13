@@ -16,17 +16,17 @@ extern bool GL_ELIDE_CLIFFORDS;
 namespace
 {
 
-using inst_ptr = CLIENT::inst_ptr;
+using inst_ptr = Client::inst_ptr;
 
 bool _memoize_pred(const inst_ptr);
-void _clean_urotseq(INSTRUCTION::urotseq_type&);
+void _clean_urotseq(Instruction::urotseq_type&);
 
 } // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-CLIENT::CLIENT(std::string _trace_file, int8_t _id)
+Client::Client(std::string _trace_file, int8_t _id)
     :trace_file(_trace_file),
     id(_id),
     tristrm_(),
@@ -35,10 +35,10 @@ CLIENT::CLIENT(std::string _trace_file, int8_t _id)
     qubits_(num_qubits)
 {
     for (qubit_type q_id = 0; q_id < num_qubits; q_id++)
-        qubits_[q_id] = new QUBIT{q_id, id};
+        qubits_[q_id] = new Qubit{q_id, id};
 }
 
-CLIENT::~CLIENT()
+Client::~Client()
 {
     generic_strm_close(tristrm_);
 
@@ -50,7 +50,7 @@ CLIENT::~CLIENT()
 ////////////////////////////////////////////////////////////
 
 void
-CLIENT::warmup_dag(size_t s)
+Client::warmup_dag(size_t s)
 {
     while (dag_->inst_count() < s && !eof())
     {
@@ -67,14 +67,14 @@ CLIENT::warmup_dag(size_t s)
 ////////////////////////////////////////////////////////////
 
 void
-CLIENT::retire_instruction(inst_ptr inst)
+Client::retire_instruction(inst_ptr inst)
 {
     cycle_type inst_latency = inst->cycle_done - *inst->first_ready_cycle;
 
     if (is_memory_access(inst->type))
     {
-        s_memory_accesses++;
-        s_memory_access_latency += inst_latency;
+        s_memory_accesses_done++;
+        s_memory_access_latency.add(inst_latency);
 
         goto kill_instruction;
     }
@@ -87,9 +87,9 @@ CLIENT::retire_instruction(inst_ptr inst)
 
     if (is_rotation_instruction(inst->type))
     {
-        s_rotation_latency += inst_latency;
-        s_total_rotation_uops += inst->original_unrolled_inst_count;
-        s_total_rotations++;
+        s_rotations_done++;
+        s_rotation_latency.add(inst_latency);
+        s_rotation_uops.add(inst->original_unrolled_inst_count);
 
         s_t_gates_done += std::count_if(inst->urotseq.begin(), inst->urotseq.end(), 
                                     [] (auto t) { return is_t_like_instruction(t); });
@@ -103,29 +103,8 @@ kill_instruction:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
-CLIENT::eof() const
-{
-    return generic_strm_eof(tristrm_);
-}
-
-const std::unique_ptr<DAG>&
-CLIENT::dag() const
-{
-    return dag_;
-}
-
-const std::vector<QUBIT*>&
-CLIENT::qubits() const
-{
-    return qubits_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
-CLIENT::open_file_and_read_qubit_count()
+Client::open_file_and_read_qubit_count()
 {
     uint32_t n;
     generic_strm_open(tristrm_, trace_file, "rb");
@@ -134,13 +113,13 @@ CLIENT::open_file_and_read_qubit_count()
 }
 
 inst_ptr
-CLIENT::read_instruction_from_trace()
+Client::read_instruction_from_trace()
 {
     inst_ptr inst = read_instruction_from_stream(tristrm_);
     
     if (inst == nullptr)
     {
-        std::cerr << "CLIENT::read_instruction_from_file: client " << static_cast<int>(id)
+        std::cerr << "Client::read_instruction_from_file: client " << static_cast<int>(id)
                 << " hit eof for trace \"" << trace_file << "\"" << _die{};
     }
 
@@ -176,7 +155,7 @@ _memoize_pred(const inst_ptr inst)
 }
 
 void
-_clean_urotseq(INSTRUCTION::urotseq_type& u)
+_clean_urotseq(Instruction::urotseq_type& u)
 {
     auto it = std::remove_if(u.begin(), u.end(), 
             [] (auto t) { return is_software_instruction(t) || (GL_ELIDE_CLIFFORDS && !is_t_like_instruction(t)); });

@@ -10,6 +10,7 @@
 #include "generic_io.h"
 #include "globals.h"
 #include "small_vector.h"
+
 #include <deque>
 #include <iosfwd>
 #include <optional>
@@ -34,26 +35,22 @@ constexpr std::string_view BASIS_GATES[] =
     "store",
     "coupled_load_store",
 
-    // pbc instruction:
-    "pauli_rotation_pi",
-    "pauli_rotation_h_pi",
-    "pauli_rotation_h_pi_dag",
-    "pauli_rotation_q_pi",
-    "pauli_rotation_q_pi_dag",
-
     "nil"
 };
 
-class INSTRUCTION
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+class Instruction
 {
 public:
     constexpr static size_t FPA_PRECISION{64};
     constexpr static int64_t INVALID_NUMBER{-1};
 
-    using qubit_array = small_vector<qubit_type, 3>;
-    using fpa_type = FPA_TYPE<FPA_PRECISION>;
+    using qubit_array = SmallVector<qubit_type, 3>;
+    using fpa_type = FPAType<FPA_PRECISION>;
 
-    enum class TYPE
+    enum class Type
     {
         /*
          * Quantum gates (Clifford + T + other extensions)
@@ -84,28 +81,20 @@ public:
         STORE,
         COUPLED_LOAD_STORE,
 
-        /*
-         * Pauli rotations are generic operations used with Pauli-Based
-         * Computation. The specific rotations for each qubit are stored
-         * in `pauli_rotation_axes`
-         * */
-        PAULI_ROTATION_Q_PI,
-        PAULI_ROTATION_Q_PI_DAG,
-
         NIL
     };
 
-    enum class PAULI
+    enum class Pauli
     {
         I, X, Y, Z, nX, nY, nZ
     };
 
-    using urotseq_type = std::vector<INSTRUCTION::TYPE>;
+    using urotseq_type = std::vector<Instruction::Type>;
 
     /*
      * `type` corresponds to some basic instruction.
      * */
-    const TYPE type;
+    const Type type;
 
     /*
      * `qubits` is a small-buffer-optimized array (inline for <=3 qubits, heap otherwise).
@@ -136,11 +125,6 @@ public:
      * By default, this is not initialized since it is a niche use case.
      * */
     std::deque<urotseq_type> corr_urotseq_array{};
-
-    /*
-     * Axes for each qubit of a `PAULI_ROTATION_*` instruction.
-     * */
-    std::vector<PAULI> pauli_rotation_axes{};
 
     /*
      * Same value as `get_inst_qubit_count(type)`
@@ -185,9 +169,19 @@ public:
     uint64_t original_unrolled_inst_count{};
 
     /* Rotation-Directed Runahead state variables */
+    struct
+    {
+        bool pending{false};
+        bool visited{false};
+    } rdr;
 
-    bool rdr_is_pending{false};
-    bool rdr_has_been_visited{false};
+    /* Reaction related state variables */
+    struct
+    {
+        bool retireable{false},
+             executed{false},
+             erroneous{false};
+    } rx;
 private:
     /*
      * Gates like RZ and RX have micro-ops (or uops) that must be execute
@@ -197,33 +191,33 @@ private:
      * the number of completed/retired uops. This instruction should be
      * retired once `uops_retired == uop_count()`
      * */
-    INSTRUCTION* current_uop_{nullptr};
+    Instruction* current_uop_{nullptr};
     size_t       uops_retired_{0};
 public:
     /*
      * Basic constructor for initializing from a given list of qubits.
      * */
-    INSTRUCTION(TYPE, std::initializer_list<qubit_type>);
+    Instruction(Type, std::initializer_list<qubit_type>);
 
     /*
      * Constructor for initializing from a container:
      * */
-    template <class ITER_TYPE> 
-    INSTRUCTION(TYPE, ITER_TYPE q_begin, ITER_TYPE q_end);
+    template <class IterType> 
+    Instruction(Type, IterType q_begin, IterType q_end);
 
     /*
      * Rotation gate constructors: we require that `urotseq` is specified using
      * iterators since the sequence can be rather long.
      * */
-    template <class ITER_TYPE>
-    INSTRUCTION(TYPE, std::initializer_list<qubit_type>, fpa_type, ITER_TYPE urotseq_begin, ITER_TYPE urotseq_end);
+    template <class IterType>
+    Instruction(Type, std::initializer_list<qubit_type>, fpa_type, IterType urotseq_begin, IterType urotseq_end);
 
-    template <class Q_IT_TYPE, class U_IT_TYPE>
-    INSTRUCTION(TYPE, Q_IT_TYPE q_begin, Q_IT_TYPE q_end, fpa_type, U_IT_TYPE urotseq_begin, U_IT_TYPE urotseq_end);
+    template <class QIt, class UIt>
+    Instruction(Type, QIt q_begin, QIt q_end, fpa_type, UIt urotseq_begin, UIt urotseq_end);
 
-    INSTRUCTION(const INSTRUCTION&);
+    Instruction(const Instruction&);
 
-    ~INSTRUCTION();
+    ~Instruction();
 
     /*
      * `retire_current_uop` deletes `current_uop` and gets the next `uop`.
@@ -238,8 +232,8 @@ public:
      * */
     void reset_uops();
 
-    size_t       uops_retired() const;
-    INSTRUCTION* current_uop() const;
+    size_t       uops_retired() const { return uops_retired_; }
+    Instruction* current_uop() const { return current_uop_; }
 
     /*
      * `uop_count` returns the number of `uops` that must be executed.
@@ -267,41 +261,39 @@ private:
     void get_next_uop();
 };
 
-std::ostream& operator<<(std::ostream&, const INSTRUCTION&);
+std::ostream& operator<<(std::ostream&, const Instruction&);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 /*
- * IO support for `INSTRUCTION`:
+ * IO support for `Instruction`:
  * */
-INSTRUCTION* read_instruction_from_stream(generic_strm_type&);
-void         write_instruction_to_stream(generic_strm_type&, const INSTRUCTION*);
+Instruction* read_instruction_from_stream(generic_strm_type&);
+void         write_instruction_to_stream(generic_strm_type&, const Instruction*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 /*
  * These functions are simple boolean functions that
- * categorize a given `INSTRUCTION::TYPE`
+ * categorize a given `Instruction::Type`
  * */
-constexpr bool is_software_instruction(INSTRUCTION::TYPE);
-constexpr bool is_memory_access(INSTRUCTION::TYPE);
-constexpr bool is_s_like_instruction(INSTRUCTION::TYPE);
-constexpr bool is_t_like_instruction(INSTRUCTION::TYPE);
-constexpr bool is_rotation_instruction(INSTRUCTION::TYPE);
-constexpr bool is_cx_like_instruction(INSTRUCTION::TYPE);
-constexpr bool is_toffoli_like_instruction(INSTRUCTION::TYPE);
-
-constexpr bool is_pauli_rotation(INSTRUCTION::TYPE);
+constexpr bool is_software_instruction(Instruction::Type);
+constexpr bool is_memory_access(Instruction::Type);
+constexpr bool is_s_like_instruction(Instruction::Type);
+constexpr bool is_t_like_instruction(Instruction::Type);
+constexpr bool is_rotation_instruction(Instruction::Type);
+constexpr bool is_cx_like_instruction(Instruction::Type);
+constexpr bool is_toffoli_like_instruction(Instruction::Type);
 
 /*
  * This function is a constexpr function that returns
  * the number of arguments for a given instruction type.
  *
- * Also useful when reading out qubits from `INSTRUCTION`
+ * Also useful when reading out qubits from `Instruction`
  * */
-constexpr size_t get_inst_qubit_count(INSTRUCTION::TYPE t);
+constexpr size_t get_inst_qubit_count(Instruction::Type t);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

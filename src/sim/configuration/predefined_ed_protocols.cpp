@@ -16,12 +16,12 @@ namespace ed
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_0(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{4}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [3,1,3]_x
+    EDSpecification l1_spec  // [3,1,3]_x
     {
         .output_error_rate=1e-2,
         .input_count=3,
@@ -30,7 +30,7 @@ protocol_0(int64_t ll_buffer_capacity)
         .dz=1
     };
 
-    ED_SPECIFICATION l2_spec   // [2,1,2]_y
+    EDSpecification l2_spec   // [2,1,2]_y
     {
         .output_error_rate=1e-4,
         .input_count=2,
@@ -39,7 +39,7 @@ protocol_0(int64_t ll_buffer_capacity)
         .dz=2
     };
 
-    ED_SPECIFICATION l3_spec   // [2,1,2]_x
+    EDSpecification l3_spec   // [2,1,2]_x
     {
         .output_error_rate=2e-8,
         .input_count=2,
@@ -48,7 +48,7 @@ protocol_0(int64_t ll_buffer_capacity)
         .dz=1
     };
 
-    ED_SPECIFICATION l4_spec   // [[6,4,2]]
+    EDSpecification l4_spec   // [[6,4,2]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=3e-15,
@@ -64,12 +64,12 @@ protocol_0(int64_t ll_buffer_capacity)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_1(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{18}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [[17,9,4]]
+    EDSpecification l1_spec  // [[17,9,4]]
     {
         .buffer_capacity=9,
         .output_error_rate=3e-6,
@@ -79,7 +79,7 @@ protocol_1(int64_t ll_buffer_capacity)
         .dz=4
     };
 
-    ED_SPECIFICATION l2_spec   // [[25,18,3]]
+    EDSpecification l2_spec   // [[25,18,3]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=3e-13,
@@ -95,12 +95,12 @@ protocol_1(int64_t ll_buffer_capacity)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_2(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{2}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [2,1,2]_x
+    EDSpecification l1_spec  // [2,1,2]_x
     {
         .output_error_rate=8.4e-3,
         .input_count=2,
@@ -109,7 +109,7 @@ protocol_2(int64_t ll_buffer_capacity)
         .dz=1
     };
 
-    ED_SPECIFICATION l2_spec   // [2,1,2]_y
+    EDSpecification l2_spec   // [2,1,2]_y
     {
         .output_error_rate=1.4e-4,
         .input_count=2,
@@ -118,7 +118,7 @@ protocol_2(int64_t ll_buffer_capacity)
         .dz=2
     };
 
-    ED_SPECIFICATION l3_spec   // [2,1,2]_x
+    EDSpecification l3_spec   // [2,1,2]_x
     {
         .output_error_rate=1.2e-6,
         .input_count=2,
@@ -127,7 +127,7 @@ protocol_2(int64_t ll_buffer_capacity)
         .dz=1
     };
 
-    ED_SPECIFICATION l4_spec   // [[4,2,2]]
+    EDSpecification l4_spec   // [[4,2,2]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=4.5e-12,
@@ -143,12 +143,12 @@ protocol_2(int64_t ll_buffer_capacity)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_3(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{18}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [[4,2,2]]
+    EDSpecification l1_spec  // [[4,2,2]]
     {
         .buffer_capacity=3,
         .output_error_rate=4.9e-4,
@@ -158,7 +158,7 @@ protocol_3(int64_t ll_buffer_capacity)
         .dz=2
     };
 
-    ED_SPECIFICATION l2_spec   // [[27,18,4]]
+    EDSpecification l2_spec   // [[27,18,4]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=4.3e-10,
@@ -175,12 +175,12 @@ protocol_3(int64_t ll_buffer_capacity)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_4(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{23}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [[8,3,3]]
+    EDSpecification l1_spec  // [[8,3,3]]
     {
         .buffer_capacity=3,
         .output_error_rate=3.85e-5,
@@ -190,7 +190,7 @@ protocol_4(int64_t ll_buffer_capacity)
         .dz=3
     };
 
-    ED_SPECIFICATION l2_spec   // [[30,23,3]]
+    EDSpecification l2_spec   // [[30,23,3]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=9.05e-11,
@@ -206,12 +206,12 @@ protocol_4(int64_t ll_buffer_capacity)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<ED_SPECIFICATION>
+std::vector<EDSpecification>
 protocol_5(int64_t ll_buffer_capacity)
 {
     ll_buffer_capacity = std::max(int64_t{25}, ll_buffer_capacity);
 
-    ED_SPECIFICATION l1_spec  // [[14,6,4]]
+    EDSpecification l1_spec  // [[14,6,4]]
     {
         .buffer_capacity=6,
         .output_error_rate=4.4e-6,
@@ -221,7 +221,7 @@ protocol_5(int64_t ll_buffer_capacity)
         .dz=4
     };
 
-    ED_SPECIFICATION l2_spec // [[32,25,3]]
+    EDSpecification l2_spec // [[32,25,3]]
     {
         .buffer_capacity=ll_buffer_capacity,
         .output_error_rate=6.1e-13,

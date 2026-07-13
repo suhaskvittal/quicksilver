@@ -17,32 +17,31 @@ namespace sim
 namespace
 {
 
-constexpr cycle_type NA_SHUTTLING_LATENCY{1};
-constexpr cycle_type NA_CX_LATENCY = NA_SHUTTLING_LATENCY + 1;
-
-using execute_result_type = COMPUTE_SUBSYSTEM::execute_result_type;
-using routing_type = COMPUTE_SUBSYSTEM::routing_type;
+using execute_result_type = ComputeSubsystem::execute_result_type;
+using routing_type = ComputeSubsystem::routing_type;
 using r_id_type = routing_type::id_type;
 
-size_t _dedicated_ancilla_count();
-size_t _num_routing_channels(COMPUTE_SUBSYSTEM*);
-size_t _channel_width(COMPUTE_SUBSYSTEM*);
+constexpr size_t MAX_QUBITS_PER_CHANNEL{8};
 
-size_t _get_idx_in_array(QUBIT*, const std::vector<QUBIT*>&);
+size_t _dedicated_ancilla_count();
+size_t _num_routing_channels(ComputeSubsystem*);
+size_t _channel_width(ComputeSubsystem*);
+
+size_t _get_idx_in_array(Qubit*, const std::vector<Qubit*>&);
 
 /*
  * Calls `test_resources_between()` for both of `routing::MCB_LEFT_ENTRY` and
  * `routing::MCB_RIGHT_ENTRY`, and returns the first one that can be locked. 
  * Return std::nullopt if neither are available.
  * */
-template <class SRC_TYPE>
+template <class Src>
 std::optional<r_id_type> _test_endpoints_and_return_first_lockable(routing_type&,
-                                                                    SRC_TYPE src,
+                                                                    Src src,
                                                                     cycle_type from,
                                                                     cycle_type to);
 
 /*
- * This function calls `LOCK_PRED` to test if if a given routing resource is available from
+ * This function calls `LockPred` to test if if a given routing resource is available from
  * `start` to `start+delta`. If this fails, then the function tries again with `start+delta`
  * to `start+2*delta` and so on until a success occurs. This function terminates when `start_max`
  * is hit.
@@ -50,22 +49,22 @@ std::optional<r_id_type> _test_endpoints_and_return_first_lockable(routing_type&
  * If a success occurs, then this function returns the starting cycle that works. Otherwise,
  * `std::nullopt` is returned.
  * */
-template <class LOCK_PRED>
+template <class LockPred>
 std::optional<cycle_type> _test_multiple_time_intervals(cycle_type start, 
                                                         cycle_type delta,
                                                         cycle_type start_max,
-                                                        const LOCK_PRED&);
+                                                        const LockPred&);
 
-template <class SRC_TYPE, class DST_TYPE>
+template <class Src, class Dst>
 cycle_type _get_earliest_lockable_time_between(routing_type&, 
-                                                SRC_TYPE, 
-                                                DST_TYPE, 
+                                                Src, 
+                                                Dst, 
                                                 cycle_type current_cycle, 
                                                 cycle_type lock_duration);
 
-template <class SRC_TYPE>
+template <class Src>
 cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&, 
-                                                        SRC_TYPE, 
+                                                        Src, 
                                                         cycle_type current_cycle, 
                                                         cycle_type lock_duration);
 
@@ -74,13 +73,13 @@ cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::routing_type::routing_type(COMPUTE_SUBSYSTEM* _c)
-    :MULTI_CHANNEL_BUS(_num_routing_channels(_c), _channel_width(_c)),
+ComputeSubsystem::routing_type::routing_type(ComputeSubsystem* _c)
+    :MultiChannelBus(_num_routing_channels(_c), _channel_width(_c)),
     c(_c)
 {}
 
-COMPUTE_SUBSYSTEM::routing_type::id_type
-COMPUTE_SUBSYSTEM::routing_type::translate(QUBIT* q) const
+ComputeSubsystem::routing_type::id_type
+ComputeSubsystem::routing_type::translate(Qubit* q) const
 {
     // we translate the storage so that the dedicated ancilla
     // have priority access to magic state production (closer to 0).
@@ -93,12 +92,12 @@ COMPUTE_SUBSYSTEM::routing_type::translate(QUBIT* q) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
+ComputeSubsystem::ComputeSubsystem(double freq_khz,
                                       size_t _code_distance,
                                       size_t _local_memory_capacity,
                                       production_level_type t_factories,
                                       memory_subsystem_type memory_subsystem)
-    :OPERABLE("compute_subsystem", freq_khz),
+    :Operable("compute_subsystem", freq_khz),
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
     dedicated_ancilla_count(_dedicated_ancilla_count()),
@@ -128,7 +127,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
         assert(dedicated_ancilla_count == GL_RDR_CAPACITY);
         for (int i = 0; i < GL_RDR_CAPACITY; i++)
         {
-            QUBIT* q = new QUBIT{.qubit_id=i, .client_id=RDR_CLIENT_ID};
+            Qubit* q = new Qubit{.qubit_id=i, .client_id=RDR_CLIENT_ID};
             dedicated_ancilla_[i] = q;
         }
     }
@@ -138,7 +137,7 @@ COMPUTE_SUBSYSTEM::COMPUTE_SUBSYSTEM(double freq_khz,
     }
 }
 
-COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
+ComputeSubsystem::~ComputeSubsystem()
 {
     for (auto* q : dedicated_ancilla_)
         delete q;
@@ -148,11 +147,11 @@ COMPUTE_SUBSYSTEM::~COMPUTE_SUBSYSTEM()
 ////////////////////////////////////////////////////////////
 
 void
-COMPUTE_SUBSYSTEM::initialize_qubits(std::vector<QUBIT*> program_qubits)
+ComputeSubsystem::initialize_qubits(std::vector<Qubit*> program_qubits)
 {
     for (size_t i = 0; i < local_memory_capacity; i++)
     {
-        QUBIT* q = program_qubits[i];
+        Qubit* q = program_qubits[i];
         memory_level_map_[q] = -1;
         local_memory_[i] = q;
     }
@@ -162,13 +161,13 @@ COMPUTE_SUBSYSTEM::initialize_qubits(std::vector<QUBIT*> program_qubits)
     for (auto* m : memory_subsystem_)
     {
         if (begin_idx == program_qubits.size())
-            std::cerr << "COMPUTE_SUBSYSTEM::initialize_qubits: extraneous levels in memory subsystem" << _die{};
+            std::cerr << "ComputeSubsystem::initialize_qubits: extraneous levels in memory subsystem" << _die{};
 
         size_t end_idx = std::min(program_qubits.size(), begin_idx + m->total_capacity);
         auto begin = program_qubits.begin() + begin_idx,
              end = program_qubits.begin() + end_idx;
         m->striped_mapping(begin, end);
-        std::for_each(begin, end, [this, level] (QUBIT* q) { memory_level_map_[q] = level; });
+        std::for_each(begin, end, [this, level] (Qubit* q) { memory_level_map_[q] = level; });
         begin_idx = end_idx;
         level++;
     }
@@ -178,7 +177,7 @@ COMPUTE_SUBSYSTEM::initialize_qubits(std::vector<QUBIT*> program_qubits)
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
+ComputeSubsystem::execute_instruction(inst_ptr inst, std::vector<Qubit*> args)
 {
     if (is_software_instruction(inst->type))
         return execute_result_type{.progress=1, .latency=0};
@@ -186,37 +185,37 @@ COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
     execute_result_type result{};
     switch (inst->type)
     {
-    case INSTRUCTION::TYPE::H:
+    case Instruction::Type::H:
         result = do_h_gate(inst, args[0]);
         break;
 
-    case INSTRUCTION::TYPE::S:
-    case INSTRUCTION::TYPE::SX:
-    case INSTRUCTION::TYPE::SDG:
-    case INSTRUCTION::TYPE::SXDG:
+    case Instruction::Type::S:
+    case Instruction::Type::SX:
+    case Instruction::Type::SDG:
+    case Instruction::Type::SXDG:
         result = do_s_like_gate(inst, args[0]);
         break;
 
-    case INSTRUCTION::TYPE::CX:
-    case INSTRUCTION::TYPE::CZ:
+    case Instruction::Type::CX:
+    case Instruction::Type::CZ:
         result = do_cx_like_gate(inst, args[0], args[1]);
         break;
 
-    case INSTRUCTION::TYPE::T:
-    case INSTRUCTION::TYPE::TX:
-    case INSTRUCTION::TYPE::TDG:
-    case INSTRUCTION::TYPE::TXDG:
+    case Instruction::Type::T:
+    case Instruction::Type::TX:
+    case Instruction::Type::TDG:
+    case Instruction::Type::TXDG:
         result = do_t_like_gate(inst, args[0]);
         break;
 
-    case INSTRUCTION::TYPE::LOAD:
-    case INSTRUCTION::TYPE::STORE:
-    case INSTRUCTION::TYPE::COUPLED_LOAD_STORE:
+    case Instruction::Type::LOAD:
+    case Instruction::Type::STORE:
+    case Instruction::Type::COUPLED_LOAD_STORE:
         result = do_memory_access(inst, args);
         break;
 
     default:
-        std::cerr << "COMPUTE_SUBSYSTEM::execute_instruction: unknown instruction: " << *inst << _die{};
+        std::cerr << "ComputeSubsystem::execute_instruction: unknown instruction: " << *inst << _die{};
     }
 
     // update availability on success
@@ -239,7 +238,7 @@ COMPUTE_SUBSYSTEM::execute_instruction(inst_ptr inst, std::vector<QUBIT*> args)
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remaining)
+ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining)
 {
     assert(is_rotation_instruction(inst->type));
     assert(inst->uops_retired() < inst->uop_count());
@@ -257,29 +256,21 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
         return result;
     }
 
-    // only handle routing if this is a superconducting quantum processor:
-    if (!GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
-        // from the program qubit to the EPR qubit.
-        // 
-        // This involves moving out of this channel (so we need to route to `MCB_LEFT_ENTRY`
-        // or `MCB_RIGHT_ENTRY`). Assume that this routing problem is solved properly in practice,
-        // and choose whichever is free
-        cycle_type tp_start = current_cycle() + code_distance,
-                   tp_end = current_cycle() + 3*code_distance;
-        auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
-        if (!channel_out.has_value())
-            return result;
-        routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
-    }
+    // now, we need to handle the aspect of routing the XX and ZZ pauli-product measurements
+    // from the program qubit to the EPR qubit.
+    //
+    // This involves moving out of this channel (so we need to route to `MCB_LEFT_ENTRY`
+    // or `MCB_RIGHT_ENTRY`). Assume that this routing problem is solved properly in practice,
+    // and choose whichever is free
+    cycle_type tp_start = current_cycle() + code_distance,
+               tp_end = current_cycle() + 3*code_distance;
+    auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
+    if (!channel_out.has_value())
+        return result;
+    routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
 
-    // update the result latency, which is currently `code_distance + GL_REACTION_TIME + 1`.
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-        result.latency = 3*NA_CX_LATENCY + 1;  // three transversal CX + measuring qubits
-    else
-        result.latency = 3*code_distance + GL_REACTION_TIME;   // ZZ with |T> + teleporting XX and ZZ + feedforward
-
+    // update the result latency which is incorrect
+    result.latency = 3*code_distance + GL_REACTION_TIME;  // ZZ with |T> + teleporting XX and ZZ + feedforward
     while (inst->uops_retired() < inst->uop_count() && remaining > 0)
     {
         auto* uop = inst->current_uop();
@@ -291,10 +282,8 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
             if (f_it == t_factories_.end())
                 break;
             (*f_it)->consume(1);
-            if (GL_OPERATE_AS_NEUTRAL_ATOM)
-                result.latency++;
-            else
-                result.latency += GL_REACTION_TIME + 1;  // need one cycle to measure |Y> ancilla
+            // need one cycle to measure |Y> ancilla
+            result.latency += 1 + GL_REACTION_TIME;  
             remaining--;
         }
         result.progress++;
@@ -320,7 +309,7 @@ COMPUTE_SUBSYSTEM::do_rotation_via_rltp(inst_ptr inst, QUBIT* q, size_t remainin
 ////////////////////////////////////////////////////////////
 
 bool
-COMPUTE_SUBSYSTEM::is_qubit_in_local_memory(const QUBIT* q) const
+ComputeSubsystem::is_qubit_in_local_memory(const Qubit* q) const
 {
     auto it = std::find(local_memory_.begin(), local_memory_.end(), q);
     return it != local_memory_.end();
@@ -334,76 +323,44 @@ COMPUTE_SUBSYSTEM::is_qubit_in_local_memory(const QUBIT* q) const
  * so we will need to allocate a space in advance.
  * */
 
-// FOR TESTING ONLY:
-// #define RDR_IGNORE_ROUTING_OVERHEADS
-
 bool
-COMPUTE_SUBSYSTEM::rdr_simulate_store(QUBIT* q)
+ComputeSubsystem::rdr_simulate_store(Qubit* q)
 {
-    // we should not be using a completion buffer on a neutral atom system.
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-        std::cerr << "COMPUTE_SUBSYSTEM::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
-
     const size_t d = code_distance;
-#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
-    const cycle_type c = current_cycle();
-#else
     const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
-#endif
     q->cycle_available = c+d+1;  // +1 due to destruction by X measurement
     return true;
 }
 
 bool
-COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_surface_code(QUBIT* q, QUBIT* m)
+ComputeSubsystem::rdr_apply_rotation_magic_state_from_surface_code(Qubit* q, Qubit* m)
 {
     const size_t d = code_distance;
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // CX + measure
-        q->cycle_available = current_cycle() + NA_CX_LATENCY + 1;
-        m->cycle_available = current_cycle() + NA_CX_LATENCY + 1;
-    }
-    else
-    {
-#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
-        const cycle_type c = current_cycle();
-#else
-        const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
-        if (!routing_.test_resources_between(q, m, c, c+d))
-            return false;
-        routing_.lock_resources_between(q, m, c, c+d);
-#endif
-        q->cycle_available = c+d+GL_REACTION_TIME;
-        m->cycle_available = c+d+1;
-        return true;
-    }
+    const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
+    if (!routing_.test_resources_between(q, m, c, c+d))
+        return false;
+    routing_.lock_resources_between(q, m, c, c+d);
+    q->cycle_available = c + d + GL_REACTION_TIME;
+    m->cycle_available = c + d + 1;
+    return true;
 }
 
 bool
-COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
+ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
 {
-    // we should not be using a completion buffer on a neutral atom system.
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-        std::cerr << "COMPUTE_SUBSYSTEM::rdr_simulate_store: unexpected store in neutral atom mode" << _die{};
-
     const size_t d = code_distance;
-#if defined(RDR_IGNORE_ROUTING_OVERHEADS)
-    const cycle_type c = current_cycle();
-#else
     const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
     routing_.lock_resources_between(q, *dst, c, c+d);
-#endif
-    q->cycle_available = c+d+GL_REACTION_TIME;
+    q->cycle_available = c + d + GL_REACTION_TIME;
     return true;
 }
 
@@ -411,7 +368,7 @@ COMPUTE_SUBSYSTEM::rdr_apply_rotation_magic_state_from_memory(QUBIT* q)
 ////////////////////////////////////////////////////////////
 
 double
-COMPUTE_SUBSYSTEM::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) const
+ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, double p) const
 {
     const double cycles = convert_cycles_between_frequencies(c->s_cycle_complete, d_freq_khz, freq_khz) * scale;
     const double ler_per_d_cycles = configuration::surface_code_logical_error_rate(code_distance, p);
@@ -425,10 +382,10 @@ COMPUTE_SUBSYSTEM::log_fidelity(CLIENT* c, double scale, double d_freq_khz, doub
                                                     return std::abs(x - f->output_error_probability) < 1e-12;
                                                 });
     if (!all_fact_have_same_fidelity)
-        std::cerr << "COMPUTE_SUBSYSTEM::log_fidelity: T factories do not have similar fidelities" << _die{};
+        std::cerr << "ComputeSubsystem::log_fidelity: T factories do not have similar fidelities" << _die{};
 
     // memory (idle) fidelity
-    const double log_f_mem = local_memory_capacity * mean(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
+    const double log_f_mem = local_memory_capacity * fpdiv(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
     // T gate fidelity
     const double log_f_t = t_gates * std::log(1.0 - t_infidelity);
     // total fidelity:
@@ -439,35 +396,8 @@ COMPUTE_SUBSYSTEM::log_fidelity(CLIENT* c, double scale, double d_freq_khz, doub
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-const COMPUTE_SUBSYSTEM::local_storage_type&
-COMPUTE_SUBSYSTEM::local_memory() const
-{
-    return local_memory_;
-}
-
-const COMPUTE_SUBSYSTEM::production_level_type&
-COMPUTE_SUBSYSTEM::t_factories() const
-{
-    return t_factories_;
-}
-
-const COMPUTE_SUBSYSTEM::memory_subsystem_type&
-COMPUTE_SUBSYSTEM::memory_subsystem() const
-{
-    return memory_subsystem_;
-}
-
-const COMPUTE_SUBSYSTEM::local_storage_type&
-COMPUTE_SUBSYSTEM::dedicated_ancilla() const
-{
-    return dedicated_ancilla_;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
-COMPUTE_SUBSYSTEM::count_available_magic_states() const
+ComputeSubsystem::count_available_magic_states() const
 {
     return std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0}, std::plus<size_t>{},
                                 [] (const auto* f) { return f->buffer_occupancy(); });
@@ -477,45 +407,29 @@ COMPUTE_SUBSYSTEM::count_available_magic_states() const
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_h_gate(inst_ptr inst, QUBIT* q)
+ComputeSubsystem::do_h_gate(inst_ptr inst, Qubit* q)
 {
     return execute_result_type{.progress=1, .latency=1};  // can be done transversally (up-to a 45deg rotation)
 }
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_s_like_gate(inst_ptr inst, QUBIT* q)
+ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
 {
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
     {
-        // assume transveral CX as it does not make sense to do lattice surgery for S
-        // on neutral atom systems
-        return execute_result_type{.progress=1, .latency=NA_CX_LATENCY+1};
-    }
-    else
-    {
-        if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
-        {
-            routing_.lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
-            return execute_result_type{.progress=1, .latency=code_distance};
-        }
+        routing_.lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
+        return execute_result_type{.progress=1, .latency=code_distance};
     }
     return execute_result_type{};
 }
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_cx_like_gate(inst_ptr inst, QUBIT* c, QUBIT* t)
+ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 {
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
+    if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
     {
-        return execute_result_type{.progress=1, .latency=NA_CX_LATENCY};  // transversal CX
-    }
-    else
-    {
-        if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
-        {
-            routing_.lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
-            return execute_result_type{.progress=1, .latency=2*code_distance};
-        }
+        routing_.lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
+        return execute_result_type{.progress=1, .latency=2*code_distance};
     }
     return execute_result_type{};
 }
@@ -524,7 +438,7 @@ COMPUTE_SUBSYSTEM::do_cx_like_gate(inst_ptr inst, QUBIT* c, QUBIT* t)
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
+ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 {
     // first get factory with magic state:
     auto f_it = std::find_if(t_factories_.begin(), t_factories_.end(),
@@ -532,45 +446,37 @@ COMPUTE_SUBSYSTEM::do_t_like_gate(inst_ptr inst, QUBIT* q)
     if (f_it == t_factories_.end())
         return execute_result_type{};
 
-    cycle_type latency;
-    if (GL_OPERATE_AS_NEUTRAL_ATOM)
-    {
-        // transversal CX ... assume auto-correction is used as it does not make sense to
-        // do S gate as it requires another patch anyway
-        latency = NA_CX_LATENCY + 1;  // CX gate + measurement of both |T> and |Y>
-    }
-    else
-    {
-        // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
-        // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
-        // takes 1us)
-        const cycle_type t_start = current_cycle(),
-                         t_end = current_cycle() + code_distance;
-        // get routing space -- on success, we can execute the T gate
-        auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
-        if (!dst.has_value())
-            return execute_result_type{};
-        routing_.lock_resources_between(q, *dst, t_start, t_end);
-        latency = code_distance + GL_REACTION_TIME;
-    }
+    // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
+    // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
+    // takes 1us)
+    const cycle_type t_start = current_cycle(),
+                     t_end = current_cycle() + code_distance;
+    // get routing space -- on success, we can execute the T gate
+    auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
+    if (!dst.has_value())
+        return execute_result_type{};
+    routing_.lock_resources_between(q, *dst, t_start, t_end);
+
+    // estimate decoding latency:
+    const cycle_type total_latency = code_distance + GL_REACTION_TIME;
     (*f_it)->consume(1);
-    return execute_result_type{.progress=1, .latency=latency};
+    return execute_result_type{.progress=1, .latency=total_latency};
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
+ComputeSubsystem::do_memory_access(inst_ptr inst, std::vector<Qubit*> args)
 {
-    if (inst->type == INSTRUCTION::TYPE::LOAD || inst->type == INSTRUCTION::TYPE::STORE)
+    if (inst->type == Instruction::Type::LOAD || inst->type == Instruction::Type::STORE)
     {
-        std::cerr << "COMPUTE_SUBSYSTEM::do_memory_access: memory access of type "
+        std::cerr << "ComputeSubsystem::do_memory_access: memory access of type "
                 << BASIS_GATES[static_cast<int>(inst->type)] << " currently unsupported" << _die{};
     }
 
-    QUBIT* ld = args[0];
-    QUBIT* st = args[1];
+    Qubit* ld = args[0];
+    Qubit* st = args[1];
 
     assert(memory_level_map_[ld] >= 0 && memory_level_map_[st] < 0);
 
@@ -583,8 +489,8 @@ COMPUTE_SUBSYSTEM::do_memory_access(inst_ptr inst, std::vector<QUBIT*> args)
         return execute_result_type{};
 
     // find memory location that contains this memory:
-    MEMORY_LEVEL* m = memory_subsystem_[memory_level_map_[ld]];
-    MEMORY_ACCESS_RESULT result = m->do_coupled_load_store(ld, st);
+    MemoryLevel* m = memory_subsystem_[memory_level_map_[ld]];
+    MemoryAccessResult result = m->do_coupled_load_store(ld, st);
     if (!result.success)
         return execute_result_type{};
 
@@ -611,17 +517,19 @@ namespace
 ////////////////////////////////////////////////////////////
 
 size_t
-_num_routing_channels(COMPUTE_SUBSYSTEM* c)
+_num_routing_channels(ComputeSubsystem* c)
 {
-    return 1;
+    const size_t total_capacity = c->local_memory_capacity + c->dedicated_ancilla_count;
+    return (total_capacity + MAX_QUBITS_PER_CHANNEL - 1) / MAX_QUBITS_PER_CHANNEL;
 }
 
 size_t
-_channel_width(COMPUTE_SUBSYSTEM* c)
+_channel_width(ComputeSubsystem* c)
 {
     size_t q_count = c->dedicated_ancilla_count + c->local_memory_capacity;
     if (q_count & 1)
         q_count++;
+    q_count = std::min(MAX_QUBITS_PER_CHANNEL, q_count);
     size_t w = q_count >> 1;
     return w;
 }
@@ -636,7 +544,7 @@ _dedicated_ancilla_count()
 }
 
 size_t
-_get_idx_in_array(QUBIT* q, const std::vector<QUBIT*>& arr)
+_get_idx_in_array(Qubit* q, const std::vector<Qubit*>& arr)
 {
     auto it = std::find(arr.begin(), arr.end(), q);
     assert(it != arr.end());
@@ -658,8 +566,8 @@ _test_endpoints_and_return_first_lockable(routing_type& r, T src, cycle_type fro
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class LOCK_PRED> std::optional<cycle_type>
-_test_multiple_time_intervals(cycle_type start, cycle_type delta, cycle_type start_max, const LOCK_PRED& pred)
+template <class LockPred> std::optional<cycle_type>
+_test_multiple_time_intervals(cycle_type start, cycle_type delta, cycle_type start_max, const LockPred& pred)
 {
     while (start < start_max)
     {

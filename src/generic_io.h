@@ -19,7 +19,7 @@
 /*
     LZMA support:
 */
-class LZMA_FILE
+class LZMAFile
 {
 private:
     constexpr static size_t LZMA_BUF_SIZE{4096};
@@ -30,8 +30,8 @@ private:
 
     bool is_open{true};
 public: 
-    LZMA_FILE(FILE*);
-    ~LZMA_FILE();
+    LZMAFile(FILE*);
+    ~LZMAFile();
 
     size_t read(void*, size_t);
     bool   eof() const;
@@ -43,9 +43,9 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-using generic_strm_type = std::variant<FILE*, gzFile, LZMA_FILE*>;
+using generic_strm_type = std::variant<FILE*, gzFile, LZMAFile*>;
 
-enum class GENERIC_STRM_TYPE_ID { FILE, GZ, XZ };
+enum class GenericStrmTypeID { FILE, GZ, XZ };
 
 void generic_strm_open(generic_strm_type& strm, std::string file_path, std::string mode);
 size_t generic_strm_read(generic_strm_type& strm, void* buf, size_t size);

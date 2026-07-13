@@ -16,28 +16,28 @@ namespace routing
 namespace
 {
 
-using range_type = RESOURCE::range_type;
+using range_type = Resource::range_type;
 
-template <class ITER>
-bool _check_for_intersection(range_type, ITER begin, ITER end);
+template <class Iter>
+bool _check_for_intersection(range_type, Iter begin, Iter end);
 
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-RESOURCE::RESOURCE()
+Resource::Resource()
 {
     usage_.reserve(RANGE_LIMIT);
 }
 
 void
-RESOURCE::lock_for_time_interval(cycle_type a, cycle_type b)
+Resource::lock_for_time_interval(cycle_type a, cycle_type b)
 {
     range_type r{a,b};
     if (_check_for_intersection(r, usage_.begin(), usage_.end()))
     {
-        std::cerr << "RESOURCE::lock_for_time_interval: resource is not free from cycle " 
+        std::cerr << "Resource::lock_for_time_interval: resource is not free from cycle " 
             << a << " to " << b << _die{};
     }
 
@@ -51,7 +51,7 @@ RESOURCE::lock_for_time_interval(cycle_type a, cycle_type b)
         }
         else
         {
-            std::cerr << "RESOURCE::lock_for_time_interval: range is not tracked"
+            std::cerr << "Resource::lock_for_time_interval: range is not tracked"
                      << " -- consider increasing RANGE_LIMIT\n";
         }
     }
@@ -62,13 +62,13 @@ RESOURCE::lock_for_time_interval(cycle_type a, cycle_type b)
 }
 
 bool
-RESOURCE::is_lockable(cycle_type a, cycle_type b) const
+Resource::is_lockable(cycle_type a, cycle_type b) const
 {
     return !_check_for_intersection(range_type{a,b}, usage_.begin(), usage_.end());
 }
 
 cycle_type
-RESOURCE::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
+Resource::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
 {
     cycle_type c{current_cycle};
     for (size_t i = 0; i < usage_.size(); i++)
@@ -76,7 +76,9 @@ RESOURCE::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
         const auto& [a, b] = usage_.at(i);
         if (b < c)
             continue;
-        if (c+t < a)
+        // Ranges are half-open [a, b): a duration-t lock occupies [c, c+t), so
+        // it fits before this range as long as c+t <= a (adjacency is allowed).
+        if (c+t <= a)
             return c;
         else
             c = b;
@@ -90,8 +92,8 @@ RESOURCE::next_ready_cycle(cycle_type current_cycle, cycle_type t) const
 namespace
 {
 
-template <class ITER> bool
-_check_for_intersection(range_type r, ITER begin, ITER end)
+template <class Iter> bool
+_check_for_intersection(range_type r, Iter begin, Iter end)
 {
     r.second--;
     return std::any_of(begin, end,

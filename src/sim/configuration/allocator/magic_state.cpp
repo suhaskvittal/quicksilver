@@ -27,18 +27,18 @@ namespace configuration
 namespace
 {
 
-PRODUCER_BASE* _alloc(FACTORY_SPECIFICATION);
-size_t         _physical_qubit_count(FACTORY_SPECIFICATION);
-double         _bandwidth(FACTORY_SPECIFICATION, double);
-double         _consumption_rate(FACTORY_SPECIFICATION, double);
+ProducerBase* _alloc(FactorySpecification);
+size_t         _physical_qubit_count(FactorySpecification);
+double         _bandwidth(FactorySpecification, double);
+double         _consumption_rate(FactorySpecification, double);
 
 } // anon
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ALLOCATION
-allocate_magic_state_factories(size_t b, std::vector<FACTORY_SPECIFICATION> specs)
+Allocation
+allocate_magic_state_factories(size_t b, std::vector<FactorySpecification> specs)
 {
     return throughput_aware_allocation(b, specs, _alloc, _physical_qubit_count, _bandwidth, _consumption_rate);
 }
@@ -56,14 +56,14 @@ namespace
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PRODUCER_BASE*
-_alloc(FACTORY_SPECIFICATION s)
+ProducerBase*
+_alloc(FactorySpecification s)
 {
-    PRODUCER_BASE* f;
+    ProducerBase* f;
         const double freq_khz = compute_freq_khz(s.cycle_time_ns);
     if (s.is_cultivation)
     {
-        f = new producer::T_CULTIVATION(freq_khz,
+        f = new producer::TCultivation(freq_khz,
                                         s.output_error_rate,
                                         s.buffer_capacity,
                                         s.probability_of_success,
@@ -71,7 +71,7 @@ _alloc(FACTORY_SPECIFICATION s)
     }
     else
     {
-        f = new producer::T_DISTILLATION(freq_khz,
+        f = new producer::TDistillation(freq_khz,
                                          s.output_error_rate,
                                          s.buffer_capacity,
                                          s.input_count,
@@ -86,7 +86,7 @@ _alloc(FACTORY_SPECIFICATION s)
 ////////////////////////////////////////////////////////////
 
 size_t
-_physical_qubit_count(FACTORY_SPECIFICATION s)
+_physical_qubit_count(FactorySpecification s)
 {
     size_t p = s.is_cultivation
                 ? magic_state_cultivation_physical_qubit_count(s.escape_distance)
@@ -102,7 +102,7 @@ _physical_qubit_count(FACTORY_SPECIFICATION s)
 ////////////////////////////////////////////////////////////
 
 double
-_bandwidth(FACTORY_SPECIFICATION s, double)
+_bandwidth(FactorySpecification s, double)
 {
     double bw;
 
@@ -127,7 +127,7 @@ _bandwidth(FACTORY_SPECIFICATION s, double)
 ////////////////////////////////////////////////////////////
 
 double
-_consumption_rate(FACTORY_SPECIFICATION s, double)
+_consumption_rate(FactorySpecification s, double)
 {
     assert(!s.is_cultivation);
 

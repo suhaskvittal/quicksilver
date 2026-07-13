@@ -8,7 +8,7 @@
 #include "sim/compute_subsystem.h"
 #include "sim/driver.h"
 #include "sim/production.h"
-#include "sim/stats.h"
+#include "sim/metrics.h"
 
 #include <iomanip>
 #include <sstream>
@@ -29,12 +29,11 @@ double GL_PHYSICAL_ERROR_RATE{1e-3};
 
 bool GL_T_GATE_DO_AUTOCORRECT{false};
 
-bool GL_OPERATE_AS_NEUTRAL_ATOM{false};
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 int64_t GL_REACTION_TIME{10};
+
 int64_t GL_RLTP_DEGREE{0};
 
 bool GL_RDR_ENABLED{false};
@@ -60,7 +59,7 @@ namespace
 /*
  * Utility function for printing stats for each client.
  * */
-void _print_client_stats(std::ostream&, DRIVER*, CLIENT*);
+void _print_client_stats(std::ostream&, Driver*, Client*);
 
 } // anon
 
@@ -93,51 +92,45 @@ walltime_s()
 ////////////////////////////////////////////////////////////
 
 void
-print_sim_stats(std::ostream& out, DRIVER* d)
+print_sim_stats(std::ostream& out, Driver* d)
 {
-    using STALL_TYPE = DRIVER::STALL_TYPE;
+    using Stall = Driver::Stall;
 
     uint64_t cx_gates{0};
     uint64_t t_gates{0};
-    for (auto t : {INSTRUCTION::TYPE::CX, INSTRUCTION::TYPE::CZ})
+    for (auto t : {Instruction::Type::CX, Instruction::Type::CZ})
         cx_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
-    for (auto t : {INSTRUCTION::TYPE::T, INSTRUCTION::TYPE::TX, INSTRUCTION::TYPE::TDG, INSTRUCTION::TYPE::TXDG})
+    for (auto t : {Instruction::Type::T, Instruction::Type::TX, Instruction::Type::TDG, Instruction::Type::TXDG})
         t_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
 
-    double t_consumption_rate_per_s = mean(t_gates, d->current_cycle() / (1e3*d->freq_khz));
+    double t_consumption_rate_per_s = fpdiv(t_gates, d->current_cycle() / (1e3*d->freq_khz));
     print_stat_line(out, "TOTAL_SIMULATION_CYCLES", d->current_cycle());
 
     print_stat_line(out, "CX_GATES_EXECUTED", cx_gates);
     print_stat_line(out, "T_GATES_EXECUTED", t_gates);
     print_stat_line(out, "T_CONSUMPTION_RATE_PER_S", t_consumption_rate_per_s);
 
-    print_stat_line(out, "ISOLATED_MEMORY_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::MEMORY));
-    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::MAGIC_STATE));
-    print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(STALL_TYPE::EPR));
+    print_stat_line(out, "ISOLATED_MEMORY_STALLS", d->stall_monitor().isolated_stalls_for(Stall::MEMORY));
+    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(Stall::MAGIC_STATE));
+    print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(Stall::EPR));
     print_stat_line(out, "TOTAL_STALLS", d->stall_monitor().cycles_with_stalls());
 
     if (GL_RDR_ENABLED)
     {
-        print_stat_line(out, "TOTAL_ROTATION_INSTRUCTIONS", d->s_rotation_instructions);
-        print_stat_line(out, "RDR_REQUESTS_SUBMITTED", d->rdr()->s_requests_submitted);
-        print_stat_line(out, "RDR_REQUESTS_INV_BEFORE_ISSUE", d->rdr()->s_requests_invalidated_before_issue);
-        print_stat_line(out, "RDR_REQUESTS_STARTED", d->rdr()->s_requests_started);
-        print_stat_line(out, "RDR_REQUESTS_COMPLETED", d->rdr()->s_requests_completed);
-        print_stat_line(out, "RDR_REQUESTS_INTERRUPTED", d->rdr()->s_requests_interrupted);
-        print_stat_line(out, "RDR_REQUESTS_INVALIDATED", d->rdr()->s_requests_invalidated);
-        print_stat_line(out, "RDR_REQUESTS_USED", d->rdr()->s_requests_used);
+        out << "RDR\n";
+        print_stat_line(out, "    TOTAL_ROTATION_INSTRUCTIONS", d->s_rotation_instructions);
+        print_stat_line(out, "    REQUESTS_SUBMITTED", d->rdr()->s_requests_submitted);
+        print_stat_line(out, "    REQUESTS_INV_BEFORE_ISSUE", d->rdr()->s_requests_invalidated_before_issue);
+        print_stat_line(out, "    REQUESTS_STARTED", d->rdr()->s_requests_started);
+        print_stat_line(out, "    REQUESTS_COMPLETED", d->rdr()->s_requests_completed);
+        print_stat_line(out, "    REQUESTS_INTERRUPTED", d->rdr()->s_requests_interrupted);
+        print_stat_line(out, "    REQUESTS_INVALIDATED", d->rdr()->s_requests_invalidated);
+        print_stat_line(out, "    REQUESTS_USED", d->rdr()->s_requests_used);
 
-        double completion_buffer_mean_occu = mean(d->rdr()->s_completion_buffer_occu_sum,
-                                                   d->rdr()->s_completion_buffer_occu_ticks);
-        print_stat_line(out, "RDR_COMPLETION_BUFFER_MEAN_OCCUPANCY", completion_buffer_mean_occu);
-
-        double request_mean_latency = mean(d->rdr()->s_request_completion_cycles_sum, d->rdr()->s_requests_used);
-        double request_mean_latency_per_uop = mean(d->rdr()->s_request_completion_cycles_sum, d->rdr()->s_request_uop_sum);
-        print_stat_line(out, "RDR_REQUEST_COMPLETION_MEAN_LATENCY", request_mean_latency);
-        print_stat_line(out, "RDR_MEAN_LATENCY_PER_UOP", request_mean_latency_per_uop);
-
-        double request_idle_time = mean(d->rdr()->s_post_completion_idle_time_sum, d->rdr()->s_requests_used);
-        print_stat_line(out, "RDR_REQUEST_POST_COMPLETION_MEAN_IDLE_TIME", request_idle_time);
+        d->rdr()->s_request_latency.dump(out, 1);
+        d->rdr()->s_request_latency_norm_uop.dump(out, 1);
+        d->rdr()->s_post_completion_idle_time.dump(out, 1);
+        d->rdr()->s_completion_buffer_occu.dump(out, 1);
     }
 
     for (auto* c : d->clients())
@@ -148,7 +141,7 @@ print_sim_stats(std::ostream& out, DRIVER* d)
 ////////////////////////////////////////////////////////////
 
 void
-print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<PRODUCER_BASE*> factories)
+print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<ProducerBase*> factories)
 {
     if (factories.empty())
         return;
@@ -166,7 +159,7 @@ print_stats_for_factories(std::ostream& out, std::string_view header, std::vecto
         total_failures += f->s_failures;
         total_consumed += f->s_consumed;
     }
-    double kill_rate = mean(total_failures, total_attempts);
+    double kill_rate = fpdiv(total_failures, total_attempts);
 
     print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
     print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
@@ -187,15 +180,11 @@ namespace
 ////////////////////////////////////////////////////////////
 
 void
-_print_client_stats(std::ostream& out, DRIVER* d, CLIENT* c)
+_print_client_stats(std::ostream& out, Driver* d, Client* c)
 {
-    double ipc = stats::ipc(c->s_unrolled_inst_done, c->s_cycle_complete);
-    double ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, d->compute_subsystem()->code_distance);
-    double kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, d->freq_khz);
-
-    double uops_per_rotation = mean(c->s_total_rotation_uops, c->s_total_rotations);
-    double rotation_latency_per_uop = mean(c->s_rotation_latency, c->s_total_rotation_uops);
-    double mean_memory_access_latency = mean(c->s_memory_access_latency, c->s_memory_accesses);
+    double ipc = stats::ipc(c->s_unrolled_inst_done, c->s_cycle_complete),
+           ipdc = stats::ipdc(c->s_unrolled_inst_done, c->s_cycle_complete, d->compute_subsystem()->code_distance),
+           kips = stats::kips(c->s_unrolled_inst_done, c->s_cycle_complete, d->freq_khz);
 
     out << "CLIENT " << static_cast<int>(c->id) << "\n";
     print_stat_line(out, "    IPC", ipc);
@@ -203,10 +192,10 @@ _print_client_stats(std::ostream& out, DRIVER* d, CLIENT* c)
     print_stat_line(out, "    KIPS", kips);
     print_stat_line(out, "    INSTRUCTIONS", c->s_unrolled_inst_done);
     print_stat_line(out, "    CYCLES", c->s_cycle_complete);
-    print_stat_line(out, "    ROTATION_LATENCY_PER_UOP", rotation_latency_per_uop);
-    print_stat_line(out, "    MEAN_UOPS_PER_ROTATION", uops_per_rotation);
-    print_stat_line(out, "    MEMORY_ACCESSES", c->s_memory_accesses);
-    print_stat_line(out, "    MEAN_MEMORY_ACCESS_LATENCY", mean_memory_access_latency);
+    // histograms
+    c->s_rotation_latency.dump(out, 1);
+    c->s_rotation_uops.dump(out, 1);
+    c->s_memory_access_latency.dump(out, 1);
 }
 
 ////////////////////////////////////////////////////////////

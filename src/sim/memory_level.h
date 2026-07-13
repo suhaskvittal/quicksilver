@@ -8,7 +8,9 @@
 
 #include "globals.h"
 #include "sim/operable.h"
+#include "sim/qubit.h"
 
+#include <cassert>
 #include <iosfwd>
 #include <unordered_set>
 #include <vector>
@@ -19,7 +21,7 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-struct MEMORY_ACCESS_RESULT
+struct MemoryAccessResult
 {
     bool success{false};
 
@@ -50,18 +52,18 @@ struct MEMORY_ACCESS_RESULT
  *  (3) `coupled_load_store_impl()`
  * All three functions are given the index of the storage, a reference
  * to that storage, and the arguments. All three functions are expected
- * to return a `MEMORY_ACCESS_RESULT`. If the `success` field of this
+ * to return a `MemoryAccessResult`. If the `success` field of this
  * result is set, then the storage is modified.
  *
  * Other required functions:
- *  (1) get_next_ready_cycle_for_load(QUBIT*): returns the earliest cycle
+ *  (1) get_next_ready_cycle_for_load(Qubit*): returns the earliest cycle
  *      where the load is feasible.
  * */
 
-class MEMORY_LEVEL : public OPERABLE
+class MemoryLevel : public Operable
 {
 public:
-    using storage_type = std::unordered_set<QUBIT*>;
+    using storage_type = std::unordered_set<Qubit*>;
 
     const size_t storage_physical_qubit_count;
     const size_t storage_logical_qubit_count;
@@ -73,24 +75,24 @@ public:
     const size_t num_blocks;
     const size_t total_capacity;
 
-    virtual ~MEMORY_LEVEL() = default;
+    virtual ~MemoryLevel() = default;
 protected:
     std::vector<storage_type> blocks_;
 public:
-    MEMORY_LEVEL(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
+    MemoryLevel(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
     /*
      * Stripes all qubits within the range across all code blocks in the system.
      * */
-    template <class ITER>
-    void striped_mapping(ITER begin, ITER end);
+    template <class Iter>
+    void striped_mapping(Iter begin, Iter end);
 
     /*
      * Memory access functions:
      * */
-    MEMORY_ACCESS_RESULT do_load(QUBIT*);
-    MEMORY_ACCESS_RESULT do_store(QUBIT*);
-    MEMORY_ACCESS_RESULT do_coupled_load_store(QUBIT* ld, QUBIT* st);
+    MemoryAccessResult do_load(Qubit*);
+    MemoryAccessResult do_store(Qubit*);
+    MemoryAccessResult do_coupled_load_store(Qubit* ld, Qubit* st);
 
     /*
      * Prints out information about the contents of this level to the given stream.
@@ -100,18 +102,20 @@ public:
     /*
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
-    virtual cycle_type next_ready_cycle_for_load(QUBIT*) const =0;
+    virtual cycle_type next_ready_cycle_for_load(Qubit*) const =0;
 
     /*
      * Returns fidelity of memory subsystem for client's application.
      * `scale` indicates the amount to scale values such as cycles or
      * number of operations by. `d_freq_khz` is the frequency of the driver.
      * */
-    virtual double log_fidelity(CLIENT*, double scale, double d_freq_khz, double phys_error) const =0;
+    virtual double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const =0;
+
+    const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:
-    virtual MEMORY_ACCESS_RESULT load_impl(size_t idx, storage_type&, QUBIT*) =0;
-    virtual MEMORY_ACCESS_RESULT store_impl(size_t idx, storage_type&, QUBIT*) =0;
-    virtual MEMORY_ACCESS_RESULT coupled_load_store_impl(size_t idx, storage_type&, QUBIT* ld, QUBIT* st) =0;
+    virtual MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) =0;
+    virtual MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) =0;
+    virtual MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) =0;
 
     long operate() override { return 1; }
 };
@@ -120,17 +124,17 @@ protected:
 ////////////////////////////////////////////////////////////
 
 /*
- * Definition of MEMORY_LEVEL::striped_mapping()
+ * Definition of MemoryLevel::striped_mapping()
  * */ 
 
-template <class ITER> void 
-MEMORY_LEVEL::striped_mapping(ITER begin, ITER end)
+template <class Iter> void 
+MemoryLevel::striped_mapping(Iter begin, Iter end)
 {
     assert(std::distance(begin, end) < total_capacity);
 
     size_t block_idx{0};
     std::for_each(begin, end,
-            [this, &block_idx] (QUBIT* q)
+            [this, &block_idx] (Qubit* q)
             {
                 this->blocks_[block_idx].insert(q);
                 block_idx = (block_idx+1) % num_blocks;

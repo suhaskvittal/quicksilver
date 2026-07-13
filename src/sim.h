@@ -19,10 +19,10 @@
 namespace sim
 {
 
-class DRIVER;
-class COMPUTE_SUBSYSTEM;
-class CLIENT;
-class PRODUCER_BASE;
+class Driver;
+class ComputeSubsystem;
+class Client;
+class ProducerBase;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -53,11 +53,6 @@ extern int64_t GL_MAX_CYCLES_WITH_NO_PROGRESS;
  * Physical error rate -- mostly important for resource estimation.
  * */
 extern double GL_PHYSICAL_ERROR_RATE;
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-extern bool GL_OPERATE_AS_NEUTRAL_ATOM;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -118,8 +113,8 @@ double walltime_s();
  * Stat printing utilities:
  * */
 
-void print_sim_stats(std::ostream&, DRIVER*);
-void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<PRODUCER_BASE*>);
+void print_sim_stats(std::ostream&, Driver*);
+void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<ProducerBase*>);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

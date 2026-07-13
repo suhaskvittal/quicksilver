@@ -14,22 +14,22 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class REMOTE_STORAGE : public STORAGE
+class RemoteStorage : public Storage
 {
 public:
-    using STORAGE::access_result_type;
-    using STORAGE::ACCESS_TYPE;
+    using Storage::access_result_type;
+    using Storage::Access;
 private:
-    std::vector<PRODUCER_BASE*> top_level_epr_generators_;
+    std::vector<ProducerBase*> top_level_epr_generators_;
 public:
-    REMOTE_STORAGE(double freq_khz,
+    RemoteStorage(double freq_khz,
                     size_t n, size_t k, size_t d,
                     size_t num_adapters,
                     cycle_type load_latency,
                     cycle_type store_latency,
-                    std::vector<PRODUCER_BASE*>);
+                    std::vector<ProducerBase*>);
 private:
-    access_result_type do_memory_access(cycle_type access_latency, ACCESS_TYPE) override;
+    access_result_type do_memory_access(cycle_type access_latency, Access) override;
 };
 
 ////////////////////////////////////////////////////////////

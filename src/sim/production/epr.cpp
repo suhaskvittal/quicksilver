@@ -36,14 +36,14 @@ std::string _ed_name(size_t input_count, size_t output_count);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ENT_DISTILLATION::ENT_DISTILLATION(double freq_khz,
+EntDistillation::EntDistillation(double freq_khz,
                                     double output_error_prob,
                                     size_t buffer_capacity,
                                     size_t input_count,
                                     size_t output_count,
                                     size_t _measurement_distance,
                                     size_t _num_checks)
-    :PRODUCER_BASE(_ed_name(input_count, output_count), 
+    :ProducerBase(_ed_name(input_count, output_count), 
                             freq_khz, 
                             output_error_prob, 
                             buffer_capacity,
@@ -58,7 +58,7 @@ ENT_DISTILLATION::ENT_DISTILLATION(double freq_khz,
 ////////////////////////////////////////////////////////////
 
 cycle_type
-ENT_DISTILLATION::get_next_progression_cycle() const
+EntDistillation::get_next_progression_cycle() const
 {
     const cycle_type next_avail_cycle = std::max(cycle_available_, current_cycle()+1);
     return next_avail_cycle;
@@ -68,7 +68,7 @@ ENT_DISTILLATION::get_next_progression_cycle() const
 ////////////////////////////////////////////////////////////
 
 bool
-ENT_DISTILLATION::production_step()
+EntDistillation::production_step()
 {
     if (current_cycle() < cycle_available_)
         return true;
@@ -109,7 +109,7 @@ ENT_DISTILLATION::production_step()
 
         // don't need full measurement distance since error rate of state is already
         // is determined by previous level
-        cycle_available_ = current_cycle() + static_cast<ENT_DISTILLATION*>(p)->measurement_distance;
+        cycle_available_ = current_cycle() + static_cast<EntDistillation*>(p)->measurement_distance;
     }
     else if (inputs_available_ >= input_count)
     {

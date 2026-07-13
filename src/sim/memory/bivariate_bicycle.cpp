@@ -31,8 +31,8 @@ std::string _name(size_t, size_t, size_t);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-BB_MEMORY::BB_MEMORY(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d)
-    :MEMORY_LEVEL(_name(n,k,d), freq_khz, qubit_count, n, k, d),
+BBMemory::BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d)
+    :MemoryLevel(_name(n,k,d), freq_khz, qubit_count, n, k, d),
     routing_(NUM_CHANNELS, _channel_width(NUM_CHANNELS, num_blocks)),
     adapters_(num_blocks, 0)
 {
@@ -55,7 +55,7 @@ BB_MEMORY::BB_MEMORY(double freq_khz, size_t qubit_count, size_t n, size_t k, si
 ////////////////////////////////////////////////////////////
 
 cycle_type
-BB_MEMORY::next_ready_cycle_for_load(QUBIT* q) const
+BBMemory::next_ready_cycle_for_load(Qubit* q) const
 {
     size_t idx = 0;
     for (size_t i = 0; i < blocks_.size(); i++)
@@ -80,7 +80,7 @@ BB_MEMORY::next_ready_cycle_for_load(QUBIT* q) const
 ////////////////////////////////////////////////////////////
 
 double
-BB_MEMORY::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) const
+BBMemory::log_fidelity(Client* c, double scale, double d_freq_khz, double p) const
 {
     const double cycles = convert_cycles_between_frequencies(c->s_cycle_complete, d_freq_khz, freq_khz) * scale;
     const double surgery_ops = s_surgery_operations * scale;
@@ -91,7 +91,7 @@ BB_MEMORY::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) co
                  aut_error_per_op = ber_per_d_cycles*10;
 
     // memory (idle) fidelity
-    const double log_f_mem = num_blocks * mean(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
+    const double log_f_mem = num_blocks * fpdiv(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
     // surgery fidelity
     const double log_f_surgery = surgery_ops * std::log(1-surgery_error_per_op);
     // automorphism fidelity
@@ -104,18 +104,18 @@ BB_MEMORY::log_fidelity(CLIENT* c, double scale, double d_freq_khz, double p) co
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_ACCESS_RESULT
-BB_MEMORY::load_impl(size_t idx, storage_type&, QUBIT* q)
+MemoryAccessResult
+BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 {
     const size_t d{storage_code_distance};
 
     // adapter has to be ready to serve access:
     if (adapters_[idx] > current_cycle())
-        return MEMORY_ACCESS_RESULT{};
+        return MemoryAccessResult{};
 
     // identify latency of surgery operation:
     cycle_type latency = get_latency_of_surgery_operation(idx);
-    MEMORY_ACCESS_RESULT out{.latency=latency, .freq_khz=freq_khz};
+    MemoryAccessResult out{.latency=latency, .freq_khz=freq_khz};
 
     // check if we can lock the routing space for the surgery operation:
     bool surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle() + latency);
@@ -142,17 +142,17 @@ BB_MEMORY::load_impl(size_t idx, storage_type&, QUBIT* q)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_ACCESS_RESULT
-BB_MEMORY::store_impl(size_t idx, storage_type&, QUBIT* q)
+MemoryAccessResult
+BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 {
     if (adapters_[idx] > current_cycle())
-        return MEMORY_ACCESS_RESULT{};
+        return MemoryAccessResult{};
 
     cycle_type latency = get_latency_of_surgery_operation(idx);
 
     // unlike load, since store does not affect the execution of dependent instructions,
     // latency exposed to user is 0. But, it does lock down routing resources
-    MEMORY_ACCESS_RESULT out{.freq_khz=freq_khz};
+    MemoryAccessResult out{.freq_khz=freq_khz};
 
     // check if we can route to the block
     bool ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
@@ -171,18 +171,18 @@ BB_MEMORY::store_impl(size_t idx, storage_type&, QUBIT* q)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-MEMORY_ACCESS_RESULT
-BB_MEMORY::coupled_load_store_impl(size_t idx, storage_type&, QUBIT* ld, QUBIT* st)
+MemoryAccessResult
+BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st)
 {
     const size_t d{storage_code_distance};
 
     if (adapters_[idx] > current_cycle())
-        return MEMORY_ACCESS_RESULT{};
+        return MemoryAccessResult{};
 
     // identify latency of load surgery:
     cycle_type ld_latency = get_latency_of_surgery_operation(idx);
 
-    MEMORY_ACCESS_RESULT out{.latency=ld_latency, .freq_khz=freq_khz};
+    MemoryAccessResult out{.latency=ld_latency, .freq_khz=freq_khz};
 
     bool ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_latency);
     bool exit_and_st_ok = routing_.test_resources_between(
@@ -205,7 +205,7 @@ BB_MEMORY::coupled_load_store_impl(size_t idx, storage_type&, QUBIT* ld, QUBIT* 
 ////////////////////////////////////////////////////////////
 
 cycle_type
-BB_MEMORY::get_latency_of_surgery_operation(size_t idx) const
+BBMemory::get_latency_of_surgery_operation(size_t idx) const
 {
     cycle_type a = adapters_[idx];
     assert(a <= current_cycle());
@@ -226,7 +226,7 @@ namespace
 constexpr size_t
 _channel_width(size_t num_channels, size_t total_blocks)
 {
-    size_t blocks_per_channel = std::ceil(mean(total_blocks, num_channels));
+    size_t blocks_per_channel = std::ceil(fpdiv(total_blocks, num_channels));
     size_t w = blocks_per_channel >> 1;
     if (blocks_per_channel & 1)
         w++;

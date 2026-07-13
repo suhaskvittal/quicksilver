@@ -92,7 +92,7 @@ inner_surface_code_distance_for_target_logical_error_rate(double e, size_t d_out
     const size_t d_inner_min = (e < 1e-3) ? size_t{3} : size_t{2};
     const size_t d_target = surface_code_distance_for_target_logical_error_rate(e, p);
     
-    size_t d_inner = static_cast<size_t>( std::ceil(1.5 * mean(d_target, d_outer)) );
+    size_t d_inner = static_cast<size_t>( std::ceil(1.5 * fpdiv(d_target, d_outer)) );
     if (d_inner <= d_inner_min)
         return d_inner_min;
     if (d_inner % 2 == 0)

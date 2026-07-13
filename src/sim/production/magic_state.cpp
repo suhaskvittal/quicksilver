@@ -34,12 +34,12 @@ static std::uniform_real_distribution FPR(0.0, 1.0);
 double _injection_error_probability();
 
 /*
- * Generate name for T_DISTILLATION factory: "D_<initial_input_count+num_rotation_steps>_<output_count>"
+ * Generate name for TDistillation factory: "D_<initial_input_count+num_rotation_steps>_<output_count>"
  * */
 std::string _distillation_name(size_t initial_input_count, size_t output_count, size_t num_rotation_steps);
 
 /*
- * Generate name for T_CULTIVATION factory: "C_p=<probability in scientific notation>"
+ * Generate name for TCultivation factory: "C_p=<probability in scientific notation>"
  * */
 std::string _cultivation_name(double probability_of_success);
 
@@ -48,14 +48,14 @@ std::string _cultivation_name(double probability_of_success);
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-T_DISTILLATION::T_DISTILLATION(double freq_khz,
+TDistillation::TDistillation(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
                                 size_t _initial_input_count,
                                 size_t output_count,
                                 size_t _measurement_distance,
                                 size_t _num_rotation_steps)
-    :PRODUCER_BASE(_distillation_name(_initial_input_count, output_count, _num_rotation_steps),
+    :ProducerBase(_distillation_name(_initial_input_count, output_count, _num_rotation_steps),
                         freq_khz,
                         output_error_probability,
                         buffer_capacity,
@@ -67,7 +67,7 @@ T_DISTILLATION::T_DISTILLATION(double freq_khz,
 {}
 
 void
-T_DISTILLATION::print_deadlock_info(std::ostream& out) const
+TDistillation::print_deadlock_info(std::ostream& out) const
 {
     out << name << ": buffer occupancy = " << buffer_occupancy_ << " of " << buffer_capacity
                 << ", step: " << step_ << " of " << (1+num_rotation_steps)
@@ -75,7 +75,7 @@ T_DISTILLATION::print_deadlock_info(std::ostream& out) const
 }
 
 bool
-T_DISTILLATION::production_step()
+TDistillation::production_step()
 {
     if (current_cycle() < cycle_available_)
         return true;
@@ -141,12 +141,12 @@ T_DISTILLATION::production_step()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-T_CULTIVATION::T_CULTIVATION(double freq_khz,
+TCultivation::TCultivation(double freq_khz,
                                 double output_error_probability,
                                 size_t buffer_capacity,
                                 double _probability_of_success,
                                 size_t _rounds)
-    :PRODUCER_BASE(_cultivation_name(_probability_of_success),
+    :ProducerBase(_cultivation_name(_probability_of_success),
                      freq_khz,
                      output_error_probability,
                      buffer_capacity,
@@ -157,7 +157,7 @@ T_CULTIVATION::T_CULTIVATION(double freq_khz,
 {}
 
 bool
-T_CULTIVATION::production_step()
+TCultivation::production_step()
 {
     if (step_ == 0)
     {

@@ -16,16 +16,16 @@ namespace
 {
 
 using dag_ptr = std::unique_ptr<DAG>;
-using inst_ptr = INSTRUCTION*;
+using inst_ptr = Instruction*;
 using active_set_type = std::unordered_set<qubit_type>;
 using layer_type = std::vector<inst_ptr>;
 
-using PAULI = INSTRUCTION::PAULI;
+using Pauli = Instruction::Pauli;
 
 /*
  * The actual function that does the converesion.
  * */
-void run(IO_UTILITY&, size_t active_set_capacity, size_t dag_inst_capacity);
+void run(IOUtility&, size_t active_set_capacity, size_t dag_inst_capacity);
 
 /*
  * Propagates the given instruction through the Clifford. The
@@ -50,7 +50,7 @@ void reorder_instructions(std::vector<layer_type>&);
 /*
  * Returns the product of the Paulis.
  * */
-PAULI pauli_multiply(PAULI, PAULI);
+Pauli pauli_multiply(Pauli, Pauli);
 
 } // anon
 
@@ -76,7 +76,7 @@ main(int argc, char* argv[])
     generic_strm_open(istrm, input_file, "r");
     generic_strm_open(ostrm, output_file, "w");
 
-    compiler::pass::IO_UTILITY io(istrm, ostrm);
+    compiler::pass::IOUtility io(istrm, ostrm);
 }
 
 ////////////////////////////////////////////////////////////
@@ -89,7 +89,7 @@ namespace
 ////////////////////////////////////////////////////////////
 
 void
-run(IO_UTILITY& io, size_t active_set_capacity, size_t dag_inst_capacity)
+run(IOUtility& io, size_t active_set_capacity, size_t dag_inst_capacity)
 {
     dag_ptr dag{new DAG{io.num_qubits}};
 
@@ -124,35 +124,35 @@ propagate_non_clifford_through_clifford_1q(inst_ptr inst, inst_ptr clifford)
     size_t idx = std::distance(inst->q_begin(), q_it);
 
     // get `p` -- we may modify depending on what `clifford` is:
-    PAULI& p = inst->pauli_rotation_axes[idx];
-    if (p == PAULI::I)
+    Pauli& p = inst->pauli_rotation_axes[idx];
+    if (p == Pauli::I)
         return;
 
     if (is_s_like_instruction(clifford->type))
     {
-        PAULI _p;
-        if (inst->type == INSTRUCTION::TYPE::S)
-            _p = PAULI::Z;
-        else if (inst->type == INSTRUCTION::TYPE::SDG)
-            _p = PAULI::nZ;
-        else if (inst->type == INSTRUCTION::TYPE::SX)
-            _p = PAULI::X;
+        Pauli _p;
+        if (inst->type == Instruction::Type::S)
+            _p = Pauli::Z;
+        else if (inst->type == Instruction::Type::SDG)
+            _p = Pauli::nZ;
+        else if (inst->type == Instruction::Type::SX)
+            _p = Pauli::X;
         else
-            _p = PAULI::nX;
+            _p = Pauli::nX;
         p = pauli_multiply(_p, p);
     }
-    else if (clifford->type == INSTRUCTION::TYPE::X || clifford->type == INSTRUCTION::TYPE::Z)
+    else if (clifford->type == Instruction::Type::X || clifford->type == Instruction::Type::Z)
     {
-        const bool is_x = (inst->type == INSTRUCTION::TYPE::X);
-        const PAULI _p = is_x ? PAULI::X : PAULI::Z;
+        const bool is_x = (inst->type == Instruction::Type::X);
+        const Pauli _p = is_x ? Pauli::X : Pauli::Z;
         p = pauli_multiply(_p, pauli_multiply(_p, p));
     }
-    else if (clifford->type == INSTRUCTION::TYPE::H)
+    else if (clifford->type == Instruction::Type::H)
     {
         // H = S * SX * S
-        p = pauli_multiply(PAULI::Z, p);
-        p = pauli_multiply(PAULI::X, p);
-        p = pauli_multiply(PAULI::Z, p);
+        p = pauli_multiply(Pauli::Z, p);
+        p = pauli_multiply(Pauli::X, p);
+        p = pauli_multiply(Pauli::Z, p);
     }
     else
     {
@@ -168,8 +168,8 @@ propagate_non_clifford_through_clifford_2q(inst_ptr inst, inst_ptr clifford)
 {
     assert(is_pauli_rotation(inst->type) && is_cx_like_instruction(clifford->type));
 
-    const PAULI _p1 = PAULI::Z,
-                _p2 = (clifford->type == INSTRUCTION::TYPE::CZ) ? PAULI::Z : PAULI::X;
+    const Pauli _p1 = Pauli::Z,
+                _p2 = (clifford->type == Instruction::Type::CZ) ? Pauli::Z : Pauli::X;
     qubit_type q1 = clifford->qubits[0],
                q2 = clifford->qubits[1];
     
@@ -177,21 +177,21 @@ propagate_non_clifford_through_clifford_2q(inst_ptr inst, inst_ptr clifford)
     auto q2_it = std::find(inst->q_begin(), inst->q_end(), q2);
 
     // get original Paulis for `q1` and `q2`
-    PAULI p1_orig{PAULI::I}, 
-          p2_orig{PAULI::I};
+    Pauli p1_orig{Pauli::I}, 
+          p2_orig{Pauli::I};
     if (q1_it != inst->q_end())
         p1_orig = inst->pauli_rotation_axes[ std::distance(inst->q_begin(), q1_it) ];
     if (q2_it != inst->q_end())
         p2_orig = inst->pauli_rotation_axes[ std::distance(inst->q_begin(), q2_it) ];
 
     // compute new products based on rules:
-    PAULI p1 = pauli_multiply(p1_orig, _p1);
-    PAULI p2 = pauli_multiply(p2_orig, _p2);
+    Pauli p1 = pauli_multiply(p1_orig, _p1);
+    Pauli p2 = pauli_multiply(p2_orig, _p2);
 
     // update `inst`:
-    auto f_update = [inst] (auto q_it, qubit_type q, PAULI p)
+    auto f_update = [inst] (auto q_it, qubit_type q, Pauli p)
                     {
-                        if (q_it == inst->q_end() && p != PAULI::I)
+                        if (q_it == inst->q_end() && p != Pauli::I)
                         {
                             inst->qubits.push_back(q);
                             inst->pauli_rotation_axes.push_back(p);
@@ -218,10 +218,10 @@ clean_pauli_rotation(inst_ptr inst)
     //   -- mark qubits for deletion by setting them to `-1`
     assert(inst->qubits.size() == inst->pauli_rotation_axes.size());
     for (size_t i = 0; i < inst->pauli_rotation_axes.size(); i++)
-        if (inst->pauli_rotation_axes[i] == PAULI::I)
+        if (inst->pauli_rotation_axes[i] == Pauli::I)
             inst->qubits = DELETE_QUBIT;
     auto q_it = std::remove(inst->qubits.begin(), inst->qubits.end(), DELETE_QUBIT);
-    auto p_it = std::remove(inst->pauli_rotation_axes.begin(), inst->pauli_rotation_axes.end(), PAULI::I);
+    auto p_it = std::remove(inst->pauli_rotation_axes.begin(), inst->pauli_rotation_axes.end(), Pauli::I);
     inst->qubits.erase(q_it, inst->qubits.end());
     inst->pauli_rotation_axes.erase(p_it, inst->pauli_rotation_axes.end());
 
@@ -230,54 +230,54 @@ clean_pauli_rotation(inst_ptr inst)
     int sgn{0};
     for (auto& p : inst->pauli_rotation_axes)
     {
-        if (p == PAULI::nX || p == PAULI::nY || p == PAULI::nZ)
+        if (p == Pauli::nX || p == Pauli::nY || p == Pauli::nZ)
             sgn++;
-        if (p == PAULI::nX)
-            p = PAULI::X;
-        else if (p == PAULI::nY)
-            p = PAULI::Y;
-        else if (p == PAULI::nZ)
-            p = PAULI::Z;
+        if (p == Pauli::nX)
+            p = Pauli::X;
+        else if (p == Pauli::nY)
+            p = Pauli::Y;
+        else if (p == Pauli::nZ)
+            p = Pauli::Z;
     }
 
     if (sgn & 1)
-        inst->type = INSTRUCTION::TYPE::PAULI_ROTATION_Q_PI_DAG;
+        inst->type = Instruction::Type::PAULI_ROTATION_Q_PI_DAG;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-PAULI
-pauli_multiply(PAULI a, PAULI b)
+Pauli
+pauli_multiply(Pauli a, Pauli b)
 {
     // Y = iXZ, X = iZY, Z = iYX
-    if (a == PAULI::I)
+    if (a == Pauli::I)
         return b;
-    if (b == PAULI::I)
+    if (b == Pauli::I)
         return a;
     if (a == b)
-        return PAULI::I;
+        return Pauli::I;
 
-    if (a == PAULI::X)
+    if (a == Pauli::X)
     {
-        if (b == PAULI::Y)  return PAULI::nZ;
-        if (b == PAULI::nY) return PAULI::Z;
-        if (b == PAULI::Z)  return PAULI::Y;
-        if (b == PAULI::nZ) return PAULI::nY;
+        if (b == Pauli::Y)  return Pauli::nZ;
+        if (b == Pauli::nY) return Pauli::Z;
+        if (b == Pauli::Z)  return Pauli::Y;
+        if (b == Pauli::nZ) return Pauli::nY;
     }
-    else if (a == PAULI::Y)
+    else if (a == Pauli::Y)
     {
-        if (b == PAULI::X)  return PAULI::Z;
-        if (b == PAULI::nX) return PAULI::nZ;
-        if (b == PAULI::Z)  return PAULI::nX;
-        if (b == PAULI::nZ) return PAULI::X;
+        if (b == Pauli::X)  return Pauli::Z;
+        if (b == Pauli::nX) return Pauli::nZ;
+        if (b == Pauli::Z)  return Pauli::nX;
+        if (b == Pauli::nZ) return Pauli::X;
     }
-    else  // `a == PAULI::Z`
+    else  // `a == Pauli::Z`
     {
-        if (b == PAULI::X)  return PAULI::nY;
-        if (b == PAULI::nX) return PAULI::Y;
-        if (b == PAULI::Y)  return PAULI::X;
-        if (b == PAULI::nY) return PAULI::nX;
+        if (b == Pauli::X)  return Pauli::nY;
+        if (b == Pauli::nX) return Pauli::Y;
+        if (b == Pauli::Y)  return Pauli::X;
+        if (b == Pauli::nY) return Pauli::nX;
     }
 }
 

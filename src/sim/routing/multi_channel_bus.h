@@ -21,7 +21,7 @@ namespace routing
 ////////////////////////////////////////////////////////////
 
 /*
- * `MULTI_CHANNEL_BUS` is a generalization of a routing structure
+ * `MultiChannelBus` is a generalization of a routing structure
  * one might often see in FTQCs with topological codes.
  *
  * Each channel can be accessed concurrently.
@@ -29,11 +29,11 @@ namespace routing
  * We want to have a "high-level" access mechanism. For example,
  * if I have a pointer to a qubit, then I want to use that pointer
  * to manipulate the routing space. This is generally hard to 
- * implement, so we give this power to the user using a CRTP (see `IMPL`).
+ * implement, so we give this power to the user using a CRTP (see `Impl`).
  *
- * `IMPL` should implement a function `translate()` that takes
+ * `Impl` should implement a function `translate()` that takes
  * a type of interest and returns `id_type` (see below).
- * The types that need to be supported by `IMPL` are those that
+ * The types that need to be supported by `Impl` are those that
  * are potentially passed into:
  *  (1) `set_location()`
  *  (2) `test_and_lock_local_resource()`
@@ -54,12 +54,12 @@ namespace routing
 constexpr int64_t MCB_LEFT_ENTRY{-1};
 constexpr int64_t MCB_RIGHT_ENTRY{-2};
 
-template <class IMPL>
-class MULTI_CHANNEL_BUS
+template <class Impl>
+class MultiChannelBus
 {
 public:
     using id_type = int64_t;
-    using channel_type = std::vector<RESOURCE>;
+    using channel_type = std::vector<Resource>;
     using coord_type = std::tuple<int, int, int>;
 
     const size_t num_channels;
@@ -68,7 +68,7 @@ private:
     std::unordered_map<id_type, coord_type> location_map_;
     std::vector<channel_type> channels_;
 public:
-    MULTI_CHANNEL_BUS(size_t num_channels, size_t num_resources_per_channel);
+    MultiChannelBus(size_t num_channels, size_t num_resources_per_channel);
 
     /*
      * Sets the location of the given object in the routing space.
@@ -112,20 +112,26 @@ public:
     void replace(T outgoing, U incoming);
 
     template <class T>
-    const RESOURCE& get_local_resource_ref(T) const;
+    const Resource& get_local_resource_ref(T) const;
 
     /*
-     * Calls `CALLBACK` for each routing resource between the two
-     * objects. `CALLBACK` is given a `const RESOURCE&`.
+     * Returns number of patches between two points.
+     * */
+    template <class T, class U>
+    size_t patch_distance(T, U) const;
+
+    /*
+     * Calls `Callback` for each routing resource between the two
+     * objects. `Callback` is given a `const Resource&`.
      *
-     * If `CALLBACK` returns true, then the function exits
+     * If `Callback` returns true, then the function exits
      * early.
      * */
-    template <class T, class U, class CALLBACK>
-    void for_each_resource_between(T, U, const CALLBACK&) const;
+    template <class T, class U, class Callback>
+    void for_each_resource_between(T, U, const Callback&) const;
 private:
     /*
-     * This function calls `IMPL::translate()`, but only if `T` is not
+     * This function calls `Impl::translate()`, but only if `T` is not
      * some integral type.
      * */
     template <class T>
@@ -137,8 +143,8 @@ private:
     template <class T>
     auto& _get_local_resource_ref(this auto& self, T);
 
-    template <class T, class U, class CALLBACK>
-    void _for_each_resource_between(this auto& self, T, U, const CALLBACK&);
+    template <class T, class U, class Callback>
+    void _for_each_resource_between(this auto& self, T, U, const Callback&);
 };
 
 ////////////////////////////////////////////////////////////

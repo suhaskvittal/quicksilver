@@ -9,6 +9,8 @@
 #include "dag.h"
 #include "generic_io.h"
 #include "globals.h"
+#include "sim/qubit.h"
+#include "stats.h"
 
 #include <limits>
 #include <memory>
@@ -19,10 +21,11 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class CLIENT
+class Client
 {
 public:
     using inst_ptr = DAG::inst_ptr;
+    using uint_hist_type = stats::Histogram<uint64_t>;
 
     /*
      * Statistics (only variables prefixed by `s_`)
@@ -31,14 +34,13 @@ public:
     uint64_t s_inst_done{0};
     uint64_t s_unrolled_inst_done{0};
     uint64_t s_t_gates_done{0};
+    uint64_t s_rotations_done{0};
+    uint64_t s_memory_accesses_done{0};
     uint64_t s_cycle_complete{std::numeric_limits<uint64_t>::max()};
 
-    uint64_t s_total_rotations{0};
-    uint64_t s_rotation_latency{0};
-    uint64_t s_total_rotation_uops{0};
-
-    uint64_t s_memory_accesses{0};
-    uint64_t s_memory_access_latency{0};
+    uint_hist_type s_rotation_latency{"ROTATION_LATENCY", 0, 10000, 10};
+    uint_hist_type s_rotation_uops{"ROTATION_UOPS", 0, 256, 8};
+    uint_hist_type s_memory_access_latency{"MEMORY_LATENCY", 0, 1000, 10};
 
     const std::string    trace_file;
     const client_id_type id;
@@ -55,10 +57,10 @@ private:
     std::unique_ptr<DAG> dag_;
     bool                 has_hit_eof_once_{false};
 
-    std::vector<QUBIT*> qubits_;
+    std::vector<Qubit*> qubits_;
 public:
-    CLIENT(std::string trace_file, client_id_type);
-    ~CLIENT();
+    Client(std::string trace_file, client_id_type);
+    ~Client();
 
     /*
      * Warms up the dag by filling it with instructions
@@ -77,15 +79,15 @@ public:
      * `dag_`, the input to the predicate is an instruction
      * pointer.
      * */
-    template <class PRED>
-    std::vector<inst_ptr> get_ready_instructions(const PRED&);
+    template <class Pred>
+    std::vector<inst_ptr> get_ready_instructions(const Pred&);
 
     void retire_instruction(inst_ptr);
 
-    bool eof() const;
+    bool eof() const { return generic_strm_eof(tristrm_); }
 
-    const std::unique_ptr<DAG>& dag() const;
-    const std::vector<QUBIT*>&  qubits() const;
+    const std::unique_ptr<DAG>& dag() const { return dag_; }
+    const std::vector<Qubit*>&  qubits() const { return qubits_; }
 private:
     size_t   open_file_and_read_qubit_count();
     inst_ptr read_instruction_from_trace();
@@ -95,11 +97,11 @@ private:
 ////////////////////////////////////////////////////////////
 
 /*
- * Implementation of `CLIENT::get_ready_instructions(const PRED&)`
+ * Implementation of `Client::get_ready_instructions(const Pred&)`
  * */
 
-template <class PRED> std::vector<CLIENT::inst_ptr>
-CLIENT::get_ready_instructions(const PRED& pred)
+template <class Pred> std::vector<Client::inst_ptr>
+Client::get_ready_instructions(const Pred& pred)
 {
     constexpr size_t DAG_WATERMARK = 16384;
     warmup_dag(DAG_WATERMARK);

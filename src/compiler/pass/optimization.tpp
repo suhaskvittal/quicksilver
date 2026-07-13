@@ -18,18 +18,18 @@ namespace optimization
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class INIT_CALLBACK, class LOOP_CALLBACK, class EXIT_CALLBACK> result_type
+template <class InitCallback, class LoopCallback, class ExitCallback> Result
 run(generic_strm_type& ostrm, 
     generic_strm_type& istrm, 
-    const INIT_CALLBACK& f_init, 
-    const LOOP_CALLBACK& f_loop,
-    const EXIT_CALLBACK& f_exit,
+    const InitCallback& f_init, 
+    const LoopCallback& f_loop,
+    const ExitCallback& f_exit,
     size_t dag_inst_capacity)
 {
     using dag_ptr = std::unique_ptr<DAG>;
 
-    result_type out{};
-    IO_UTILITY io(istrm, ostrm);
+    Result out{};
+    IOUtility io(istrm, ostrm);
     dag_ptr dag{new DAG{io.num_qubits}};
 
     f_init(io);
