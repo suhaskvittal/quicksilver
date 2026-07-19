@@ -84,6 +84,12 @@ public:
     void remove_instruction_from_front_layer(inst_ptr);
 
     /*
+     * Removes all instructions from the DAG, deleting the underlying
+     * nodes and instructions and resetting the DAG to an empty state.
+     * */
+    void clear();
+
+    /*
      * This returns a list of all instructions in the front layer.
      * These are the oldest instructions in the program.
      * */

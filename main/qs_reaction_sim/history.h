@@ -20,6 +20,24 @@ namespace rs
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+/*
+ * AI-GENERATED
+ *
+ * A `History` plays one of two roles, distinguished only by what resolving a
+ * conditional-basis measurement signals to the owning instruction:
+ *  --> `Reaction`     : the fast decoder. Resolving a CBM means its basis is now
+ *                       known, so the instruction may react/retire (`rx.retireable`).
+ *  --> `Verification` : the slow decoder. The reaction already happened; resolving
+ *                       a CBM means the slow decoder has caught up and checked the
+ *                       fast decoder's guess (`rx.verified`).
+ * All other mechanics -- events, the predecessor DAG, window accounting -- are
+ * identical between the two roles.
+ * */
+enum class HistoryRole { Reaction, Verification };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 struct HistoryEvent
 {
     enum class Type
@@ -105,7 +123,14 @@ public:
     const size_t max_program_qubits,
                  max_qubits,
                  code_distance;
-    const DecodingMethod decoding_method;
+    const HistoryRole role;
+    /*
+     * AI-GENERATED
+     *
+     * Per-window probability that the fast decoder mis-decoded, used only by a
+     * `Verification`-role history. Zero for a `Reaction` history.
+     * */
+    const double error_injection_probability;
 private:
     /*
      * `front_layer_` contains `HistoryEvent` that correspond
@@ -124,7 +149,8 @@ private:
      * */
     std::vector<qubit_type> ancilla_pool_;
 public:
-    History(size_t max_program_qubits, size_t code_distance, DecodingMethod);
+    History(size_t max_program_qubits, size_t code_distance, HistoryRole,
+                double error_injection_probability = 0.0);
     ~History();
 
     HistoryEvent* front(qubit_type q) const { return front_layer_[q]; }
@@ -140,6 +166,18 @@ public:
      * */
     std::vector<qubit_type> retire_front_event(qubit_type);
 
+    /*
+     * AI-GENERATED
+     *
+     * Decodes syndrome volume for every qubit's front layer, giving each qubit a
+     * budget of `max_windows` windows this call. Fully-decoded events are retired
+     * (and out-of-order Pauli corrections skipped past), cascading resolution
+     * through the predecessor graph. Returns the
+     * conditional-basis ancillas freed across all retires -- the only ancillas the
+     * fast-path Driver lifetime-tracks. The slow-path caller may discard them.
+     * */
+    std::vector<qubit_type> decode(cycle_type current_cycle, size_t max_windows);
+
     void add_idle(qubit_type, cycle_type duration);
 
     /*
@@ -150,7 +188,6 @@ public:
     event_add_result_type add_events_for_instructions(inst_ptr, cycle_type current_cycle);
     
     size_t event_count() const { return event_count_; }
-    bool can_decode_ooo() const { return decoding_method == DecodingMethod::PWD; }
 private:
     qubit_type get_ancilla();
 
@@ -175,6 +212,18 @@ private:
      * */
     void advance_front_past(HistoryEvent*);
     void resolve_event(HistoryEvent*, std::vector<qubit_type>& freed);
+
+    /*
+     * AI-GENERATED
+     *
+     * Taints the T gates a fast-decoder error on `e`'s window would corrupt.
+     * If `e` is itself a conditional-basis measurement (a T gate's measurement),
+     * only its owning instruction is flagged. Otherwise the error is on data/
+     * ancilla volume that flows downstream, so every CBM reachable along
+     * `dependent` edges has its owning instruction flagged. Only called for a
+     * `Verification`-role history.
+     * */
+    void inject_error(HistoryEvent*);
 
     event_add_result_type add_cx_like_instruction(inst_ptr, cycle_type);
     event_add_result_type add_s_like_instruction(inst_ptr, cycle_type);

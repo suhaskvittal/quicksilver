@@ -131,19 +131,30 @@ Instruction::~Instruction()
 ////////////////////////////////////////////////////////////
 
 bool
-Instruction::retire_current_uop()
+Instruction::advance_uop()
 {
     if (current_uop_ == nullptr)
-        std::cerr << "Instruction::retire_current_uop: tried to retire current uop, but does not exist" << _die{};
+        std::cerr << "Instruction::advance_uop: tried to retire current uop, but does not exist" << _die{};
 
     uops_retired_++;
     if (uops_retired_ >= uop_count())
+    {
+        current_uop_ = nullptr;
         return true;
-
-    delete current_uop_;
+    }
     get_next_uop();
-
     return false;
+}
+
+bool
+Instruction::retire_current_uop()
+{
+    const bool was_not_done_before = (uops_retired_ < uop_count());
+    Instruction* old_uop = current_uop_;
+    const bool outcome = advance_uop();
+    if (was_not_done_before)
+        delete old_uop;
+    return outcome;
 }
 
 void

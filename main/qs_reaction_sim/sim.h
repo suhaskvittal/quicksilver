@@ -27,13 +27,52 @@ namespace rs
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+extern bool GL_RAD_ENABLED;
+
+class RAD;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 class Driver : public sim::Operable
 {
 public:
     using inst_ptr = Instruction*;
 
     /*
-     * Routing data type:
+     * Configuration type:
+     * */
+    struct config_type
+    {
+        /*
+         * Driver params:
+         * */
+        cycle_type reaction_time;
+        size_t     decoder_count;
+        size_t     code_distance;
+
+        /*
+         * RAD params:
+         * */
+        struct
+        {
+            /*
+             * These variables are not the same as the driver
+             * variables. Specify the faster decoder for 
+             * `Driver`'s parameters, and specify the slower
+             * decoder for `RAD`'s parameters.
+             * */
+            cycle_type reaction_time;
+            size_t     decoder_count;
+            double     fast_decoder_error_probability;
+        } rad;
+    };
+
+    /*
+     * Routing data type. We implement the routing space as
+     * multiple rows of qubits. Specifics of implementation,
+     * such as number of program qubits per row, are in the
+     * source file.
      * */
     struct routing_type : public sim::routing::MultiChannelBus<routing_type>
     {
@@ -42,8 +81,7 @@ public:
         routing_type(size_t n);
     };
 
-    const DecoderTraits dec_traits;
-    const DecodingMethod dec_method;
+    const DecoderTraits decoder_traits;
     const size_t decoder_count,
                  code_distance;
 
@@ -85,18 +123,23 @@ private:
     std::vector<cycle_type> program_qubit_available_cycle_;
     std::unordered_map<qubit_type, cycle_type> anc_available_cycle_;
 
-    cycle_type decoder_avail_next_cycle_{0};
+    /*
+     * This will be initialized to the decoder's reaction time to
+     * simulate that we are in the "middle" of a computation.
+     * */
+    cycle_type decoder_next_available_cycle_;
 
     /*
      * Routing logic:
      * */
     std::unique_ptr<routing_type> routing_;
+
+    /*
+     * RAD (may not be defined)
+     * */
+    std::unique_ptr<RAD> rad_;
 public:
-    Driver(std::string trace_file, 
-            DecoderTraits,
-            DecodingMethod,
-            size_t decoder_count,
-            size_t code_distance);
+    Driver(std::string trace_file, config_type);
     ~Driver();
 
     long operate() override;
@@ -109,10 +152,12 @@ public:
 
     double ipc() const { return fpdiv(s_inst_done, current_cycle()); }
     size_t program_qubits() const { return program_qubits_; }
+
+    const std::unique_ptr<RAD>& rad() const { return rad_; }
 private:
     void fetch_into_dag();
     bool execute_instruction(inst_ptr);
-    void decode_qubit_histories();
+    void decode_history();
     void retire_instruction(inst_ptr);
 
     bool handle_routing(inst_ptr);

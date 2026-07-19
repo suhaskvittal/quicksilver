@@ -14,6 +14,7 @@
 #include <deque>
 #include <iosfwd>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 ////////////////////////////////////////////////////////////
@@ -65,7 +66,7 @@ public:
 
         /*
          * Memory instructions:
-         *  Load/store semantics are generally not useful by themselves
+         *  Load/store operations are generally not useful by themselves
          *  since quantum programs require *precise* data movement.
          *  Keep in mind that in a DAG representation, there are no
          *  dependent instructions between a store and a load.
@@ -74,7 +75,6 @@ public:
          *
          *  Use "coupled_load_store" instead. This is effectively
          *  adds a fence before the load and store.
-         *
          *      i.e., `coupled_load_store <ld-qubit>, <st-qubit>`
          * */
         LOAD,
@@ -179,10 +179,24 @@ public:
     struct
     {
         bool retireable{false},
-             executed{false},
-             erroneous{false};
-
-        // we need this to calculate spacetime volume consumed
+             executed{false};
+        /*
+         * RAD specific variables:
+         *      `verified` means that the slow decoder has caught up
+         *      `erroneous` means that an error has propagated to this T gate
+         *      `waiting_on_wrong_path` means that this instruction is waiting for uncomputation
+         *                              + recovery to complete before commit
+         *      `is_non_program_instruction` indicates that this is due to some wrong path, so
+         *                              we should not count it in the stats
+         * */
+        bool verified{false},
+             erroneous{false},
+             waiting_on_wrong_path{false},
+             is_non_program_instruction{false};
+        /*
+         * We need `routing_space_consumed` to calculate spacetime 
+         * volume consumed
+         * */ 
         size_t routing_space_consumed{0};
     } rx;
 private:
@@ -221,6 +235,15 @@ public:
     Instruction(const Instruction&);
 
     ~Instruction();
+
+    /*
+     * `advance_uop` advances to the next uop without deleting the
+     * current uop. Use at your own risk. This is useful when
+     * we need to retain a uop for whatever reason.
+     *
+     * This function returns true if all uops are done.
+     * */
+    bool advance_uop();
 
     /*
      * `retire_current_uop` deletes `current_uop` and gets the next `uop`.

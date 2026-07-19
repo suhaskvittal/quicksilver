@@ -10,7 +10,10 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
+#include <random>
 #include <unordered_set>
+
+namespace sim { extern std::mt19937_64 GL_RNG; }
 
 namespace rs
 {
@@ -21,7 +24,7 @@ namespace rs
 namespace
 {
 
-constexpr size_t MAX_ANCILLA{128};
+constexpr size_t MAX_ANCILLA{2048};
 
 constexpr std::string_view _event_to_string(HistoryEvent::Type);
 
@@ -96,11 +99,12 @@ HistoryEvent::init_pauli_correction(qubit_type q, std::initializer_list<HistoryE
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-History::History(size_t n, size_t d, DecodingMethod m)
+History::History(size_t n, size_t d, HistoryRole r, double eip)
     :max_program_qubits(n),
     max_qubits(n + MAX_ANCILLA),
     code_distance(d),
-    decoding_method(m),
+    role(r),
+    error_injection_probability(eip),
     front_layer_(max_qubits, nullptr),
     back_layer_(max_qubits, nullptr),
     ancilla_pool_(MAX_ANCILLA)
@@ -170,10 +174,6 @@ History::retire_front_event(qubit_type q)
     if (e->type == HistoryEvent::Idle && e->dependent.empty() && !e->predecessors.empty())
         return {};
 
-    // if we cannot decode OoO (SWD), then check that all predecessors are retired
-    if (!can_decode_ooo() && !e->predecessors.empty())
-        std::cerr << "History::retire_front_event:: attempted to retire out-of-order with pending predecessors" << _die{};
-
     // `e` has finished decoding: it leaves the front layer. Front promotion
     // is per-qubit, so advance every qubit `e` currently fronts to its
     // dependent. Resolution, by contrast, follows the full predecessor graph
@@ -184,6 +184,65 @@ History::retire_front_event(qubit_type q)
     std::vector<qubit_type> freed;
     if (e->predecessors.empty())
         resolve_event(e, freed);
+    return freed;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::vector<qubit_type>
+History::decode(cycle_type current_cycle, size_t max_windows)
+{
+    std::vector<qubit_type> freed;
+
+    // AI-GENERATED
+    //
+    // A multi-qubit event fronts several qubits at once; `visited` ensures we
+    // charge its volume once rather than once per qubit.
+    std::unordered_set<HistoryEvent*> visited;
+    visited.reserve(max_program_qubits);
+
+    for (qubit_type q = 0; q < max_qubits; q++)
+    {
+        size_t windows_decoded{0};
+        while (windows_decoded < max_windows)
+        {
+            auto* e = front(q);
+            if (e == nullptr)
+                break;
+            if (current_cycle < e->cycle_available || visited.count(e) > 0)
+                break;
+            visited.insert(e);
+
+            const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
+            const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
+
+            // Nothing left to decode for `e`. Two cases:
+            //  --> this is a pauli correction, so advance decoder
+            //  --> this is a blocked conditional basis measurement, so do not advance
+            if (volume_to_decode == 0)
+            {
+                if (e->is_pauli_correction())
+                {
+                    auto f = retire_front_event(q);
+                    freed.insert(freed.end(), f.begin(), f.end());
+                    continue;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            e->volume_decoded += volume_to_decode;
+            if (e->is_fully_decoded())
+            {
+                auto f = retire_front_event(q);
+                freed.insert(freed.end(), f.begin(), f.end());
+            }
+            windows_decoded += volume_to_decode;
+        }
+    }
     return freed;
 }
 
@@ -291,11 +350,35 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
     if (!e->predecessors.empty())
         std::cerr << "History::resolve_event: attempted to resolve event with pending predecessors" << _die{};
 
+    // AI-GENERATED
+    //
     // A conditional basis measurement is the one blocking event: only now that
-    // its predecessors have all resolved is its basis known, so this is where
-    // we signal the owning instruction that it may retire.
+    // its predecessors have all resolved is the decode of its window final. What
+    // that means for the owning instruction depends on the role:
+    //  --> Reaction     : its basis is now known, so it may react/retire.
+    //  --> Verification : the slow decoder has caught up and checked the fast
+    //                     decoder's guess. (Whether that guess was erroneous is
+    //                     determined elsewhere; here we only mark it verified.)
     if (e->type == HistoryEvent::CondBasisMeas)
-        e->owning_inst->rx.retireable = true;
+    {
+        if (role == HistoryRole::Reaction)
+            e->owning_inst->rx.retireable = true;
+        else
+            e->owning_inst->rx.verified = true;
+    }
+
+    // AI-GENERATED
+    //
+    // Verification role only: the slow decoder has just finished this window.
+    // With probability `error_injection_probability` the fast decoder mis-decoded
+    // it; model that by tainting the T gates the error would reach. Drawn here,
+    // before the dependent graph is torn down below, so `inject_error` can walk it.
+    if (role == HistoryRole::Verification)
+    {
+        static std::uniform_real_distribution<double> FPR(0.0, 1.0);
+        if (FPR(sim::GL_RNG) < error_injection_probability)
+            inject_error(e);
+    }
 
     // `e` may still be a front here when reached directly by the cascade rather
     // than through `retire_front_event` -- e.g. a blocked CBM whose predecessors
@@ -338,6 +421,41 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
 
     delete e;
     event_count_--;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+History::inject_error(HistoryEvent* e)
+{
+    // AI-GENERATED
+    //
+    // A CBM is itself a T gate's measurement, so an error on its window taints
+    // only its owner.
+    if (e->type == HistoryEvent::CondBasisMeas)
+    {
+        if (e->owning_inst != nullptr)
+            e->owning_inst->rx.erroneous = true;
+        return;
+    }
+
+    // Otherwise the error sits on data/ancilla volume that flows forward. Every
+    // CBM reachable along `dependent` edges consumes that corrupted data, so all
+    // of their owning T gates are tainted. A run of T gates on one qubit chains
+    // ppm -> correction -> ppm, so this naturally taints the whole downstream run.
+    std::vector<HistoryEvent*> stack{e};
+    std::unordered_set<HistoryEvent*> visited{e};
+    while (!stack.empty())
+    {
+        auto* x = stack.back();
+        stack.pop_back();
+        if (x->type == HistoryEvent::CondBasisMeas && x->owning_inst != nullptr)
+            x->owning_inst->rx.erroneous = true;
+        for (auto* d : x->dependent)
+            if (visited.insert(d).second)
+                stack.push_back(d);
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -388,7 +506,6 @@ History::add_s_like_instruction(inst_ptr inst, cycle_type c)
         * ma = HistoryEvent::init_known_basis_meas(a, c+code_distance+1);
     auto* cq = HistoryEvent::init_pauli_correction(q, {ma});
     push_back_events({ppm, ma, cq});
-    // Known-basis ancilla: deallocated immediately, no idle-cycle tracking.
     return {};
 }
 

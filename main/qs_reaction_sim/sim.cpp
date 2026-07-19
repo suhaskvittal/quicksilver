@@ -4,11 +4,14 @@
  * */
 
 #include "qs_reaction_sim/sim.h"
+#include "qs_reaction_sim/rad.h"
 
 #define RS_VERBOSE
 
 namespace rs
 {
+
+bool GL_RAD_ENABLED{false};
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -41,16 +44,12 @@ Driver::routing_type::routing_type(size_t n)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-Driver::Driver(std::string trace_file, 
-                DecoderTraits dec, 
-                DecodingMethod m,
-                size_t _decoder_count,
-                size_t _code_distance)
+Driver::Driver(std::string trace_file, config_type conf)
     :sim::Operable("ReactionSim", /* does not matter: */ 1),
-    dec_traits(dec),
-    dec_method(m),
-    decoder_count(_decoder_count),
-    code_distance(_code_distance)
+    decoder_traits(conf.code_distance, conf.reaction_time),
+    decoder_count(conf.decoder_count),
+    code_distance(conf.code_distance),
+    decoder_next_available_cycle_(decoder_traits.pwd_reaction_time())
 {
     // Open trace file:
     uint32_t qubit_count{};
@@ -58,13 +57,16 @@ Driver::Driver(std::string trace_file,
     generic_strm_read(trace_strm_, &qubit_count, sizeof(uint32_t));
     program_qubits_ = qubit_count;
 
+    // initialize `dag_` and `syndrome_history_` which depend on `program_qubits_`
     dag_ = std::make_unique<DAG>(program_qubits_);
-    syndrome_history_ = std::make_unique<History>(program_qubits_, code_distance, m);
+    syndrome_history_ = std::make_unique<History>(program_qubits_, code_distance, HistoryRole::Reaction);
 
     program_qubit_available_cycle_.resize(program_qubits_, 0);
     anc_available_cycle_.reserve(128);
 
-    // initialize routing:
+    // initialize routing space.
+    // we also need to map program qubits to their location
+    // within the routing space.
     routing_ = std::make_unique<routing_type>(program_qubits());
     for (qubit_type i = 0; i < program_qubits(); i++)
     {
@@ -75,6 +77,24 @@ Driver::Driver(std::string trace_file,
         ii /= 2;
         const auto co = ii;
         routing_->set_location(i, ch, ro, co);
+    }
+
+    // Safety: assert that the decoder's throughput is high enough:
+    //  You can uncomment this if you are interested in what will happen.
+    //  Believe me, one of the first things I did was make sure that
+    //  insufficient throughput results in a deadlock (assuming you
+    //  have a T gate somewhere in the circuit).
+    const double tp = decoder_traits.pwd_throughput(decoder_count);
+    if (tp < 1.0)
+        std::cerr << "Driver:: decoder throughput does not meet backlog criterion: tp = " << tp << " < 1" << _die{};
+
+    // RAD declaration
+    if (GL_RAD_ENABLED)
+    {
+        rad_ = std::make_unique<RAD>(program_qubits_,
+                                     conf.rad.decoder_count,
+                                     DecoderTraits(conf.code_distance, conf.rad.reaction_time),
+                                     conf.rad.fast_decoder_error_probability);
     }
 }
 
@@ -91,6 +111,9 @@ long
 Driver::operate()
 {
     long progress{0};
+
+    if (GL_RAD_ENABLED)
+        progress += rad_->operate(current_cycle());
 
     // 1. Handle retired non-cliffords in front layer
     for (auto* inst : dag_->get_front_layer())
@@ -126,16 +149,14 @@ Driver::operate()
     }
 
     // 3. handle decoding in `syndrome_history_`
-    if (current_cycle() >= decoder_avail_next_cycle_)
-        decode_qubit_histories();
+    if (current_cycle() >= decoder_next_available_cycle_)
+        decode_history();
 
     // 4. end of cycle
-    for (qubit_type q = 0; q < program_qubits_; q++)
-        if (current_cycle() >= program_qubit_available_cycle_[q])
-            syndrome_history_->add_idle(q, 1);
-    for (auto [q, c] : anc_available_cycle_)
-        if (current_cycle() >= c)
-            syndrome_history_->add_idle(q, 1);
+    add_idle_cycle_array(syndrome_history_, current_cycle(), program_qubit_available_cycle_);
+    add_idle_cycle_map(syndrome_history_, current_cycle(), anc_available_cycle_);
+    if (GL_RAD_ENABLED)
+        rad_->add_idle_cycle(current_cycle(), program_qubit_available_cycle_);
     return progress;
 }
 
@@ -219,8 +240,14 @@ Driver::execute_instruction(inst_ptr inst)
         return true;
     }
     // check if operands are available:
-    const bool all_available = std::all_of(inst->qubits.begin(), inst->qubits.end(),
-                                    [this] (auto q) { return current_cycle() >= program_qubit_available_cycle_[q]; });
+    const bool all_available = std::all_of(inst->q_begin(), inst->q_end(),
+                                    [this] (auto q) 
+                                    { 
+                                        const bool avail = current_cycle() >= program_qubit_available_cycle_[q]; 
+                                        const bool blocked_by_rad = GL_RAD_ENABLED
+                                                                    && rad_->is_qubit_blocked_by_wrong_path(q);
+                                        return avail && !blocked_by_rad;
+                                    });
     if (!all_available)
         return false;
 
@@ -234,12 +261,18 @@ Driver::execute_instruction(inst_ptr inst)
     // add instruction to `syndrome_history_`
     auto result = syndrome_history_->add_events_for_instructions(inst, current_cycle());
     inst->rx.executed = true;
+
     // update qubit availability cycle:
     const auto avail_cycle = current_cycle() + _inst_latency(inst->type, code_distance);
     for (auto q : inst->qubits)
         program_qubit_available_cycle_[q] = avail_cycle;
     for (auto q : result.ancilla)
         anc_available_cycle_[q] = avail_cycle;
+
+    // also add to `rad_`'s history
+    if (GL_RAD_ENABLED)
+        rad_->register_instruction_in_history(inst, current_cycle(), avail_cycle);
+
     return true;
 }
 
@@ -247,56 +280,18 @@ Driver::execute_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 void
-Driver::decode_qubit_histories()
+Driver::decode_history()
 {
     // TODO: we need to also handle limited amounts of decoders.
     // This assumes that we have `decoder_count` decoders per program
-    // qubit.
-    std::unordered_set<HistoryEvent*> visited;  // avoid double counting
-    visited.reserve(program_qubits());
-    for (qubit_type q = 0; q < syndrome_history_->max_qubits; q++)
-    {
-        // amount of windows decoded depends on `decoder_count` = 2*decoder_count,
-        const size_t max_windows = 2*decoder_count; 
-        size_t windows_decoded{0};
-        while (windows_decoded < max_windows)
-        {
-            if (syndrome_history_->front(q) == nullptr)
-                break;
-            auto* e = syndrome_history_->front(q);
-            if (current_cycle() < e->cycle_available || visited.count(e) > 0)
-                break;
-            visited.insert(e);
+    // qubit, giving each qubit a budget of `2*decoder_count` windows.
+    const size_t max_windows = 2*decoder_count;
+    auto deallocated_ancilla = syndrome_history_->decode(current_cycle(), max_windows);
+    for (auto a : deallocated_ancilla)
+        anc_available_cycle_.erase(a);
 
-            const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
-            const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
-
-            // Nothing left to decode for `e`. Two cases:
-            //  --> this is a pauli correction, so advance decoder
-            //  --> this is a blocked conditional basis measurement, so do not advance
-            if (volume_to_decode == 0)
-            {
-                if (e->is_pauli_correction() && syndrome_history_->can_decode_ooo())
-                {
-                    for (auto a : syndrome_history_->retire_front_event(q))
-                        anc_available_cycle_.erase(a);
-                    continue;
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            e->volume_decoded += volume_to_decode;
-            if (e->is_fully_decoded())
-                for (auto a : syndrome_history_->retire_front_event(q))
-                    anc_available_cycle_.erase(a);
-            windows_decoded += volume_to_decode;
-        }
-    }
-    auto tr = dec_traits.pwd_reaction_time();
-    decoder_avail_next_cycle_ = current_cycle() + tr;
+    auto tr = decoder_traits.pwd_reaction_time();
+    decoder_next_available_cycle_ = current_cycle() + tr;
 }
 
 ////////////////////////////////////////////////////////////
@@ -307,11 +302,34 @@ Driver::retire_instruction(inst_ptr inst)
 {
     update_stats(inst->uop_count() > 0 ? inst->current_uop() : inst);
 
-    const bool destroy_inst = (inst->uop_count() == 0) || inst->retire_current_uop();
-    if (destroy_inst)
+    if (GL_RAD_ENABLED)
     {
-        dag_->remove_instruction_from_front_layer(inst);
-        delete inst;
+        if (inst->uop_count() > 0)
+        {
+            rad_->retire_instruction(inst->current_uop());
+            // we do not want to delete the current uop, just advance:
+            if (inst->advance_uop())
+            {
+                // ok to delete macro op as we have moved all of its uops
+                // into `RAD`
+                dag_->remove_instruction_from_front_layer(inst);
+                delete inst;
+            }
+        }
+        else
+        {
+            dag_->remove_instruction_from_front_layer(inst);
+            rad_->retire_instruction(inst);
+        }
+    }
+    else
+    {
+        const bool destroy_inst = (inst->uop_count() == 0) || inst->retire_current_uop();
+        if (destroy_inst)
+        {
+            dag_->remove_instruction_from_front_layer(inst);
+            delete inst;
+        }
     }
 }
 

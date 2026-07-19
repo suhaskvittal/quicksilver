@@ -5,6 +5,7 @@
 
 #include "dag.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 ////////////////////////////////////////////////////////////
@@ -20,6 +21,12 @@ DAG::DAG(size_t _qubit_count)
 }
 
 DAG::~DAG()
+{
+    clear();
+}
+
+void
+DAG::clear()
 {
     // delete all nodes and instructions remaining in the DAG:
     // can do this efficiently via DFS:
@@ -42,6 +49,12 @@ DAG::~DAG()
             delete x;
         }
     }
+
+    // reset the DAG back to an empty state:
+    front_layer_.clear();
+    std::fill(back_instructions_.begin(), back_instructions_.end(), nullptr);
+    node_lookup_table_.clear();
+    inst_count_ = 0;
 }
 
 ////////////////////////////////////////////////////////////
