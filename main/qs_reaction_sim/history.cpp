@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <iostream>
-#include <numeric>
 #include <random>
 #include <unordered_set>
 
@@ -23,8 +22,6 @@ namespace rs
 
 namespace
 {
-
-constexpr size_t MAX_ANCILLA{2048};
 
 constexpr std::string_view _event_to_string(HistoryEvent::Type);
 
@@ -101,28 +98,24 @@ HistoryEvent::init_pauli_correction(qubit_type q, std::initializer_list<HistoryE
 
 History::History(size_t n, size_t d, HistoryRole r, double eip)
     :max_program_qubits(n),
-    max_qubits(n + MAX_ANCILLA),
     code_distance(d),
     role(r),
     error_injection_probability(eip),
-    front_layer_(max_qubits, nullptr),
-    back_layer_(max_qubits, nullptr),
-    ancilla_pool_(MAX_ANCILLA)
+    next_ancilla_(static_cast<qubit_type>(n))
 {
-    std::iota(ancilla_pool_.begin(), ancilla_pool_.end(), static_cast<qubit_type>(n));
+    front_layer_.reserve(n);
+    back_layer_.reserve(n);
 }
 
 History::~History()
 {
     // `front_layer` in this code segment is NOT the same `front_layer_`
-    // in the class.
+    // in the class. A multi-qubit event fronts several keys, so dedup via `seen`.
     std::vector<HistoryEvent*> front_layer;
-    for (qubit_type q = 0; q < max_qubits; q++)
-    {
-        auto* e = front(q);
-        if (e != nullptr && e->predecessors.empty())
+    std::unordered_set<HistoryEvent*> seen;
+    for (const auto& [q, e] : front_layer_)
+        if (e->predecessors.empty() && seen.insert(e).second)
             front_layer.push_back(e);
-    }
 
     while (event_count_ > 0 && !front_layer.empty())
     {
@@ -156,7 +149,7 @@ History::~History()
 std::vector<qubit_type>
 History::retire_front_event(qubit_type q)
 {
-    auto* e = front_layer_[q];
+    auto* e = front(q);
     if (e == nullptr)
         std::cerr << "History::retire_front_event: attempted to retire null event for qubit " << q << _die{};
     if (!e->is_fully_decoded())
@@ -202,7 +195,19 @@ History::decode(cycle_type current_cycle, size_t max_windows)
     std::unordered_set<HistoryEvent*> visited;
     visited.reserve(max_program_qubits);
 
-    for (qubit_type q = 0; q < max_qubits; q++)
+    // AI-GENERATED
+    //
+    // Snapshot the fronted qubits (sorted, to keep the deterministic ascending-id
+    // order the old `[0, max_qubits)` loop had) so retiring -- which mutates
+    // `front_layer_` -- can't invalidate what we iterate. `front(q)` is re-read
+    // each pass, so promotions/erasures from a shared event's retire are seen.
+    std::vector<qubit_type> fronted;
+    fronted.reserve(front_layer_.size());
+    for (const auto& [q, e] : front_layer_)
+        fronted.push_back(q);
+    std::sort(fronted.begin(), fronted.end());
+
+    for (qubit_type q : fronted)
     {
         size_t windows_decoded{0};
         while (windows_decoded < max_windows)
@@ -254,7 +259,7 @@ History::advance_front_past(HistoryEvent* e)
 {
     for (qubit_type x : e->qubits)
     {
-        if (front_layer_[x] != e)
+        if (front(x) != e)
             continue;
         auto f_it = std::find_if(e->dependent.begin(), e->dependent.end(),
                             [x] (const auto* f)
@@ -262,7 +267,7 @@ History::advance_front_past(HistoryEvent* e)
                                 auto x_it = std::find(f->qubits.begin(), f->qubits.end(), x);
                                 return x_it != f->qubits.end();
                             });
-        front_layer_[x] = (f_it == e->dependent.end()) ? nullptr : *f_it;
+        set_front(x, (f_it == e->dependent.end()) ? nullptr : *f_it);
     }
 }
 
@@ -275,7 +280,7 @@ History::add_idle(qubit_type q, cycle_type duration)
     // Check back layer for `q`. If it is an idle, conditional basis
     // measurement, or known basis measurement, then we can increment
     // the duration.
-    auto* e = back_layer_[q];
+    auto* e = back(q);
     const bool cannot_append_idle = (e == nullptr)
                                     || (e->type == HistoryEvent::PauliProductMeas)
                                     || e->is_pauli_correction();
@@ -288,8 +293,8 @@ History::add_idle(qubit_type q, cycle_type duration)
             e->dependent.push_back(idle);
             idle->predecessors.push_back(e);
         }
-        if (front_layer_[q] == nullptr)
-            front_layer_[q] = idle;
+        if (front(q) == nullptr)
+            set_front(q, idle);
         back_layer_[q] = idle;
         event_count_++;
     }
@@ -328,15 +333,16 @@ History::push_back_event(HistoryEvent* e)
     std::unordered_set<HistoryEvent*> visited;
     for (qubit_type q : e->qubits)
     {
-        if (back_layer_[q] != nullptr && visited.count(back_layer_[q]) == 0)
+        auto* b = back(q);
+        if (b != nullptr && visited.count(b) == 0)
         {
-            back_layer_[q]->dependent.push_back(e);
-            e->predecessors.push_back(back_layer_[q]);
-            visited.insert(back_layer_[q]);
+            b->dependent.push_back(e);
+            e->predecessors.push_back(b);
+            visited.insert(b);
         }
         back_layer_[q] = e;
-        if (front_layer_[q] == nullptr)
-            front_layer_[q] = e;
+        if (front(q) == nullptr)
+            set_front(q, e);
     }
     event_count_++;
 }
@@ -401,23 +407,20 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
 
     for (qubit_type q : e->qubits)
     {
-        if (back_layer_[q] == e)
-            back_layer_[q] = nullptr;
+        if (back(q) == e)
+            back_layer_.erase(q);
     }
 
-    // An ancilla is consumed by a single non-Clifford. Its measurement (known-
-    // or conditional-basis) is the last event on that ancilla and resolves after
-    // its PPM, so returning the ancilla to the pool here is safe to reuse.
-    if (e->type == HistoryEvent::KnownBasisMeas || e->type == HistoryEvent::CondBasisMeas)
-    {
-        ancilla_pool_.push_back(e->qubits.front());
-        // Only conditional-basis (T-like) ancillas are lifetime-tracked by the
-        // Driver (`anc_available_cycle_`); a known-basis ancilla is never entered
-        // there. Report only the former in `freed` so the caller drops exactly
-        // the entries it holds -- and does not need a stale-entry no-op for KBM.
-        if (e->type == HistoryEvent::CondBasisMeas)
-            freed.push_back(e->qubits.front());
-    }
+    // An ancilla is consumed by a single non-Clifford. Its measurement (known- or
+    // conditional-basis) is the last event on that ancilla; as it resolves the
+    // ancilla drops out of the layer maps. With the ever-increasing ancilla
+    // pointer ids are never reused, so there is nothing to return to a pool.
+    // Only conditional-basis (T-like) ancillas are lifetime-tracked by the Driver
+    // (`anc_available_cycle_`); a known-basis ancilla is never entered there.
+    // Report only the former in `freed` so the caller drops exactly the entries
+    // it holds.
+    if (e->type == HistoryEvent::CondBasisMeas)
+        freed.push_back(e->qubits.front());
 
     delete e;
     event_count_--;
@@ -464,11 +467,8 @@ History::inject_error(HistoryEvent* e)
 qubit_type
 History::get_ancilla()
 {
-    if (ancilla_pool_.empty())
-        std::cerr << "History::get_ancilla: ancilla pool exhausted" << _die{};
-    qubit_type a = ancilla_pool_.back();
-    ancilla_pool_.pop_back();
-    return a;
+    // Ever-increasing pointer: hand out a fresh id and never reuse it.
+    return next_ancilla_++;
 }
 
 ////////////////////////////////////////////////////////////

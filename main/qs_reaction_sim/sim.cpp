@@ -188,9 +188,14 @@ Driver::print_progress(std::ostream& ostrm) const
         }
     }
     ostrm << "\nIPdC = " << ipc()*code_distance 
-            << "\ninst read = " << s_inst_read 
             << "\ninst done = " << s_inst_done
-            << "\n";
+            << "\nevent count = " << syndrome_history_->event_count();
+    if (GL_RAD_ENABLED)
+    {
+        ostrm << "\nRAD event count = " << rad_->history()->event_count()
+                << "\nevent count ratio = " << fpdiv(syndrome_history_->event_count(), rad_->history()->event_count());
+    }
+    ostrm << "\n\n";
 }
 
 void

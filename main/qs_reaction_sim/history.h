@@ -12,6 +12,7 @@
 #include "instruction.h"
 
 #include <initializer_list>
+#include <unordered_map>
 #include <vector>
 
 namespace rs
@@ -121,7 +122,6 @@ public:
     };
 
     const size_t max_program_qubits,
-                 max_qubits,
                  code_distance;
     const HistoryRole role;
     /*
@@ -133,28 +133,32 @@ public:
     const double error_injection_probability;
 private:
     /*
-     * `front_layer_` contains `HistoryEvent` that correspond
-     * to the oldest, undecoded event for each qubit.
-     *
-     * `back_layer_` is fixed-width and contains one entry
-     * per qubit. The same `HistoryEvent` may be at two
-     * indices.
+     * `front_layer_` maps each qubit to its oldest undecoded event; `back_layer_`
+     * maps each qubit to its youngest event. A multi-qubit event may appear under
+     * several keys. A missing key means the qubit has no event -- `front`/`back`
+     * return nullptr. These are maps rather than fixed vectors because ancilla ids
+     * come from an ever-increasing pointer (never reused), so the id space is
+     * unbounded but sparse.
      * */
-    std::vector<HistoryEvent*> front_layer_,
-                               back_layer_;
+    std::unordered_map<qubit_type, HistoryEvent*> front_layer_,
+                                                  back_layer_;
     size_t event_count_{0};
 
     /*
-     * We have `History` auto-maintain an ancilla pool.
+     * Ancilla allocator: an ever-increasing counter starting just past the program
+     * qubits. Ids are never reused, so freeing an ancilla is just dropping it from
+     * the layer maps.
      * */
-    std::vector<qubit_type> ancilla_pool_;
+    qubit_type next_ancilla_;
 public:
     History(size_t max_program_qubits, size_t code_distance, HistoryRole,
                 double error_injection_probability = 0.0);
     ~History();
 
-    HistoryEvent* front(qubit_type q) const { return front_layer_[q]; }
-    HistoryEvent* back(qubit_type q) const { return back_layer_[q]; }
+    HistoryEvent* front(qubit_type q) const
+    { auto it = front_layer_.find(q); return it == front_layer_.end() ? nullptr : it->second; }
+    HistoryEvent* back(qubit_type q) const
+    { auto it = back_layer_.find(q); return it == back_layer_.end() ? nullptr : it->second; }
 
     /*
      * AI-GENERATED
@@ -190,6 +194,19 @@ public:
     size_t event_count() const { return event_count_; }
 private:
     qubit_type get_ancilla();
+
+    /*
+     * AI-GENERATED
+     *
+     * Sets the front event for `q`, erasing the entry when `e` is null so
+     * `front_layer_` only ever holds live fronts (and `front` can treat a missing
+     * key as nullptr).
+     * */
+    void set_front(qubit_type q, HistoryEvent* e)
+    {
+        if (e == nullptr) front_layer_.erase(q);
+        else              front_layer_[q] = e;
+    }
 
     void push_back_event(HistoryEvent*);
     void push_back_events(std::initializer_list<HistoryEvent*> arr) { for (auto* e : arr) push_back_event(e); }
