@@ -11,6 +11,7 @@
 #include "dag.h"
 #include "decoder_traits.h"
 #include "globals.h"
+#include "stats.h"
 
 #include <memory>
 #include <unordered_set>
@@ -51,6 +52,14 @@ public:
     const size_t program_qubits,
                  decoder_count,
                  code_distance;
+
+    /*
+     * Statistics
+     * */
+    uint64_t s_wrong_paths{};
+    stats::Histogram<uint64_t> s_wrong_path_latency{"WRONG_PATH_LATENCY", 0, 10000, 10};
+    stats::Histogram<size_t>   s_wrong_path_inst_count{"WRONG_PATH_INST_COUNT", 0, 1024, 8};
+    stats::Histogram<size_t>   s_qubits_blocked_by_wrong_path{"QUBITS_BLOCKED_DURING_WRONG_PATH", 0, 8192, 16};
 private:
     /*
      * This contains a DAG full of retired instructions. Once an
@@ -80,6 +89,8 @@ private:
     std::vector<inst_ptr> wrong_path_uncomp_,
                           wrong_path_recomp_,
                           wrong_path_incomplete_;
+    cycle_type wrong_path_start_cycle_,
+               wrong_path_inst_count_;
 
     std::unique_ptr<History> syndrome_history_;
     std::unordered_map<qubit_type, cycle_type> anc_available_cycle_;
@@ -122,7 +133,7 @@ public:
      * */
     auto& wrong_path_dag(this auto& r) { return r.wrong_path_dag_; }
 private:
-    long handle_commit();
+    long handle_commit(cycle_type);
     void decode_history(cycle_type);
 
     /*
@@ -130,7 +141,7 @@ private:
      * instruction. Returns true if we cannot move into the `RESOLVING`
      * state.
      * */
-    bool handle_decoding_error(inst_ptr);
+    bool handle_decoding_error(inst_ptr, cycle_type current_cycle);
 
     void try_and_add_to_wrong_path(inst_ptr);
     void initialize_wrong_path();

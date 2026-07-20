@@ -45,8 +45,73 @@ def _trotterization_write_pauli_string_ops(term: list[tuple[str,int]],
     out += bck_basis_xform
     return out
 
-def build_trotterization(output_file: str, 
-                         input_file: str, 
+class _TrotterRunScheduler:
+    '''
+        Commutation-aware ASAP scheduler for Trotter terms.
+
+        Two terms may execute in the same layer only if their qubit supports are
+        disjoint. Independently, a term may be *reordered* earlier past any term
+        it commutes with -- we use qubit-wise commutativity (QWC) as a scalable,
+        locally-checkable proxy: a term may slide earlier on qubit `q` only across
+        terms carrying the same Pauli on `q`. A change of Pauli type on `q` is a
+        hard ordering barrier.
+
+        Per qubit `q` we track:
+          - `pauli[q]`: Pauli of the current same-Pauli run on `q`
+          - `base[q]` : earliest layer a same-Pauli term may occupy on `q`
+                        (i.e. where `q` became free after the previous run)
+          - `used[q]` : set of layers already occupied within the current run
+
+        Scheduling a term is O(term weight) plus a small hole-search, so the whole
+        pass is linear in total Pauli weight rather than O(terms * layers).
+    '''
+    def __init__(self):
+        self.pauli = {}   # q -> current run's Pauli, or absent if unused
+        self.base  = {}   # q -> earliest layer available in current run (default 0)
+        self.used  = {}   # q -> set of occupied layers in current run
+        self.depth = 0    # number of layers assigned so far
+
+    def schedule(self, labels) -> int:
+        '''
+            Returns the layer index for a term and updates internal state.
+            `labels` is a list of (pauli_char, qubit) with pauli_char in {X,Y,Z}.
+        '''
+        # 1) lower bound from commutation barriers
+        lb = 0
+        barrier = {}   # q -> True if this term starts a new run on q
+        for (p, q) in labels:
+            if self.pauli.get(q, p) == p:      # unused or QWC-compatible: may slide to run base
+                cand = self.base.get(q, 0)
+                barrier[q] = False
+            else:                              # Pauli changed: must follow the whole previous run
+                cand = max(self.used[q]) + 1
+                barrier[q] = True
+            if cand > lb:
+                lb = cand
+
+        # 2) smallest layer >= lb that is free on every qubit in the support.
+        # For barrier qubits, lb already clears their (older) used layers.
+        L = lb
+        while any((not barrier[q]) and (L in self.used.get(q, ())) for (p, q) in labels):
+            L += 1
+
+        # 3) commit
+        for (p, q) in labels:
+            if barrier[q]:
+                self.pauli[q] = p
+                self.base[q]  = lb
+                self.used[q]  = {L}
+            else:
+                self.pauli[q] = p
+                self.base.setdefault(q, 0)
+                self.used.setdefault(q, set()).add(L)
+
+        if L + 1 > self.depth:
+            self.depth = L + 1
+        return L
+
+def build_trotterization(output_file: str,
+                         input_file: str,
                          hamlib_key: str,
                          num_qubits: int,
                          one_norm: float,
@@ -73,35 +138,26 @@ h {CTRL};
         threshold = 0.01 * one_norm / term_count
         term_number = 0
 
-        trotter_layers = []
-        trotter_layer_qubits = []
+        scheduler = _TrotterRunScheduler()
+        trotter_layers = []   # trotter_layers[L] = list of (labels, c) placed in layer L
         for (labels, coeff, _) in read_pauli_strings_hdf5(input_file, hamlib_key):
             if abs(coeff) < threshold:
                 continue
+            if not labels:   # identity term: only a global phase, skip
+                continue
 
             if term_number % 100_000 == 0:
-                print(f'\twriting term {term_number}')
+                print(f'\tscheduling term {term_number}, layers = {len(trotter_layers)}')
             term_number += 1
-            
+
             c = coeff * normalization_factor
 
-            # Add to `trotter_layers`:
-            qubits = [q for (p,q) in labels]
-            j = 0
-            while j < len(trotter_layers):
-                if any(q in trotter_layer_qubits for q in qubits):
-                    j += 1
-                    continue
-                else:
-                    break
-            if j >= len(trotter_layers):
+            L = scheduler.schedule(labels)
+            while L >= len(trotter_layers):
                 trotter_layers.append([])
-                trotter_layer_qubits.append(set())
-            trotter_layers[j].append((labels, c))
-            for q in qubits:
-                trotter_layer_qubits[j].add(q)
+            trotter_layers[L].append((labels, c))
 
-        print(f'layers: {len(trotter_layers)}')
+        print(f'layers: {scheduler.depth} (terms: {term_number})')
         for layer in trotter_layers:
             for (labels, c) in layer:
                 txt = _trotterization_write_pauli_string_ops(labels, c, MAIN_REGISTER, CTRL)
@@ -339,7 +395,9 @@ def _qubitization_select(input_file: str,
 def build_qubitization(output_file: str, 
                        input_file: str,
                        hamlib_key: str,
-                       num_qubits: str
+                       num_qubits: str,
+                       write_prepare=True,
+                       write_select=True
 ):
     CTRL = 'ctrl'
     MAIN_REGISTER = 'q'
@@ -364,10 +422,13 @@ h {CTRL};
 ''')
         # We'll do one iteration of PREPARE*SELECT*PREPAREdg
         # for simplicity, just copy PREPARE for its inverse
-        print('generating prepare...')
-        prepare = _qubitization_ry_prepare(input_file, hamlib_key, num_phase_qubits, PHASE_REGISTER, ANCILLA) 
-        print('generating select...')
-        select = _qubitization_select(input_file, hamlib_key, num_phase_qubits, MAIN_REGISTER, PHASE_REGISTER, ANCILLA, CTRL)
+        prepare, select = '', ''
+        if write_prepare:
+            print('generating prepare...')
+            prepare = _qubitization_ry_prepare(input_file, hamlib_key, num_phase_qubits, PHASE_REGISTER, ANCILLA) 
+        if write_select:
+            print('generating select...')
+            select = _qubitization_select(input_file, hamlib_key, num_phase_qubits, MAIN_REGISTER, PHASE_REGISTER, ANCILLA, CTRL)
         f.write(prepare + select + prepare)
 
 #################################################################
@@ -387,20 +448,23 @@ if __name__ == '__main__':
         return f'bisquit/qasm/{filename}_{suffix}.qasm'
 
     for (output_filename, input_file, key, num_qubits, one_norm) in BENCHMARK_LIST:
-        trotterization_output_path = make_output_file_path(output_filename, 't')
-        qubitization_output_path = make_output_file_path(output_filename, 'q')
-
         input_file = f'bisquit/hamlib/{input_file}'
     
         print(f'Now building: {output_filename}')
         print('TROTTERIZATION --------------------------------------------------')
+        trotterization_output_path = make_output_file_path(output_filename, 't')
         build_trotterization(trotterization_output_path, input_file, key, num_qubits, one_norm)
 
         print('QUBITIZATION ----------------------------------------------------')
-        build_qubitization(qubitization_output_path, input_file, key, num_qubits)
-
-
-
+        # hardcode the small ones
+        if output_filename == 'bose_hubbard' or output_filename == 'boron':
+            qubitization_output_path = make_output_file_path(output_filename, 'q')
+            build_qubitization(qubitization_output_path, input_file, key, num_qubits)
+        else:
+            select_output_path = make_output_file_path(output_filename, 'q_sel')
+            prepare_output_path = make_output_file_path(output_filename, 'q_prep')
+            build_qubitization(select_output_path, input_file, key, num_qubits, write_select=True, write_prepare=False)
+            build_qubitization(prepare_output_path, input_file, key, num_qubits, write_select=False, write_prepare=True)
 
 #################################################################
 #################################################################

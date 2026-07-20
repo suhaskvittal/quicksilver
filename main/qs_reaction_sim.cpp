@@ -63,6 +63,8 @@ main(int argc, char* argv[])
     std::cout << "\n\nFINAL_STATS----------------------------------------\n";
 
     print_stat_line(std::cout, "IPdC", driver->ipc() * conf.code_distance);
+    print_stat_line(std::cout, "SIM_INST", driver->s_inst_done);
+    print_stat_line(std::cout, "SIM_CYCLES", driver->current_cycle());
     print_stat_line(std::cout, "T_GATES_EXECUTED", driver->s_t_gates_done);
 
     if (GL_RAD_ENABLED)
@@ -71,10 +73,22 @@ main(int argc, char* argv[])
         print_stat_line(std::cout, "FAST_DECODER_THROUGHPUT", driver->decoder_traits.pwd_throughput(driver->decoder_count));
         print_stat_line(std::cout, "SLOW_DECODER_THROUGHPUT", driver->rad()->slow_decoder_traits.pwd_throughput(driver->rad()->decoder_count));
     }
+    else
+    {
+        print_stat_line(std::cout, "DECODER_THROUGHPUT", driver->decoder_traits.pwd_throughput(driver->decoder_count));
+    }
 
     driver->s_t_latency.dump(std::cout);
     driver->s_cx_routing_overhead.dump(std::cout);
     driver->s_t_routing_overhead.dump(std::cout);
+
+    if (GL_RAD_ENABLED)
+    {
+        print_stat_line(std::cout, "WRONG_PATHS_DURING_EXECUTION", driver->rad()->s_wrong_paths);
+        driver->rad()->s_wrong_path_latency.dump(std::cout);
+        driver->rad()->s_wrong_path_inst_count.dump(std::cout);
+        driver->rad()->s_qubits_blocked_by_wrong_path.dump(std::cout);
+    }
 
     delete driver;
     return 0;

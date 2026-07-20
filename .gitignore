@@ -3,6 +3,7 @@ QASMBench/
 build/
 Release/
 Debug/
+Asan/
 
 benchmarks/bin/*
 benchmarks/stats/*

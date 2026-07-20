@@ -100,15 +100,21 @@ RAD::operate(cycle_type c)
     // has fully drained, unblock and end wrong-path execution.
     if (is_executing_wrong_path() && wrong_path_dag_->inst_count() == 0)
     {
+        s_wrong_paths++;
+        s_wrong_path_latency.add(c - wrong_path_start_cycle_);
+        s_wrong_path_inst_count.add(wrong_path_inst_count_);
+        s_qubits_blocked_by_wrong_path.add(wrong_path_blocked_qubits_.size());
+
         wrong_path_blocked_qubits_.clear();
         wrong_path_state_ = WrongPathState::INVALID;
+
 #if defined(RAD_VERBOSE)
         std::cout << "wrong path execution complete\n";
 #endif
     }
 
     // 3. commit instructions and handle any detected errors on non-cliffords
-    progress += handle_commit();
+    progress += handle_commit(c);
 
     // 4. decode syndrome history if able
     if (c >= slow_decoder_next_available_cycle_)
@@ -164,7 +170,7 @@ RAD::commit_instruction(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 long
-RAD::handle_commit()
+RAD::handle_commit(cycle_type c)
 {
     long progress{0};
     bool any_removed{false};
@@ -181,7 +187,7 @@ RAD::handle_commit()
                 // handle decoding error: only commit if we
                 // can start resolving wrong path
                 if (inst->rx.erroneous)
-                    ok_to_commit &= handle_decoding_error(inst);
+                    ok_to_commit &= handle_decoding_error(inst, c);
             }
             else
             {
@@ -222,7 +228,7 @@ RAD::decode_history(cycle_type c)
 ////////////////////////////////////////////////////////////
 
 bool
-RAD::handle_decoding_error(inst_ptr tainted_inst)
+RAD::handle_decoding_error(inst_ptr tainted_inst, cycle_type c)
 {
     // if we are executing the wrong path, then handle this case (need to stop wrong path execution)
     if (is_executing_wrong_path() || is_waiting_for_fast_decoder_before_resolution())
@@ -260,6 +266,12 @@ RAD::handle_decoding_error(inst_ptr tainted_inst)
     if (!is_resolving_wrong_path())
         std::cout << "starting wrong path resolution\n";;
 #endif
+    if (wrong_path_state_ == WrongPathState::INVALID)
+    {
+        wrong_path_start_cycle_ = c;
+        wrong_path_inst_count_ = 0;  // reset to `0`: this is later set in `initialize_wrong_path`
+    }
+
     wrong_path_state_ = WrongPathState::RESOLVING;
 
     // 2. add all qubit arguments in `tainted_inst` to `wrong_path_blocked_qubits_`
@@ -291,6 +303,10 @@ void
 RAD::initialize_wrong_path()
 {
     wrong_path_state_ = WrongPathState::EXECUTING;
+
+    // only count uncomputation and recomputation since we accounted for `wrong_path_incomplete_`
+    // in some previous call
+    wrong_path_inst_count_ += wrong_path_uncomp_.size() + wrong_path_recomp_.size();
 
     std::vector<inst_ptr> wp_inst;
     wp_inst.reserve(wrong_path_uncomp_.size() + wrong_path_recomp_.size());
