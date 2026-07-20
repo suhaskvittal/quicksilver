@@ -182,13 +182,13 @@ public:
      * AI-GENERATED
      *
      * Decodes syndrome volume for every qubit's front layer, giving each qubit a
-     * budget of `max_windows` windows this call. Fully-decoded events are retired
+     * budget of `max_volume` cycles this call. Fully-decoded events are retired
      * (and out-of-order Pauli corrections skipped past), cascading resolution
      * through the predecessor graph. Returns the
      * conditional-basis ancillas freed across all retires -- the only ancillas the
      * fast-path Driver lifetime-tracks. The slow-path caller may discard them.
      * */
-    std::vector<qubit_type> decode(cycle_type current_cycle, size_t max_windows);
+    std::vector<qubit_type> decode(cycle_type current_cycle, size_t max_volume);
 
     void add_idle(qubit_type, cycle_type duration);
 

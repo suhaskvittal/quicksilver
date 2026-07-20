@@ -48,9 +48,9 @@ public:
         /*
          * Driver params:
          * */
-        cycle_type reaction_time;
-        size_t     decoder_count;
-        size_t     code_distance;
+        double  reaction_time;
+        int64_t decoder_count,
+                code_distance;
 
         /*
          * RAD params:
@@ -63,9 +63,9 @@ public:
              * `Driver`'s parameters, and specify the slower
              * decoder for `RAD`'s parameters.
              * */
-            cycle_type reaction_time;
-            size_t     decoder_count;
-            double     fast_decoder_error_probability;
+            double  reaction_time;
+            int64_t decoder_count;
+            double  fast_decoder_error_probability;
         } rad;
     };
 
@@ -90,7 +90,9 @@ public:
      * Stats:
      * */
     uint64_t s_inst_done{0},
-             s_inst_read{0};
+             s_inst_read{0},
+             s_t_gates_in_program_done{0},
+             s_t_gates_done{0};
 
     stats::Histogram<uint64_t> s_t_latency{"T_LATENCY", 0, 1000, 10};
 
@@ -165,6 +167,10 @@ private:
 
     void update_stats(inst_ptr);
 
+    /*
+     * Functions for operating over a given dag (calls functions above)
+     * */
+    long retire_instructions_from_dag(dag_ptr&);
     long execute_instructions_from_dag(const dag_ptr&, bool ignore_wrong_path_blockage);
 };
 

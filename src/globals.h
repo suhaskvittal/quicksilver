@@ -6,6 +6,7 @@
 #ifndef GLOBALS_h
 #define GLOBALS_h
 
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -77,6 +78,12 @@ template <class T> constexpr T
 sqr(T x) 
 { 
     return x*x;
+}
+
+template <class T> constexpr T
+iceil(double x)
+{
+    return static_cast<T>( std::ceil(x) );
 }
 
 ////////////////////////////////////////////////////////////

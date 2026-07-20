@@ -93,6 +93,7 @@ Driver::Driver(std::string trace_file, config_type conf)
     {
         rad_ = std::make_unique<RAD>(program_qubits_,
                                      conf.rad.decoder_count,
+                                     conf.code_distance,
                                      DecoderTraits(conf.code_distance, conf.rad.reaction_time),
                                      conf.rad.fast_decoder_error_probability);
     }
@@ -115,16 +116,13 @@ Driver::operate()
     if (GL_RAD_ENABLED)
         progress += rad_->operate(current_cycle());
 
-    // 1. Handle retired non-cliffords in front layer
-    for (auto* inst : dag_->get_front_layer())
-    {
-        auto* uop = (inst->uop_count() > 0) ? inst->current_uop() : inst;
-        if (is_t_like_instruction(uop->type) && uop->rx.retireable)
-        {
-            retire_instruction(inst);
-            progress++;
-        }
-    }
+    // 1. Handle retired non-cliffords in front layer. Retiring is real forward
+    // progress: a pure T-gate stream never executes a Clifford, and T-gate
+    // execution alone does not count as progress, so without this the no-progress
+    // deadlock counter would trip during a long (single-qubit) T sequence.
+    progress += retire_instructions_from_dag(dag_);
+    if (GL_RAD_ENABLED && (rad_->is_executing_wrong_path() || rad_->is_waiting_for_fast_decoder_before_resolution()))
+        progress += retire_instructions_from_dag(rad_->wrong_path_dag());
 
     // 2. Read through front layer of DAG and execute instructions:
     fetch_into_dag();
@@ -274,7 +272,7 @@ Driver::decode_history()
     // This assumes that we have `decoder_count` decoders per program
     // qubit, giving each qubit a budget of `2*decoder_count` windows.
     const size_t max_windows = 2*decoder_count;
-    auto deallocated_ancilla = syndrome_history_->decode(current_cycle(), max_windows);
+    auto deallocated_ancilla = syndrome_history_->decode(current_cycle(), code_distance*max_windows);
     for (auto a : deallocated_ancilla)
         anc_available_cycle_.erase(a);
 
@@ -391,12 +389,45 @@ Driver::handle_routing(inst_ptr inst)
 void
 Driver::update_stats(inst_ptr inst)
 {
-    if (inst->rx.is_non_program_instruction)
-        return;
-    s_inst_done++;
     auto latency = (current_cycle() - *inst->first_ready_cycle);
     if (is_t_like_instruction(inst->type))
+    {
         s_t_latency.add(latency);
+        s_t_gates_done++;
+    }
+
+    if (!inst->rx.is_non_program_instruction)
+    {
+        s_inst_done++;
+        if (is_t_like_instruction(inst->type))
+            s_t_gates_in_program_done++;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+long
+Driver::retire_instructions_from_dag(dag_ptr& d)
+{
+    long progress{0};
+    bool any_retired{false};
+    do
+    {
+        any_retired = false;
+        for (auto* inst : d->get_front_layer())
+        {
+            auto* uop = (inst->uop_count() > 0) ? inst->current_uop() : inst;
+            if (is_t_like_instruction(uop->type) && uop->rx.retireable)
+            {
+                retire_instruction(inst);
+                progress++;
+                any_retired = true;
+            }
+        }
+    }
+    while (any_retired);
+    return progress;
 }
 
 ////////////////////////////////////////////////////////////
@@ -405,7 +436,7 @@ Driver::update_stats(inst_ptr inst)
 long
 Driver::execute_instructions_from_dag(const dag_ptr& d, bool ignore_wrong_path_blockage)
 {
-    if (GL_RAD_ENABLED && rad_->is_resolving_wrong_path())
+    if (GL_RAD_ENABLED && (rad_->is_resolving_wrong_path() || rad_->is_waiting_for_fast_decoder_before_resolution()))
         return 0;
 
     long progress{0};

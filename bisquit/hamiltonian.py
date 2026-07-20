@@ -68,11 +68,13 @@ qreg {CTRL};
 
 h {CTRL};
 ''')
-        # now iterate through the terms:
         normalization_factor = math.pi / (one_norm*trotter_steps)
         term_count = count_terms_hdf5(input_file, hamlib_key)
         threshold = 0.01 * one_norm / term_count
         term_number = 0
+
+        trotter_layers = []
+        trotter_layer_qubits = []
         for (labels, coeff, _) in read_pauli_strings_hdf5(input_file, hamlib_key):
             if abs(coeff) < threshold:
                 continue
@@ -80,11 +82,30 @@ h {CTRL};
             if term_number % 100_000 == 0:
                 print(f'\twriting term {term_number}')
             term_number += 1
-#           if term_number >= max_terms:
-#               break
+            
             c = coeff * normalization_factor
-            txt = _trotterization_write_pauli_string_ops(labels, c, MAIN_REGISTER, CTRL)
-            f.write(txt)
+
+            # Add to `trotter_layers`:
+            qubits = [q for (p,q) in labels]
+            j = 0
+            while j < len(trotter_layers):
+                if any(q in trotter_layer_qubits for q in qubits):
+                    j += 1
+                    continue
+                else:
+                    break
+            if j >= len(trotter_layers):
+                trotter_layers.append([])
+                trotter_layer_qubits.append(set())
+            trotter_layers[j].append((labels, c))
+            for q in qubits:
+                trotter_layer_qubits[j].add(q)
+
+        print(f'layers: {len(trotter_layers)}')
+        for layer in trotter_layers:
+            for (labels, c) in layer:
+                txt = _trotterization_write_pauli_string_ops(labels, c, MAIN_REGISTER, CTRL)
+                f.write(txt)
         f.write(f'h {CTRL};\n')
 
 #################################################################

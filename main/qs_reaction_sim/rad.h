@@ -29,6 +29,18 @@ public:
     using dag_ptr = std::unique_ptr<DAG>;
     using blocked_set_type = std::unordered_set<qubit_type>;
 
+    /*
+     * Wrong-path lifecycle:
+     *  --> INVALID   : no wrong path in flight.
+     *  --> RESOLVING : an error was detected; the main program is stalled while
+     *                  the tainted region is determined (`retired_dag_` drains and
+     *                  the syndrome history decodes down to idles).
+     *  --> EXECUTING : the `wrong_path_dag_` (uncompute + recompute) is running.
+     *  --> TRANSIENT : in the middle of RESOLVING and EXECUTING (finishing up decoding for
+     *                  executed non-Cliffords, but also blocking execution due to resolution)
+     * */
+    enum class WrongPathState { INVALID, RESOLVING, EXECUTING, TRANSIENT };
+
     const double fast_decoder_error_probability;
 
     /*
@@ -36,8 +48,9 @@ public:
      * should be implemented in `Driver`
      * */
     const DecoderTraits slow_decoder_traits;
-    const size_t program_qubits;
-    const size_t decoder_count;
+    const size_t program_qubits,
+                 decoder_count,
+                 code_distance;
 private:
     /*
      * This contains a DAG full of retired instructions. Once an
@@ -54,8 +67,7 @@ private:
      * */
     dag_ptr wrong_path_dag_;
     blocked_set_type wrong_path_blocked_qubits_;
-    bool wrong_path_resolution_in_progress_{false},
-         wrong_path_execution_in_progress_{false};
+    WrongPathState wrong_path_state_{WrongPathState::INVALID};
 
     /*
      * During resolution, track instructions to put into `wrong_path_dag_`
@@ -76,6 +88,7 @@ private:
 public:
     RAD(size_t program_qubits,
         size_t decoder_count,
+        size_t code_distance,
         DecoderTraits slow_decoder_traits,
         double fast_decoder_error_probability);
 
@@ -97,7 +110,9 @@ public:
     void commit_instruction(inst_ptr);
     
     bool is_qubit_blocked_by_wrong_path(qubit_type q) const { return wrong_path_blocked_qubits_.count(q) > 0;}
-    bool is_resolving_wrong_path() const { return wrong_path_resolution_in_progress_; }
+    bool is_resolving_wrong_path() const { return wrong_path_state_ == WrongPathState::RESOLVING; }
+    bool is_executing_wrong_path() const { return wrong_path_state_ == WrongPathState::EXECUTING; }
+    bool is_waiting_for_fast_decoder_before_resolution() const { return wrong_path_state_ == WrongPathState::TRANSIENT; }
 
     const std::unique_ptr<History>& history() const { return syndrome_history_; }
 
@@ -108,14 +123,16 @@ public:
     auto& wrong_path_dag(this auto& r) { return r.wrong_path_dag_; }
 private:
     long handle_commit();
-    long handle_wrong_path_retires();
     void decode_history(cycle_type);
 
     /*
      * Handles errors originating from decoding errors on the given
-     * instructions (the front-layer T gates the slow decoder just flagged).
+     * instruction. Returns true if we cannot move into the `RESOLVING`
+     * state.
      * */
-    void handle_decoding_error(std::vector<inst_ptr> tainted_inst);
+    bool handle_decoding_error(inst_ptr);
+
+    void try_and_add_to_wrong_path(inst_ptr);
     void initialize_wrong_path();
 };
 

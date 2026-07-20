@@ -258,6 +258,16 @@ target_link_libraries(qs_report PRIVATE qs_common)
 ###################################################
 ###################################################
 
+# Synthetic single-qubit T benchmark generator (qs_generate_synthetic_t_benchmark)
+
+add_executable(qs_generate_synthetic_t_benchmark main/qs_generate_synthetic_t_benchmark.cpp)
+target_include_directories(qs_generate_synthetic_t_benchmark PRIVATE "src")
+target_compile_options(qs_generate_synthetic_t_benchmark PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_generate_synthetic_t_benchmark PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Throughput estimator (qs_throughput_estimator)
 
 add_executable(qs_throughput_estimator main/qs_magic_state_throughput.cpp)

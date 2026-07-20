@@ -184,7 +184,7 @@ History::retire_front_event(qubit_type q)
 ////////////////////////////////////////////////////////////
 
 std::vector<qubit_type>
-History::decode(cycle_type current_cycle, size_t max_windows)
+History::decode(cycle_type current_cycle, size_t max_volume)
 {
     std::vector<qubit_type> freed;
 
@@ -209,18 +209,18 @@ History::decode(cycle_type current_cycle, size_t max_windows)
 
     for (qubit_type q : fronted)
     {
-        size_t windows_decoded{0};
-        while (windows_decoded < max_windows)
+        size_t volume_decoded{0};
+        while (volume_decoded < max_volume)
         {
             auto* e = front(q);
             if (e == nullptr)
                 break;
-            if (current_cycle < e->cycle_available || visited.count(e) > 0)
+            if (current_cycle < e->cycle_available) // || visited.count(e) > 0)
                 break;
             visited.insert(e);
 
             const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
-            const auto volume_to_decode = std::min(volume_remaining, max_windows - windows_decoded);
+            const auto volume_to_decode = std::min(volume_remaining, max_volume - volume_decoded);
 
             // Nothing left to decode for `e`. Two cases:
             //  --> this is a pauli correction, so advance decoder
@@ -245,7 +245,7 @@ History::decode(cycle_type current_cycle, size_t max_windows)
                 auto f = retire_front_event(q);
                 freed.insert(freed.end(), f.begin(), f.end());
             }
-            windows_decoded += volume_to_decode;
+            volume_decoded += volume_to_decode;
         }
     }
     return freed;
