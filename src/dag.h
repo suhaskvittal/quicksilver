@@ -85,15 +85,18 @@ public:
 
     /*
      * Removes all instructions from the DAG, deleting the underlying
-     * nodes and instructions and resetting the DAG to an empty state.
+     * nodes and instructions and reseting the DAG to an empty state.
+     *
+     * If `dealloc_inst` is false, then instruction pointers are not
+     * freed.
      * */
-    void clear();
+    void clear(bool dealloc_inst=true);
 
     /*
      * This returns a list of all instructions in the front layer.
      * These are the oldest instructions in the program.
      * */
-    std::vector<inst_ptr> get_front_layer() const;
+    std::vector<inst_ptr> get_front_layer() const { return get_front_layer_if([] (const auto*) { return true; }); }
 
     /*
      * This is a modified version of the above function that

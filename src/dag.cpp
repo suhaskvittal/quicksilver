@@ -25,38 +25,6 @@ DAG::~DAG()
     clear();
 }
 
-void
-DAG::clear()
-{
-    // delete all nodes and instructions remaining in the DAG:
-    // can do this efficiently via DFS:
-    std::vector<node_type*> dfss;
-    for (const auto& [__unused_inst, node] : front_layer_)
-        dfss.push_back(node);
-
-    while (!dfss.empty())
-    {
-        auto* x = dfss.back();
-        dfss.pop_back();
-
-        x->tmp_pred_count_++;
-        if (x->tmp_pred_count_ == x->predecessors.size())
-        {
-            // traverse now -- since we will delete `x`
-            for (auto* y : x->dependent)
-                dfss.push_back(y);
-            delete x->inst;
-            delete x;
-        }
-    }
-
-    // reset the DAG back to an empty state:
-    front_layer_.clear();
-    std::fill(back_instructions_.begin(), back_instructions_.end(), nullptr);
-    node_lookup_table_.clear();
-    inst_count_ = 0;
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -151,10 +119,37 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<DAG::inst_ptr>
-DAG::get_front_layer() const
+void
+DAG::clear(bool dealloc_inst)
 {
-    return get_front_layer_if([] (const auto*) { return true; });
+    // delete all nodes and instructions remaining in the DAG:
+    // can do this efficiently via DFS:
+    std::vector<node_type*> dfss;
+    for (const auto& [__unused_inst, node] : front_layer_)
+        dfss.push_back(node);
+
+    while (!dfss.empty())
+    {
+        auto* x = dfss.back();
+        dfss.pop_back();
+
+        x->tmp_pred_count_++;
+        if (x->tmp_pred_count_ == x->predecessors.size())
+        {
+            // traverse now -- since we will delete `x`
+            for (auto* y : x->dependent)
+                dfss.push_back(y);
+            if (dealloc_inst)
+                delete x->inst;
+            delete x;
+        }
+    }
+
+    // reset the DAG back to an empty state:
+    front_layer_.clear();
+    std::fill(back_instructions_.begin(), back_instructions_.end(), nullptr);
+    node_lookup_table_.clear();
+    inst_count_ = 0;
 }
 
 ////////////////////////////////////////////////////////////

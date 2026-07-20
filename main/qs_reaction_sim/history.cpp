@@ -345,6 +345,8 @@ History::push_back_event(HistoryEvent* e)
             set_front(q, e);
     }
     event_count_++;
+    // Only non-idle events are pushed here (idles go through `add_idle`).
+    non_idle_event_count_++;
 }
 
 ////////////////////////////////////////////////////////////
@@ -422,6 +424,8 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
     if (e->type == HistoryEvent::CondBasisMeas)
         freed.push_back(e->qubits.front());
 
+    if (e->type != HistoryEvent::Idle)
+        non_idle_event_count_--;
     delete e;
     event_count_--;
 }

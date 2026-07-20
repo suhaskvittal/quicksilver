@@ -143,6 +143,14 @@ private:
     std::unordered_map<qubit_type, HistoryEvent*> front_layer_,
                                                   back_layer_;
     size_t event_count_{0};
+    /*
+     * AI-GENERATED
+     *
+     * Count of non-idle events currently live. `only_contains_idles()` tests this
+     * against zero, so it cannot be fooled by a real event hidden behind a front
+     * idle on the same qubit.
+     * */
+    size_t non_idle_event_count_{0};
 
     /*
      * Ancilla allocator: an ever-increasing counter starting just past the program
@@ -192,6 +200,15 @@ public:
     event_add_result_type add_events_for_instructions(inst_ptr, cycle_type current_cycle);
     
     size_t event_count() const { return event_count_; }
+
+    /*
+     * AI-GENERATED
+     *
+     * True when every live event is an idle -- i.e. all real syndrome events have
+     * decoded/resolved. RAD uses this as the "wrong-path resolution finished"
+     * signal once the main program is stalled.
+     * */
+    bool only_contains_idles() const { return non_idle_event_count_ == 0; }
 private:
     qubit_type get_ancilla();
 

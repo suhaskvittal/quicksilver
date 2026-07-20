@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <limits>
 
+#define RAD_VERBOSE
+
 namespace rs
 {
 
@@ -80,26 +82,35 @@ RAD::operate(cycle_type c)
 {
     long progress{0};
 
-    // 1. if wrong path dag is non-empty, then try and retire
+    // 1. If we are resolving the wrong path, then check if the syndrome history
+    // only contains idle events. If so, then unset this flag and populate
+    // `wrong_path_dag_`
+    if (wrong_path_resolution_in_progress_ 
+        && retired_dag_->inst_count() == 0
+        && syndrome_history_->only_contains_idles())
+    {
+        initialize_wrong_path();
+    }
+
+    // 2. if wrong path dag is non-empty, then try and retire
     // instructions from it. Note that we cannot commit as
     // we must account for errors on wrong path.
     if (wrong_path_dag_->inst_count() > 0)
-    {
         progress += handle_wrong_path_retires();
-    }
-    else if (wrong_path_originators_.size() > 0)
+
+    if (wrong_path_execution_in_progress_ && wrong_path_dag_->inst_count() == 0)
     {
-        // 1a. if wrong path is empty but we have wrong path originators, then
-        //      we have completed the wrong path recently:
-        for (auto* inst : wrong_path_originators_)
-            inst->rx.waiting_on_wrong_path = false;
-        wrong_path_originators_.clear();
+        wrong_path_blocked_qubits_.clear();
+        wrong_path_execution_in_progress_ = false;
+#if defined(RAD_VERBOSE)
+        std::cout << "wrong path execution complete\n";
+#endif
     }
 
-    // 2. commit instructions and handle any detected errors on non-cliffords
+    // 3. commit instructions and handle any detected errors on non-cliffords
     progress += handle_commit();
 
-    // 3. decode syndrome history if able
+    // 4. decode syndrome history if able
     if (c >= slow_decoder_next_available_cycle_)
         decode_history(c);
 
@@ -164,10 +175,28 @@ RAD::handle_commit()
                                     [] (const auto* inst)
                                     {
                                         return !is_t_like_instruction(inst->type)
-                                                || (inst->rx.verified && !inst->rx.erroneous && !inst->rx.waiting_on_wrong_path);
+                                                || (inst->rx.verified && !inst->rx.erroneous);
                                     });
         for (auto* inst : inst_to_remove)
+        {
+            // if wrong path resolution is in progress, then add to wrong path if this instruction
+            // intersects with any qubits currently blocked by the wrong path
+            if (wrong_path_resolution_in_progress_)
+            {
+                const bool add_to_wp = std::any_of(inst->q_begin(), inst->q_end(),
+                                                [this] (auto q) { return wrong_path_blocked_qubits_.count(q) > 0; });
+                if (add_to_wp)
+                {
+                    // create copy of instruction:
+                    wrong_path_recomp_.push_back( new Instruction(inst->type, inst->q_begin(), inst->q_end()) );
+                    wrong_path_uncomp_.push_back( new Instruction(_get_inverse_type(inst->type), inst->q_begin(), inst->q_end()) );
+                    wrong_path_blocked_qubits_.insert(inst->q_begin(), inst->q_end());
+                }
+            }
+
+            // finally delete instruction
             commit_instruction(inst);
+        }
         any_removed = (inst_to_remove.size() > 0);
         progress += inst_to_remove.size();
     }
@@ -176,7 +205,7 @@ RAD::handle_commit()
     // now handle any erroneous non-cliffords in the front layer:
     auto tainted_inst = retired_dag_->get_front_layer_if(
                                     [] (const auto* inst) { return inst->rx.verified && inst->rx.erroneous; });
-    initialize_wrong_path_on_error(tainted_inst);
+    handle_decoding_error(tainted_inst);
     return progress;
 }
 
@@ -218,70 +247,83 @@ RAD::decode_history(cycle_type c)
 ////////////////////////////////////////////////////////////
 
 void
-RAD::initialize_wrong_path_on_error(std::vector<inst_ptr> tainted_inst)
+RAD::handle_decoding_error(std::vector<inst_ptr> tainted_inst)
 {
-    // Nothing flagged this cycle -- no wrong path to build.
     if (tainted_inst.empty())
         return;
 
-    if (wrong_path_dag_->inst_count() > 0)
-        std::cerr << "unimplemented: got new error while on wrong path" << _die{};
-
-    // now that we have a list of affected t gates, compute the wrong path
-    // we will treat this as a stack and push back instructions from the
-    // stack onto `wrong_path_dag_`
-    std::vector<inst_ptr> wrong_path(tainted_inst);
-    wrong_path.reserve(256);
-
-    blocked_set_type tainted_qubits;
-    for (auto* inst : tainted_inst)
-        tainted_qubits.insert(inst->q_begin(), inst->q_end());
-
-    retired_dag_->for_each_instruction_in_layer_order(1, std::numeric_limits<size_t>::max(),
-            [&] (auto* inst, size_t)
-            {
-                const bool is_tainted = std::any_of(inst->q_begin(), inst->q_end(),
-                                            [&] (qubit_type q) { return tainted_qubits.count(q) > 0; });
-                if (is_tainted)
-                {
-                    tainted_qubits.insert(inst->q_begin(), inst->q_end());
-                    wrong_path.push_back(inst);
-                }
-            });
-
-    // clear erroneous flag for all instructions on the wrong path:
-    for (auto* inst : wrong_path)
-        inst->rx.erroneous = false;
-    // mark `tainted_inst` as waiting on wrong path:
-    for (auto* inst : tainted_inst)
-        inst->rx.waiting_on_wrong_path = true;
-
-    // create two copies of each instruction in `wrong_path` and give those to `wrong_path_dag_`:
-    //  --> `uncomp` inverts each instruction, applied in reverse order,
-    //  --> `recovery` re-applies each instruction in the original order.
-    std::vector<inst_ptr> uncomp(wrong_path.size()),
-                            recovery(wrong_path.size());
-    for (size_t i = 0; i < wrong_path.size(); i++)
+    // if we are executing the wrong path, then handle this case (need to stop wrong path execution)
+    if (wrong_path_execution_in_progress_)
     {
-        const size_t j = wrong_path.size() - i - 1;
-        auto* orig = wrong_path[i];
-        uncomp[j] = new Instruction(_get_inverse_type(orig->type),
-                                            orig->q_begin(),
-                                            orig->q_end());
-        recovery[i] = new Instruction(orig->type,
-                                            orig->q_begin(),
-                                            orig->q_end());
+#if defined(RAD_VERBOSE)
+        std::cout << "got error while executing wrong path (inst left = " << wrong_path_dag_->inst_count() << ")\n"; 
+#endif
 
-        // flag the uncomputation + recovery instructions as non-program instructions
-        uncomp[j]->rx.is_non_program_instruction = true;
-        recovery[i]->rx.is_non_program_instruction = true;
+        if (wrong_path_incomplete_.size() > 0)
+            std::cerr << "RAD::handle_decoding_error: expected wrong_path_incomplete_ to be empty" << _die{};
+        // move all pending instructions in `wrong_path_dag_` into `wrong_path_incomplete_`
+        wrong_path_incomplete_.reserve(wrong_path_dag_->inst_count());
+        wrong_path_dag_->for_each_instruction_in_layer_order(
+                                    0,
+                                    std::numeric_limits<size_t>::max(),
+                                    [this] (auto* inst, auto)
+                                    {
+                                        if (!inst->rx.executed)
+                                            wrong_path_incomplete_.push_back(inst);
+                                    });
+        // then clear `wrong_path_dag_` (do not free instructions)
+        wrong_path_dag_->clear(false);
     }
-    for (auto* inst : uncomp)
+
+    // 1. set wrong path resolution signal 
+#if defined(RAD_VERBOSE)
+    if (!wrong_path_resolution_in_progress_)
+        std::cout << "starting wrong path resolution\n";; 
+#endif
+    wrong_path_resolution_in_progress_ = true;
+    wrong_path_execution_in_progress_ = false;
+
+    // 2. add all qubit arguments in `tainted_inst` to `wrong_path_blocked_qubits_`
+    // and unset erroneous flag
+    for (auto* inst : tainted_inst)
+    {
+        wrong_path_blocked_qubits_.insert(inst->q_begin(), inst->q_end());
+        inst->rx.erroneous = false;
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+RAD::initialize_wrong_path()
+{
+    wrong_path_resolution_in_progress_ = false;
+    wrong_path_execution_in_progress_ = true;
+
+    std::vector<inst_ptr> wp_inst;
+    wp_inst.reserve(wrong_path_uncomp_.size() + wrong_path_recomp_.size());
+    std::move(wrong_path_uncomp_.rbegin(), wrong_path_uncomp_.rend(), std::back_inserter(wp_inst));
+    std::move(wrong_path_recomp_.begin(), wrong_path_recomp_.end(), std::back_inserter(wp_inst));
+    wrong_path_uncomp_.clear();
+    wrong_path_recomp_.clear();
+
+    // after adding the uncomputation + recomputation, add all of `wrong_path_incomplete_`
+    std::move(wrong_path_incomplete_.begin(), wrong_path_incomplete_.end(), std::back_inserter(wp_inst));
+    wrong_path_incomplete_.clear();
+
+    for (auto* inst : wp_inst)
+    {
+        // signal that this is from the wrong path so we update stats
+        inst->rx.is_non_program_instruction = true;
         wrong_path_dag_->add_instruction(inst);
-    for (auto* inst : recovery)
-        wrong_path_dag_->add_instruction(inst);
-    wrong_path_originators_ = tainted_inst;
-    wrong_path_blocked_qubits_ = tainted_qubits;
+    }
+
+#if defined(RAD_VERBOSE)
+    std::cout << "entered wrong path execution, inst in wrong path = " << wrong_path_dag_->inst_count() 
+                << ", blocked = " << wrong_path_blocked_qubits_.size() 
+                << "\n";
+#endif
 }
 
 ////////////////////////////////////////////////////////////

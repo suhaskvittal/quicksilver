@@ -191,7 +191,6 @@ public:
          * */
         bool verified{false},
              erroneous{false},
-             waiting_on_wrong_path{false},
              is_non_program_instruction{false};
         /*
          * We need `routing_space_consumed` to calculate spacetime 

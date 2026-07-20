@@ -38,6 +38,7 @@ class Driver : public sim::Operable
 {
 public:
     using inst_ptr = Instruction*;
+    using dag_ptr = std::unique_ptr<DAG>;
 
     /*
      * Configuration type:
@@ -105,7 +106,7 @@ private:
     /*
      * Instruction DAG:
      * */
-    std::unique_ptr<DAG> dag_;
+    dag_ptr dag_;
 
     /*
      * Syndrome history:
@@ -163,6 +164,8 @@ private:
     bool handle_routing(inst_ptr);
 
     void update_stats(inst_ptr);
+
+    long execute_instructions_from_dag(const dag_ptr&, bool ignore_wrong_path_blockage);
 };
 
 ////////////////////////////////////////////////////////////

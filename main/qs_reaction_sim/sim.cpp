@@ -128,25 +128,9 @@ Driver::operate()
 
     // 2. Read through front layer of DAG and execute instructions:
     fetch_into_dag();
-    for (auto* inst : dag_->get_front_layer())
-    {
-        auto* uop = (inst->uop_count() > 0) ? inst->current_uop() : inst;
-        if (uop->rx.executed)
-            continue;
-
-        // 2a. execute:
-        const bool success = execute_instruction(uop);
-        if (!success)
-            continue;
-
-        // 2b. if the instruction is a clifford, then we can retire it
-        // immediately.
-        if (_can_retire_immediately(uop->type))
-        {
-            retire_instruction(inst);
-            progress++;
-        }
-    }
+    progress += execute_instructions_from_dag(dag_, false);
+    if (GL_RAD_ENABLED)
+        progress += execute_instructions_from_dag(rad_->wrong_path_dag(), true);
 
     // 3. handle decoding in `syndrome_history_`
     if (current_cycle() >= decoder_next_available_cycle_)
@@ -244,14 +228,13 @@ Driver::execute_instruction(inst_ptr inst)
         inst->first_ready_cycle = current_cycle();  // we need this line to avoid segfaults later.
         return true;
     }
+
     // check if operands are available:
     const bool all_available = std::all_of(inst->q_begin(), inst->q_end(),
                                     [this] (auto q) 
                                     { 
                                         const bool avail = current_cycle() >= program_qubit_available_cycle_[q]; 
-                                        const bool blocked_by_rad = GL_RAD_ENABLED
-                                                                    && rad_->is_qubit_blocked_by_wrong_path(q);
-                                        return avail && !blocked_by_rad;
+                                        return avail;
                                     });
     if (!all_available)
         return false;
@@ -323,7 +306,10 @@ Driver::retire_instruction(inst_ptr inst)
         }
         else
         {
-            dag_->remove_instruction_from_front_layer(inst);
+            if (inst->rx.is_non_program_instruction)
+                rad_->wrong_path_dag()->remove_instruction_from_front_layer(inst);
+            else
+                dag_->remove_instruction_from_front_layer(inst);
             rad_->retire_instruction(inst);
         }
     }
@@ -405,10 +391,52 @@ Driver::handle_routing(inst_ptr inst)
 void
 Driver::update_stats(inst_ptr inst)
 {
+    if (inst->rx.is_non_program_instruction)
+        return;
     s_inst_done++;
     auto latency = (current_cycle() - *inst->first_ready_cycle);
     if (is_t_like_instruction(inst->type))
         s_t_latency.add(latency);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+long
+Driver::execute_instructions_from_dag(const dag_ptr& d, bool ignore_wrong_path_blockage)
+{
+    if (GL_RAD_ENABLED && rad_->is_resolving_wrong_path())
+        return 0;
+
+    long progress{0};
+    for (auto* inst : d->get_front_layer())
+    {
+        auto* uop = (inst->uop_count() > 0) ? inst->current_uop() : inst;
+        if (uop->rx.executed)
+            continue;
+
+        // if not `ignore_wrong_path_blockage`, then ensure none of the qubits are blocked
+        if (GL_RAD_ENABLED && !ignore_wrong_path_blockage)
+        {
+            const bool any_blocked = std::any_of(inst->q_begin(), inst->q_end(),
+                                        [this] (auto q) { return rad_->is_qubit_blocked_by_wrong_path(q); });
+            if (any_blocked)
+                continue;
+        }
+
+        const bool success = execute_instruction(uop);
+        if (!success)
+            continue;
+
+        // if the instruction is a clifford, then we can retire it
+        // immediately.
+        if (_can_retire_immediately(uop->type))
+        {
+            retire_instruction(inst);
+            progress++;
+        }
+    }
+    return progress;
 }
 
 ////////////////////////////////////////////////////////////
