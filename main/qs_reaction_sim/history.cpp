@@ -186,14 +186,10 @@ History::retire_front_event(qubit_type q)
 std::vector<qubit_type>
 History::decode(cycle_type current_cycle, size_t max_volume)
 {
-    std::vector<qubit_type> freed;
+    if (current_cycle < earliest_available_event_cycle_)
+        return {};
 
-    // AI-GENERATED
-    //
-    // A multi-qubit event fronts several qubits at once; `visited` ensures we
-    // charge its volume once rather than once per qubit.
-    std::unordered_set<HistoryEvent*> visited;
-    visited.reserve(max_program_qubits);
+    std::vector<qubit_type> freed;
 
     // AI-GENERATED
     //
@@ -207,6 +203,9 @@ History::decode(cycle_type current_cycle, size_t max_volume)
         fronted.push_back(q);
     std::sort(fronted.begin(), fronted.end());
 
+    // reset `earliest_available_event_cycle_`. We will set it in the loop
+    earliest_available_event_cycle_ = std::numeric_limits<cycle_type>::max();
+
     for (qubit_type q : fronted)
     {
         size_t volume_decoded{0};
@@ -215,9 +214,8 @@ History::decode(cycle_type current_cycle, size_t max_volume)
             auto* e = front(q);
             if (e == nullptr)
                 break;
-            if (current_cycle < e->cycle_available) // || visited.count(e) > 0)
+            if (current_cycle < e->cycle_available)
                 break;
-            visited.insert(e);
 
             const auto volume_remaining = e->spacetime_volume() - e->volume_decoded;
             const auto volume_to_decode = std::min(volume_remaining, max_volume - volume_decoded);
@@ -247,7 +245,13 @@ History::decode(cycle_type current_cycle, size_t max_volume)
             }
             volume_decoded += volume_to_decode;
         }
+
+        // re-read `front(q)` to update `earliest_available_event_cycle_`
+        auto* e = front(q);
+        if (e != nullptr)
+            earliest_available_event_cycle_ = std::min(earliest_available_event_cycle_, e->cycle_available);
     }
+
     return freed;
 }
 
@@ -473,6 +477,23 @@ History::get_ancilla()
 {
     // Ever-increasing pointer: hand out a fresh id and never reuse it.
     return next_ancilla_++;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void 
+History::set_front(qubit_type q, HistoryEvent* e)
+{
+    if (e == nullptr) 
+    {
+        front_layer_.erase(q);
+    }
+    else
+    {
+        front_layer_[q] = e;
+        earliest_available_event_cycle_ = std::min(earliest_available_event_cycle_, e->cycle_available);
+    }
 }
 
 ////////////////////////////////////////////////////////////

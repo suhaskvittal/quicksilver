@@ -124,22 +124,8 @@ public:
     const size_t max_program_qubits,
                  code_distance;
     const HistoryRole role;
-    /*
-     * AI-GENERATED
-     *
-     * Per-window probability that the fast decoder mis-decoded, used only by a
-     * `Verification`-role history. Zero for a `Reaction` history.
-     * */
     const double error_injection_probability;
 private:
-    /*
-     * `front_layer_` maps each qubit to its oldest undecoded event; `back_layer_`
-     * maps each qubit to its youngest event. A multi-qubit event may appear under
-     * several keys. A missing key means the qubit has no event -- `front`/`back`
-     * return nullptr. These are maps rather than fixed vectors because ancilla ids
-     * come from an ever-increasing pointer (never reused), so the id space is
-     * unbounded but sparse.
-     * */
     std::unordered_map<qubit_type, HistoryEvent*> front_layer_,
                                                   back_layer_;
     size_t event_count_{0};
@@ -153,11 +139,20 @@ private:
     size_t non_idle_event_count_{0};
 
     /*
+     * AI-GENERATED
+     *
      * Ancilla allocator: an ever-increasing counter starting just past the program
      * qubits. Ids are never reused, so freeing an ancilla is just dropping it from
      * the layer maps.
      * */
     qubit_type next_ancilla_;
+
+    /*
+     * A problem with `decode()` is that if reaction time is low, the simulation time
+     * is high because decode is O(n). So we have extra state to reduce the calls
+     * to `decode()`:
+     * */
+    cycle_type earliest_available_event_cycle_{0};
 public:
     History(size_t max_program_qubits, size_t code_distance, HistoryRole,
                 double error_injection_probability = 0.0);
@@ -219,11 +214,7 @@ private:
      * `front_layer_` only ever holds live fronts (and `front` can treat a missing
      * key as nullptr).
      * */
-    void set_front(qubit_type q, HistoryEvent* e)
-    {
-        if (e == nullptr) front_layer_.erase(q);
-        else              front_layer_[q] = e;
-    }
+    void set_front(qubit_type, HistoryEvent*);
 
     void push_back_event(HistoryEvent*);
     void push_back_events(std::initializer_list<HistoryEvent*> arr) { for (auto* e : arr) push_back_event(e); }

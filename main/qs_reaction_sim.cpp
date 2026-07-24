@@ -52,6 +52,7 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     // allocate simulation objects:
+    sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
     Driver* driver = new Driver(trace_file, conf);
     while (driver->s_inst_done < inst_sim)
     {
@@ -89,6 +90,8 @@ main(int argc, char* argv[])
         driver->rad()->s_wrong_path_inst_count.dump(std::cout);
         driver->rad()->s_qubits_blocked_by_wrong_path.dump(std::cout);
     }
+
+    print_stat_line(std::cout, "SIM_WALLTIME_S", sim::walltime_s());
 
     delete driver;
     return 0;
