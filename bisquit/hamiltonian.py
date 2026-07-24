@@ -6,6 +6,8 @@
 from hamlib_snippets import *
 from common import *
 
+import os
+
 #################################################################
 #################################################################
 
@@ -163,6 +165,9 @@ h {CTRL};
                 txt = _trotterization_write_pauli_string_ops(labels, c, MAIN_REGISTER, CTRL)
                 f.write(txt)
         f.write(f'h {CTRL};\n')
+    compression_cmd = f'xz -z -T 16 {output_file}'
+    print(compression_cmd)
+    os.system(compression_cmd)
 
 #################################################################
 #################################################################
@@ -430,6 +435,10 @@ h {CTRL};
             print('generating select...')
             select = _qubitization_select(input_file, hamlib_key, num_phase_qubits, MAIN_REGISTER, PHASE_REGISTER, ANCILLA, CTRL)
         f.write(prepare + select + prepare)
+
+    compression_cmd = f'xz -z -T 16 {output_file}'
+    print(compression_cmd)
+    os.system(compression_cmd)
 
 #################################################################
 #################################################################
