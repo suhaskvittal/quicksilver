@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <vector>
 
 int main(int argc, char* argv[]) 
 {
@@ -39,6 +40,14 @@ int main(int argc, char* argv[])
     uint64_t mem_accesses   = 0;
     uint64_t unrolled_insts = 0;
 
+    // Instruction-level parallelism: ASAP-layer the compute DAG. `qubit_next_layer[q]`
+    // is the earliest layer a future instruction on qubit `q` can occupy; a layer holds
+    // mutually independent compute instructions. Software instructions are excluded (they
+    // are not scheduled on hardware), so they neither occupy a layer nor advance depth.
+    std::vector<int64_t> qubit_next_layer(num_qubits, 0);
+    int64_t  num_layers         = 0;   // critical-path depth of the compute DAG
+    uint64_t compute_inst_count = 0;   // non-software instructions
+
     uint64_t inst_count{0};
     while (!generic_strm_eof(istrm)) 
     {
@@ -46,6 +55,11 @@ int main(int argc, char* argv[])
             std::cout << "progress: " << inst_count << " instructions read\n";
 
         INSTRUCTION* inst = read_instruction_from_stream(istrm);
+        if (generic_strm_eof(istrm))
+        {
+            delete inst;
+            break;
+        }
 
         inst_count++;
         if (is_software_instruction(inst->type))
@@ -53,6 +67,17 @@ int main(int argc, char* argv[])
             delete inst;
             continue;
         }
+
+        // place this instruction in the earliest layer after all its operands are free,
+        // then advance those operands past it. `num_layers` tracks the max depth reached.
+        int64_t layer = 0;
+        for (auto it = inst->q_begin(); it != inst->q_end(); ++it)
+            layer = std::max(layer, qubit_next_layer[*it]);
+        for (auto it = inst->q_begin(); it != inst->q_end(); ++it)
+            qubit_next_layer[*it] = layer + 1;
+        num_layers = std::max(num_layers, layer + 1);
+        compute_inst_count++;
+
         size_t u = inst->unrolled_inst_count();
         if (is_rotation_instruction(inst->type))
             u = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return !is_software_instruction(t); });
@@ -106,4 +131,9 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "T_GATE_%",     100*t_fraction);
     print_stat_line(std::cout, "CX_GATE_%",    100*cx_fraction);
     print_stat_line(std::cout, "MEM_%",        100*mem_fraction);
+
+    // instruction-level parallelism = mean compute instructions per DAG layer
+    print_stat_line(std::cout, "COMPUTE_INST_COUNT", compute_inst_count);
+    print_stat_line(std::cout, "DAG_LAYERS",         num_layers);
+    print_stat_line(std::cout, "MEAN_ILP",           mean(compute_inst_count, num_layers));
 }

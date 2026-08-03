@@ -12,6 +12,8 @@
 namespace sim
 {
 
+extern bool GL_MEMORY_IDEAL_RESOURCES;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -58,7 +60,7 @@ MEMORY_SUBSYSTEM::do_load(QUBIT* q, cycle_type c_current_cycle, double c_freq_kh
         std::cerr << _die{};
     }
 
-    if (routing_->can_route_to(*s_it, c_current_cycle))
+    if (GL_MEMORY_IDEAL_RESOURCES || routing_->can_route_to(*s_it, c_current_cycle))
         return handle_access_outcome((*s_it)->do_load(q), *s_it, c_current_cycle, c_freq_khz);
     return access_result_type{};
 }
@@ -95,7 +97,7 @@ MEMORY_SUBSYSTEM::do_coupled_load_store(QUBIT* ld, QUBIT* st, cycle_type c_curre
     }
 
     // coupled  access only succeeds if both load and store can occur
-    if (!routing_->can_route_to(*s_it, c_current_cycle))
+    if (!GL_MEMORY_IDEAL_RESOURCES && !routing_->can_route_to(*s_it, c_current_cycle))
         return access_result_type{};
     return handle_access_outcome((*s_it)->do_coupled_load_store(ld, st), *s_it, c_current_cycle, c_freq_khz);
 }
@@ -160,8 +162,13 @@ MEMORY_SUBSYSTEM::handle_access_outcome(access_result_type result,
         result.latency = convert_cycles_between_frequencies(result.latency, result.storage_freq_khz, c_freq_khz);
         result.critical_latency = convert_cycles_between_frequencies(result.critical_latency, result.storage_freq_khz, c_freq_khz);
 
-        cycle_type routing_cycles = convert_cycles_between_frequencies(2, result.storage_freq_khz, c_freq_khz);
-        routing_->lock_route_to(s, c_current_cycle+routing_cycles);
+        // Ideal-resources mode: do not reserve routing bandwidth, so the channel
+        // is never the bottleneck (the access latency in `result` is preserved).
+        if (!GL_MEMORY_IDEAL_RESOURCES)
+        {
+            cycle_type routing_cycles = convert_cycles_between_frequencies(2, result.storage_freq_khz, c_freq_khz);
+            routing_->lock_route_to(s, c_current_cycle+routing_cycles);
+        }
     }
     return result;
 }

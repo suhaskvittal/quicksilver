@@ -11,12 +11,14 @@
 namespace sim
 {
 
+extern bool GL_MEMORY_IDEAL_RESOURCES;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 namespace
 {
-    
+
 /*
  * Returns a generated name for the storage given its code parameters.
  * */
@@ -174,18 +176,29 @@ STORAGE::operate()
 STORAGE::access_result_type
 STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
 {
-    auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
-                            [this] (cycle_type c) { return c <= current_cycle(); });
-    if (adapter_it == cycle_available_.end())
-        return access_result_type{};
-
     cycle_type total_latency{0};
-    if (load_latency > 0)
+    if (GL_MEMORY_IDEAL_RESOURCES)
     {
-        cycle_type adapter_manip_latency = adapter_access(adapter_it, type);
-        assert(adapter_manip_latency <= 2);
-        total_latency = access_latency + adapter_manip_latency;
-        *adapter_it = total_latency;
+        // Ideal-resources mode: unlimited adapter bandwidth -- never wait on or
+        // reserve an adapter -- but keep the access latency so load results still
+        // become available `access_latency` cycles later.
+        if (load_latency > 0)
+            total_latency = access_latency;
+    }
+    else
+    {
+        auto adapter_it = std::find_if(cycle_available_.begin(), cycle_available_.end(),
+                                [this] (cycle_type c) { return c <= current_cycle(); });
+        if (adapter_it == cycle_available_.end())
+            return access_result_type{};
+
+        if (load_latency > 0)
+        {
+            cycle_type adapter_manip_latency = adapter_access(adapter_it, type);
+            assert(adapter_manip_latency <= 2);
+            total_latency = access_latency + adapter_manip_latency;
+            *adapter_it = total_latency;
+        }
     }
 
     switch (type)

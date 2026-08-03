@@ -1,6 +1,8 @@
 QASMBench/
 
 build/
+build_ilp/
+build-ilp/
 Release/
 Debug/
 
@@ -13,10 +15,7 @@ venv/*
 bisquit/qasm/*
 bisquit/hamlib/*
 
-commands.out
-compile_commands.out
-sim_commands.out
-nohup.out
+*.out
 
 out/
 

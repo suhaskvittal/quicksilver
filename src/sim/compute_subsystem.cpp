@@ -10,6 +10,8 @@
 
 #include <fstream>
 
+//#define LOG_INST
+
 namespace sim
 {
 
@@ -400,6 +402,15 @@ COMPUTE_SUBSYSTEM::retire_instruction(CLIENT* c, inst_ptr inst, cycle_type inst_
 
     if (is_rpc_enabled())
         rotation_subsystem_->invalidate(inst);
+
+#if defined(LOG_INST)
+    if (current_cycle() - *inst->first_ready_cycle > 23000 && is_memory_access(inst->type))
+    {
+        std::cout << "@ t = " << current_cycle() << "\t" << *inst << ", first ready cycle = " << *inst->first_ready_cycle 
+                << " resource ready cycle = " << *inst->first_cycle_with_available_resource_state
+                << " inst_latency = " << inst_latency << "\n";
+    }
+#endif
 
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);

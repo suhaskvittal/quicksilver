@@ -180,10 +180,13 @@ main(int argc, char* argv[])
          * */
         .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
+        .optional("", "--memory-ideal-resources",
+                        "Disable all memory-subsystem resource overhead (EPR, adapters, routing); keep only access latency",
+                        sim::GL_MEMORY_IDEAL_RESOURCES, false)
 
         .parse(argc, argv);
 
-    GL_USE_RPC_ISA = 1;
+    GL_USE_RPC_ISA = 0;
 
     /* Parse trace string and do jit compilation if neeeded */
 

@@ -43,26 +43,33 @@ REMOTE_STORAGE::REMOTE_STORAGE(double freq_khz,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+extern bool GL_MEMORY_IDEAL_RESOURCES;
+
 REMOTE_STORAGE::access_result_type
 REMOTE_STORAGE::do_memory_access(cycle_type access_latency, ACCESS_TYPE type)
 {
-    const size_t epr_required = _get_required_epr_pairs_for_access(type);
-    const size_t epr_available = std::transform_reduce(top_level_epr_generators_.begin(),
-                                                        top_level_epr_generators_.end(),
-                                                        size_t{0},
-                                                        std::plus<size_t>{},
-                                                        [] (const auto* p) { return p->buffer_occupancy(); });
-    if (epr_available < epr_required)
-        return access_result_type{};
-
-    size_t epr_remaining{epr_required};
-    for (auto* p : top_level_epr_generators_)
+    // Ideal-resources mode: skip the EPR supply entirely (no availability check,
+    // no consumption), so accesses never stall on entanglement distillation.
+    if (!GL_MEMORY_IDEAL_RESOURCES)
     {
-        size_t c = std::min(p->buffer_occupancy(), epr_remaining);
-        p->consume(c);
-        epr_remaining -= c;
-        if (epr_available == 0)
-            break;
+        const size_t epr_required = _get_required_epr_pairs_for_access(type);
+        const size_t epr_available = std::transform_reduce(top_level_epr_generators_.begin(),
+                                                            top_level_epr_generators_.end(),
+                                                            size_t{0},
+                                                            std::plus<size_t>{},
+                                                            [] (const auto* p) { return p->buffer_occupancy(); });
+        if (epr_available < epr_required)
+            return access_result_type{};
+
+        size_t epr_remaining{epr_required};
+        for (auto* p : top_level_epr_generators_)
+        {
+            size_t c = std::min(p->buffer_occupancy(), epr_remaining);
+            p->consume(c);
+            epr_remaining -= c;
+            if (epr_available == 0)
+                break;
+        }
     }
 
     return STORAGE::do_memory_access(access_latency, type);
