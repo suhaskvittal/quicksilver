@@ -55,10 +55,12 @@ struct HistoryEvent
     using inst_ptr = Instruction*;
 
     Type type;
+
     /*
      * An event can only be decoded once the current cycle exceeds `cycle_available`
      * */
     cycle_type cycle_available{};
+
     /*
      * `duration` and `patch_count` dictate the amount of volume that must be decoded.
      * See `spacetime_volume()` below.
@@ -68,11 +70,17 @@ struct HistoryEvent
     size_t     volume_decoded{0};
 
     inst_ptr owning_inst{nullptr};
-
     std::vector<qubit_type> qubits;
 
     std::vector<HistoryEvent*> predecessors{},
                                dependent{};
+
+    /*
+     * RAD: we may decide to stop using an inaccurate decoder. If so,
+     * we need to identify how much of the spacetime volume is decoded
+     * erroneously.
+     * */
+    cycle_type erroneous_volume{0};
 
     /*
      * Initialization functions:
@@ -125,6 +133,13 @@ public:
                  code_distance;
     const HistoryRole role;
     const double error_injection_probability;
+
+    uint64_t s_errors_injected{0};
+
+    /*
+     * If this is true, then `HistoryEvent::erroneous_volume` is not updated.
+     * */
+    bool verifier_is_using_accurate_decoder{false};
 private:
     std::unordered_map<qubit_type, HistoryEvent*> front_layer_,
                                                   back_layer_;

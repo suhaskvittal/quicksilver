@@ -466,7 +466,7 @@ if __name__ == '__main__':
 
         print('QUBITIZATION ----------------------------------------------------')
         # hardcode the small ones
-        if output_filename == 'bose_hubbard' or output_filename == 'boron':
+        if output_filename == 'boron':
             qubitization_output_path = make_output_file_path(output_filename, 'q')
             build_qubitization(qubitization_output_path, input_file, key, num_qubits)
         else:

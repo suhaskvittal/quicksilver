@@ -238,6 +238,9 @@ History::decode(cycle_type current_cycle, size_t max_volume)
             }
 
             e->volume_decoded += volume_to_decode;
+            if (!verifier_is_using_accurate_decoder)
+                e->erroneous_volume += volume_to_decode;
+
             if (e->is_fully_decoded())
             {
                 auto f = retire_front_event(q);
@@ -379,17 +382,17 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
             e->owning_inst->rx.verified = true;
     }
 
-    // AI-GENERATED
-    //
-    // Verification role only: the slow decoder has just finished this window.
-    // With probability `error_injection_probability` the fast decoder mis-decoded
-    // it; model that by tainting the T gates the error would reach. Drawn here,
-    // before the dependent graph is torn down below, so `inject_error` can walk it.
+    // randomly inject errors (probability of error scales with spacetime volume)
     if (role == HistoryRole::Verification)
     {
         static std::uniform_real_distribution<double> FPR(0.0, 1.0);
-        if (FPR(sim::GL_RNG) < error_injection_probability)
+        const double p = FPR(sim::GL_RNG),
+                     pth = error_injection_probability*e->erroneous_volume;
+        if (p < pth)
+        {
             inject_error(e);
+            s_errors_injected++;
+        }
     }
 
     // `e` may still be a front here when reached directly by the cascade rather
@@ -440,32 +443,25 @@ History::resolve_event(HistoryEvent* e, std::vector<qubit_type>& freed)
 void
 History::inject_error(HistoryEvent* e)
 {
-    // AI-GENERATED
-    //
-    // A CBM is itself a T gate's measurement, so an error on its window taints
-    // only its owner.
-    if (e->type == HistoryEvent::CondBasisMeas)
+    // find all affected T gates:
+    std::vector<HistoryEvent*> dfs{e};
+    std::unordered_set<HistoryEvent*> visited;
+    while (dfs.size() > 0)
     {
-        if (e->owning_inst != nullptr)
-            e->owning_inst->rx.erroneous = true;
-        return;
-    }
-
-    // Otherwise the error sits on data/ancilla volume that flows forward. Every
-    // CBM reachable along `dependent` edges consumes that corrupted data, so all
-    // of their owning T gates are tainted. A run of T gates on one qubit chains
-    // ppm -> correction -> ppm, so this naturally taints the whole downstream run.
-    std::vector<HistoryEvent*> stack{e};
-    std::unordered_set<HistoryEvent*> visited{e};
-    while (!stack.empty())
-    {
-        auto* x = stack.back();
-        stack.pop_back();
+        auto* x = dfs.back();
+        dfs.pop_back();
+        if (visited.count(x))
+            continue;
+        visited.insert(x);
         if (x->type == HistoryEvent::CondBasisMeas && x->owning_inst != nullptr)
+        {
             x->owning_inst->rx.erroneous = true;
-        for (auto* d : x->dependent)
-            if (visited.insert(d).second)
-                stack.push_back(d);
+        }
+        else
+        {
+            for (auto* y : x->dependent)
+                dfs.push_back(y);
+        }
     }
 }
 

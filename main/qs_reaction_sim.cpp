@@ -48,8 +48,16 @@ main(int argc, char* argv[])
         .optional("", "--rad-reaction-time", "RAD slow decoder reaction time", conf.rad.reaction_time, 100)
         .optional("", "--rad-decoder-count", "RAD slow decoder count", conf.rad.decoder_count, 1024)
         .optional("", "--rad-error-rate", "RAD fast-decoder per-window error probability", conf.rad.fast_decoder_error_probability, 0.0)
+        .optional("", "--rad-rfifo-capacity", "RAD R-FIFO capacity", conf.rad.retired_dag_capacity, 256)
 
         .parse(argc, argv);
+
+    const double fast_decoder_tp = DecoderTraits(conf.code_distance, conf.reaction_time)
+                                        .pwd_throughput(conf.decoder_count);
+    conf.rad.decoder_count = DecoderTraits(conf.code_distance, conf.rad.reaction_time)
+                                .pwd_decoders_required(fast_decoder_tp);
+
+    std::cout << "configured RAD to have " << conf.rad.decoder_count << " decoder\n";
 
     // allocate simulation objects:
     sim::GL_SIM_WALL_START = std::chrono::steady_clock::now();
@@ -85,10 +93,19 @@ main(int argc, char* argv[])
 
     if (GL_RAD_ENABLED)
     {
+        double fr_cycles_locked_to_l2 = fpdiv(driver->rad()->s_cycles_locked_to_l2_decoder, driver->current_cycle()),
+               fr_cycles_stalled = fpdiv(driver->rad()->s_cycles_main_program_stalled, driver->current_cycle());
+
+        driver->rad()->s_retired_dag_occu.dump(std::cout);
+
+        print_stat_line(std::cout, "ERRORS_INJECTED", driver->rad()->history()->s_errors_injected);
         print_stat_line(std::cout, "WRONG_PATHS_DURING_EXECUTION", driver->rad()->s_wrong_paths);
         driver->rad()->s_wrong_path_latency.dump(std::cout);
         driver->rad()->s_wrong_path_inst_count.dump(std::cout);
         driver->rad()->s_qubits_blocked_by_wrong_path.dump(std::cout);
+        driver->rad()->s_wrong_path_recursion_depth.dump(std::cout);
+        print_stat_line(std::cout, "FR_CYCLES_LOCKED_TO_L2_DECODER", fr_cycles_locked_to_l2);
+        print_stat_line(std::cout, "FR_CYCLES_STALLED_BY_WRONG_PATH", fr_cycles_stalled);
     }
 
     print_stat_line(std::cout, "SIM_WALLTIME_S", sim::walltime_s());

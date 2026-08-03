@@ -1,5 +1,5 @@
 /*
- *  author: Suhas Vittal
+ o  author: Suhas Vittal
  *  date:   15 July 2026
  * */
 
@@ -56,6 +56,7 @@ _get_inverse_type(Instruction::Type t)
 RAD::RAD(size_t _program_qubits,
             size_t _decoder_count,
             size_t _code_distance,
+            size_t _retired_dag_capacity,
             DecoderTraits _slow_decoder_traits,
             double _fast_decoder_error_probability)
     :fast_decoder_error_probability(_fast_decoder_error_probability),
@@ -63,14 +64,17 @@ RAD::RAD(size_t _program_qubits,
     program_qubits(_program_qubits),
     decoder_count(_decoder_count),
     code_distance(_code_distance),
+    retired_dag_capacity(_retired_dag_capacity),
     retired_dag_{new DAG(_program_qubits)},
-    wrong_path_dag_{new DAG(_program_qubits)},
     syndrome_history_{new History(_program_qubits,
                                     _slow_decoder_traits.code_distance,
                                     HistoryRole::Verification,
                                     _fast_decoder_error_probability)},
     slow_decoder_next_available_cycle_(0)
 {
+    for (size_t i = 0; i < RECURSION_DEPTH_MAX; i++)
+        wrong_path_dag_array_[i] = dag_ptr{new DAG(program_qubits)};
+
     const double tp = slow_decoder_traits.pwd_throughput(decoder_count);
     if (tp < 1.0)
         std::cerr << "RAD: slow decoder has insufficient throughput: tp = " << tp << " < 1" << _die{};
@@ -98,19 +102,31 @@ RAD::operate(cycle_type c)
     // `Driver::retire_instruction`, which routes `is_non_program_instruction`
     // retires out of `wrong_path_dag_` into `retired_dag_`). Once the wrong path
     // has fully drained, unblock and end wrong-path execution.
-    if (is_executing_wrong_path() && wrong_path_dag_->inst_count() == 0)
+    if (is_executing_wrong_path() && wrong_path_dag()->inst_count() == 0)
     {
-        s_wrong_paths++;
-        s_wrong_path_latency.add(c - wrong_path_start_cycle_);
-        s_wrong_path_inst_count.add(wrong_path_inst_count_);
-        s_qubits_blocked_by_wrong_path.add(wrong_path_blocked_qubits_.size());
+        if (wrong_path_idx_ == 0)
+        {
+            s_wrong_paths++;
+            s_wrong_path_latency.add(c - wrong_path_start_cycle_);
+            s_wrong_path_inst_count.add(wrong_path_inst_count_);
+            s_qubits_blocked_by_wrong_path.add(wrong_path_blocked_qubits_.size());
+            s_wrong_path_recursion_depth.add(wrong_path_max_recursion_depth_+1);
 
-        wrong_path_blocked_qubits_.clear();
-        wrong_path_state_ = WrongPathState::INVALID;
+            wrong_path_blocked_qubits_.clear();
+            wrong_path_state_ = WrongPathState::INVALID;
 
 #if defined(RAD_VERBOSE)
-        std::cout << "wrong path execution complete\n";
+            std::cout << "wrong path execution complete\n";
 #endif
+        }
+        else
+        {
+#if defined(RAD_VERBOSE)
+            std::cout << "wrong path recursion level complete... stepping up one\n";
+#endif
+            wrong_path_idx_--;
+            syndrome_history_->verifier_is_using_accurate_decoder = false;
+        }
     }
 
     // 3. commit instructions and handle any detected errors on non-cliffords
@@ -120,7 +136,30 @@ RAD::operate(cycle_type c)
     if (c >= slow_decoder_next_available_cycle_)
         decode_history(c);
 
+    // stats:
+    s_retired_dag_occu.add(retired_dag_->inst_count());
+    if (stop_using_fast_decoder())
+        s_cycles_locked_to_l2_decoder++;
+    if (stall_main_program() || is_resolving_wrong_path())
+        s_cycles_main_program_stalled++;
+
     return progress;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+RAD::stop_using_fast_decoder() const
+{
+    if (is_waiting_for_fast_decoder_before_resolution())
+    {
+        return (wrong_path_idx_ == RECURSION_DEPTH_MAX-2);
+    }
+    else
+    {
+        return wrong_path_idx_ == RECURSION_DEPTH_MAX-1;
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -233,41 +272,46 @@ RAD::handle_decoding_error(inst_ptr tainted_inst, cycle_type c)
     // if we are executing the wrong path, then handle this case (need to stop wrong path execution)
     if (is_executing_wrong_path() || is_waiting_for_fast_decoder_before_resolution())
     {
-        if (wrong_path_incomplete_.size() > 0)
-            std::cerr << "RAD::handle_decoding_error: expected wrong_path_incomplete_ to be empty" << _die{};
-        // move all pending instructions in `wrong_path_dag_` into `wrong_path_incomplete_`
+        // finish up any instructions in `wrong_path_dag_`
         bool any_unretired{false};
-        wrong_path_incomplete_.reserve(wrong_path_dag_->inst_count());
-        wrong_path_dag_->for_each_instruction_in_layer_order(
+        wrong_path_dag()->for_each_instruction_in_layer_order(
                                     0,
                                     std::numeric_limits<size_t>::max(),
                                     [this, &any_unretired] (auto* inst, auto)
                                     {
-                                        wrong_path_incomplete_.push_back(inst);
                                         any_unretired |= inst->rx.executed && !inst->rx.retireable;
                                     });
         if (any_unretired)
         {
             wrong_path_state_ = WrongPathState::TRANSIENT;
-            wrong_path_incomplete_.clear();
             return false;
         }
 
 #if defined(RAD_VERBOSE)
-        std::cout << "got error while executing wrong path (inst left = " << wrong_path_dag_->inst_count() << ")\n"; 
+        std::cout << "got error while executing wrong path (inst left = " 
+                    << wrong_path_dag()->inst_count() << ")\n"; 
 #endif
 
-        // then clear `wrong_path_dag_` (do not free instructions)
-        wrong_path_dag_->clear(false);
+        wrong_path_idx_++;
+        wrong_path_max_recursion_depth_ = std::max(wrong_path_idx_, wrong_path_max_recursion_depth_);
+#if defined(RAD_VERBOSE)
+        std::cout << "\t@ recursion depth = " << wrong_path_idx_ << "\n";
+#endif
+
+        if (wrong_path_idx_ >= RECURSION_DEPTH_MAX)
+            std::cerr << "unexpected: exceeded max alloted recursion depth for wrong path recovery" << _die{};
+
+        // start using slow decoder for all decodes (no errors on new instructions):
+        if (wrong_path_idx_ == RECURSION_DEPTH_MAX-1)
+            syndrome_history_->verifier_is_using_accurate_decoder = true;
     }
 
     // 1. set wrong path resolution signal
-#if defined(RAD_VERBOSE)
-    if (!is_resolving_wrong_path())
-        std::cout << "starting wrong path resolution\n";;
-#endif
     if (wrong_path_state_ == WrongPathState::INVALID)
     {
+#if defined(RAD_VERBOSE)
+        std::cout << "starting wrong path resolution\n";;
+#endif
         wrong_path_start_cycle_ = c;
         wrong_path_inst_count_ = 0;  // reset to `0`: this is later set in `initialize_wrong_path`
     }
@@ -315,19 +359,15 @@ RAD::initialize_wrong_path()
     wrong_path_uncomp_.clear();
     wrong_path_recomp_.clear();
 
-    // after adding the uncomputation + recomputation, add all of `wrong_path_incomplete_`
-    std::move(wrong_path_incomplete_.begin(), wrong_path_incomplete_.end(), std::back_inserter(wp_inst));
-    wrong_path_incomplete_.clear();
-
     for (auto* inst : wp_inst)
     {
         // signal that this is from the wrong path so we update stats
         inst->rx.is_non_program_instruction = true;
-        wrong_path_dag_->add_instruction(inst);
+        wrong_path_dag()->add_instruction(inst);
     }
 
 #if defined(RAD_VERBOSE)
-    std::cout << "entered wrong path execution, inst in wrong path = " << wrong_path_dag_->inst_count() 
+    std::cout << "entered wrong path execution, inst in wrong path = " << wrong_path_dag()->inst_count() 
                 << ", blocked = " << wrong_path_blocked_qubits_.size() 
                 << "\n";
 #endif

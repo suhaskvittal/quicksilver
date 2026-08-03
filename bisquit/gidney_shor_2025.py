@@ -109,14 +109,24 @@ def _loop1_adder(q_dlog: str,
             out += str(GATE('cx').operand(q_dlog_partial_sum, 0).operand(q_dlog, 0)) \
                     + str(GATE('cx').operand(q_dlog_delta, 0).operand(q_dlog, 0))
         else:
+            # XOR both addends with previous sum qubit ( ai + si ) * ( bi + si )
             for qr in [q_dlog_partial_sum, q_dlog_delta]:
-                out += str(GATE('cx').operand(q_dlog_partial_sum, i-1).operand(q_dlog, i-1))
+                out += str(GATE('cx').operand(q_dlog, i-1).operand(qr, i-1))
+
+            # do AND between both addends (product in previous comment)
             out += str(GATE('ccx').operand(q_dlog_partial_sum, i-1).operand(q_dlog_delta, i-1).operand(q_dlog, i))
+
+            # two steps: we need to undo XOR between addends and previous sum qubit and also XOR with
+            # current sum qubit
             for qr in [q_dlog_partial_sum, q_dlog_delta]:
-                out += str(GATE('cx').operand(q_dlog_partial_sum, i-1).operand(q_dlog, i-1))
+                # undo 
+                out += str(GATE('cx').operand(q_dlog, i-1).operand(qr, i-1))
+                # XOR
                 for j in [i-1, i]:
                     out += str(GATE('cx').operand(qr, j).operand(q_dlog, i))
-            out += str(GATE('cx').operand(q_dlog, i-1))
+            # XOR previous sum qubit with new sum qubit
+            out += str(GATE('cx').operand(q_dlog, i-1).operand(q_dlog, i))
+
     # uncompute partial sum
     for i in range(q_dlog_w):
         out += str(GATE('mx').operand(q_dlog_partial_sum, i))
@@ -799,8 +809,10 @@ if __name__ == '__main__':
     m = 1280
 
     # read text file containing residue primes:
+    MAX_PRIMES = 256
     with open('bisquit/residue_primes_21.txt', 'r') as rd:
         residue_primes = [ int(ln) for ln in rd.readlines() ]
+        residue_primes = residue_primes[:MAX_PRIMES]
     print(f'Found {len(residue_primes)} residue primes')
     total_primes_required = int( (n*m) / (ell*w1) )
 
@@ -824,7 +836,7 @@ if __name__ == '__main__':
     with open(output_file, 'w') as wr:
         # preamble:
         wr.write(f'''OPENQASM 2.0;
-`include "qelib1.inc"
+`include "qelib1.inc";
 
 qreg {Q_EXPONENT}[{m}];
 
@@ -836,8 +848,8 @@ qreg {Q_RESIDUE}[{ell+1}];
 
 qreg {UIT_ANC}[{w1}];
 qreg {CARRY_ANC}[{f+1}];
-qreg {LOOKUP_ANC}[{ell+1}];   # provision for largest lookup
-qreg {LOOKUP2_ANC}[{ell+1}];  # provision for largest lookup
+qreg {LOOKUP_ANC}[{ell+1}];
+qreg {LOOKUP2_ANC}[{ell+1}];
 qreg {LOOP3_HELPER}[{ell+1}];
 qreg {LOOP4_CMP_ANC}[{f+1}];
 

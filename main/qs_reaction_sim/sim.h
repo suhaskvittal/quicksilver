@@ -66,6 +66,7 @@ public:
             double  reaction_time;
             int64_t decoder_count;
             double  fast_decoder_error_probability;
+            int64_t retired_dag_capacity;
         } rad;
     };
 
