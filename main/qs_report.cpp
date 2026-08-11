@@ -62,18 +62,12 @@ int main(int argc, char* argv[])
         if (inst_count % print_progress == 0)
             std::cout << "progress: " << inst_count << " instructions read\n";
 
-<<<<<<< HEAD
         Instruction* inst = read_instruction_from_stream(istrm);
-        if (inst == nullptr)
-            break;
-=======
-        INSTRUCTION* inst = read_instruction_from_stream(istrm);
         if (generic_strm_eof(istrm))
         {
             delete inst;
             break;
         }
->>>>>>> hint_micro2026
 
         inst_count++;
         if (is_software_instruction(inst->type))
@@ -189,6 +183,6 @@ int main(int argc, char* argv[])
     // instruction-level parallelism = mean compute instructions per DAG layer
     print_stat_line(std::cout, "COMPUTE_INST_COUNT", compute_inst_count);
     print_stat_line(std::cout, "DAG_LAYERS",         num_layers);
-    print_stat_line(std::cout, "MEAN_ILP",           mean(compute_inst_count, num_layers));
+    print_stat_line(std::cout, "MEAN_ILP",           fpdiv(compute_inst_count, num_layers));
 }
 

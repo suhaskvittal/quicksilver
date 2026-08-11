@@ -15,7 +15,7 @@ namespace memory_scheduler
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-result_type
+Result
 transform_active_set(const active_set_type& current, const active_set_type& target, std::vector<double> scores)
 {
     Result out{};

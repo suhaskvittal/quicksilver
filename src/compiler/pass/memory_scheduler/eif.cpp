@@ -53,15 +53,15 @@ eif(const active_set_type& active_set, const dag_ptr& dag, Config conf)
 
     std::vector<double> scores(dag->qubit_count, 0.0);
     dag->for_each_instruction_in_layer_order(
-            [&scores, &target_active_set] (auto* inst)
+            0,
+            conf.eif_lookahead_depth,
+            [&scores, &target_active_set] (auto* inst, size_t)
             {
                 size_t in_target = std::count_if(inst->q_begin(), inst->q_end(),
                                         [&target_active_set] (qubit_type q) { return target_active_set.count(q) > 0; });
-                std::for_each(inst->q_begin(), inst->q_end(), 
+                std::for_each(inst->q_begin(), inst->q_end(),
                         [&scores, x= in_target] (auto q) { return scores[q] += x; });
-            },
-            0,
-            conf.eif_lookahead_depth);
+            });
 
     return transform_active_set(active_set, target_active_set, scores);
 }

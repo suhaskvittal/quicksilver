@@ -129,9 +129,7 @@ struct Result
  * The user can also supply an array of scores. Qubits with higher
  * scores are prioritized for eviction.
  * */
-result_type transform_active_set(const active_set_type& current,
-                                 const active_set_type& target,
-                                 std::vector<double> scores);
+Result transform_active_set(const active_set_type& current, const active_set_type& target, std::vector<double> scores);
 
 /*
  * Returns true if all of the instruction's args are in `active_set`
