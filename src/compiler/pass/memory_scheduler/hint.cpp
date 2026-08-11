@@ -124,10 +124,28 @@ hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
             [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); }
     );
 
+    // compute active set
     active_set_type best_active_set = conf.hint_use_complex_selection
                                         ? _cst_find_best_active_set_complex(entry_points, conf.active_set_capacity)
                                         : _cst_find_best_active_set_simple(entry_points);
-    auto out = transform_active_set(active_set, best_active_set);
+
+    // compute eviction scores for each qubit using `best_active_set`
+    std::vector<double> scores(dag->qubit_count, 0.0);
+    if (conf.hint_use_nonarbitrary_victim_selection)
+    {
+        for (auto q : best_active_set)
+        {
+            auto* node = entry_points[q];
+            while (node != nullptr)
+            {
+                for (auto x : node->qubits)
+                    scores[x] += 1.0;
+                node = node->child;
+            }
+        }
+    }
+
+    auto out = transform_active_set(active_set, best_active_set, scores);
 
     _cst_free(std::move(entry_points));
     return out;

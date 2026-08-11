@@ -32,6 +32,9 @@ def memory_scheduler_exe() -> str:
 def quicksilver_exe() -> str:
     return './build/quicksilver'
 
+def memory_optimality_exe() -> str:
+    return './build/qs_memory_optimality'
+
 ##############################################
 ##############################################
 
@@ -105,6 +108,28 @@ def run_memory_scheduler(workload_file_path: str,
           + f' -pp {print_progress}'\
           + f' --dag-capacity {dag_capacity}'\
           + f' -s {scheduler_id}'
+    if kwargs is not None:
+        cmd = join_command_line_args(cmd, kwargs)
+    cmd = f'{cmd} &> {stats_path}'
+    print(cmd)
+    return cmd
+
+
+def run_memory_optimality(workload_file_path: str,
+                          project: str,
+                          policy: str,
+                          active_set_capacity=12,
+                          inst_limit=100,
+                          kwargs=None
+) -> str:
+    w = get_workload_name(workload_file_path)
+
+    stats_folder_path = get_compiler_stats_folder_path(project, policy)
+    stats_path = f'{stats_folder_path}/{w}.out'
+
+    cmd = f'{memory_optimality_exe()} {workload_file_path}'\
+          + f' -c {active_set_capacity}'\
+          + f' -i {inst_limit}'
     if kwargs is not None:
         cmd = join_command_line_args(cmd, kwargs)
     cmd = f'{cmd} &> {stats_path}'

@@ -8,6 +8,8 @@
 #include "sim/configuration/resource_estimation.h"
 #include "sim.h"
 
+//#define LOG_INST
+
 namespace sim
 {
 

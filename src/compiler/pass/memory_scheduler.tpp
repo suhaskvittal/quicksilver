@@ -38,6 +38,9 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
         // try to fill up the DAG during every iteration
         io.read_instructions(dag.get(), conf.dag_inst_capacity);
 
+        if (generic_strm_eof(istrm) && dag->inst_count() == 0)
+            break;
+
         // try to complete as many instructions as possible using the `active_set`
         auto completable = dag->get_front_layer_if(
                                 [&active_set] (auto* inst) { return instruction_is_ready(inst, active_set); });
@@ -60,7 +63,10 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
             {
                 io.write_instruction(inst);
                 dag->remove_instruction_from_front_layer(inst);
-                inst_done += inst->uop_count();
+                if (conf.count_whole_instructions)
+                    inst_done++;
+                else
+                    inst_done += inst->uop_count();
             }
         }
 

@@ -329,3 +329,55 @@ endif()
 
 ###################################################
 ###################################################
+
+# Memory scheduler optimality study (qs_memory_optimality)
+#
+# Truncates a trace, runs EIF/HINT on it, and computes the memory-access-optimal
+# baseline via OR-Tools CP-SAT (run_ilp_optimal).
+#
+# Gated behind COMPILE_ILP_OPT because the first configure fetches and builds
+# OR-Tools (+ abseil/protobuf/re2) from source. Building from source (rather
+# than prebuilt binaries) compiles everything with this project's toolchain,
+# which avoids ABI mismatches with the local GCC.
+#
+#   cmake -DCOMPILE_ILP_OPT=ON -S . -B build
+
+option(COMPILE_ILP_OPT "Build the CP-SAT optimal memory scheduler (requires OR-Tools)" OFF)
+
+if (COMPILE_ILP_OPT)
+    include(FetchContent)
+
+    # Fetch+build OR-Tools' own deps (abseil, protobuf, re2, ...).
+    set(BUILD_DEPS     ON  CACHE BOOL "" FORCE)
+    set(BUILD_SAMPLES  OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING  OFF CACHE BOOL "" FORCE)
+
+    # CP-SAT needs none of the MILP backends. Disabling them is faster *and*
+    # avoids compiling the older COIN-OR/SCIP/HiGHS sources with a bleeding-edge
+    # GCC. Flip any of these ON if you later want the MPSolver linear interface.
+    set(USE_SCIP   OFF CACHE BOOL "" FORCE)
+    set(USE_COINOR OFF CACHE BOOL "" FORCE)
+    set(USE_HIGHS  OFF CACHE BOOL "" FORCE)
+    set(USE_GLPK   OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(or-tools
+        GIT_REPOSITORY https://github.com/google/or-tools.git
+        GIT_TAG        v9.11        # bump to the latest stable tag as desired
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(or-tools)
+
+    add_executable(qs_memory_optimality main/qs_memory_optimality.cpp
+                                        src/compiler/pass/memory_scheduler.cpp
+                                        src/compiler/pass/memory_scheduler/eif.cpp
+                                        src/compiler/pass/memory_scheduler/hint.cpp)
+    target_include_directories(qs_memory_optimality PRIVATE "src")
+    # Intentionally omit ${COMPILE_OPTIONS} (LTO/-march=native) here: the driver
+    # is not hot (the solve happens inside OR-Tools, already optimized), and it
+    # keeps linking against the in-tree OR-Tools objects simple.
+    target_compile_options(qs_memory_optimality PRIVATE ${COMPILE_OPTIONS})
+    target_link_libraries(qs_memory_optimality PRIVATE qs_common ortools::ortools)
+endif()
+
+###################################################
+###################################################

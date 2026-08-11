@@ -49,9 +49,16 @@ struct Config
     int64_t dag_inst_capacity{8192};
     bool    verbose{false};
 
-    /* Policy specific parameters */
+    /* EIF specific parameters */
+    int64_t eif_lookahead_depth{0};
+
+    /* HINT specific parameters */
     int64_t hint_lookahead_depth{16};
     bool    hint_use_complex_selection{true};
+    bool    hint_use_nonarbitrary_victim_selection{false};
+
+    /* Other */
+    bool count_whole_instructions{false};
 };
 
 /*
@@ -118,8 +125,13 @@ struct Result
  * Typically, a memory scheduler will identify *what* it wants
  * in the active set. This function converts between the
  * current active set and desired active set.
+ *
+ * The user can also supply an array of scores. Qubits with higher
+ * scores are prioritized for eviction.
  * */
-Result transform_active_set(const active_set_type& current, const active_set_type& target);
+result_type transform_active_set(const active_set_type& current,
+                                 const active_set_type& target,
+                                 std::vector<double> scores);
 
 /*
  * Returns true if all of the instruction's args are in `active_set`

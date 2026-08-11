@@ -1,6 +1,8 @@
 QASMBench/
 
 build/
+build_ilp/
+build-ilp/
 Release/
 Debug/
 Asan/
@@ -27,3 +29,5 @@ test.qasm
 plots/
 
 .claude.todo
+
+__pycache__

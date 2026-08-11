@@ -90,6 +90,14 @@ constexpr client_id_type RDR_CLIENT_ID{-47};
 extern bool GL_ELIDE_CLIFFORDS;
 extern bool GL_ZERO_LATENCY_T_GATES;
 
+/*
+ * Disables every memory-subsystem resource overhead -- EPR distillation supply,
+ * storage adapters, and routing bandwidth -- while preserving the raw memory
+ * access latency. Lets you isolate how much of the slowdown is the access
+ * latency itself versus contention for those resources.
+ * */
+extern bool GL_MEMORY_IDEAL_RESOURCES;
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
