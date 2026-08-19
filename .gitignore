@@ -15,6 +15,7 @@ bisquit/qasm/*
 bisquit/hamlib/*
 
 *.out
+*.html
 
 out/
 
