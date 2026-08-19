@@ -111,11 +111,8 @@ Instruction::Instruction(const Instruction& other)
     number(other.number),
     cycle_done(other.cycle_done),
     deletable(other.deletable),
-    first_ready_cycle(other.first_ready_cycle),
-    first_ready_cycle_for_current_uop(other.first_ready_cycle_for_current_uop),
-    first_cycle_with_all_load_results_available(other.first_cycle_with_all_load_results_available),
-    first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
+    stall_data(other.stall_data),
     rdr(other.rdr),
     current_uop_(other.current_uop_ ? new Instruction(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)

@@ -65,6 +65,7 @@ public:
     virtual void print_deadlock_info(std::ostream&) const {}
 
     cycle_type current_cycle() const { return current_cycle_; }
+    cycle_type cycles_with_no_progress() const { return cycles_with_no_progress_; }
 protected:
     /* 
      * This is what the descendant should implement.

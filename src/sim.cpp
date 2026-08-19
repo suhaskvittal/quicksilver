@@ -95,7 +95,7 @@ walltime_s()
 void
 print_sim_stats(std::ostream& out, Driver* d)
 {
-    using Stall = Driver::Stall;
+    using StallType = Driver::StallType;
 
     uint64_t cx_gates{0};
     uint64_t t_gates{0};
@@ -111,9 +111,9 @@ print_sim_stats(std::ostream& out, Driver* d)
     print_stat_line(out, "T_GATES_EXECUTED", t_gates);
     print_stat_line(out, "T_CONSUMPTION_RATE_PER_S", t_consumption_rate_per_s);
 
-    print_stat_line(out, "ISOLATED_MEMORY_STALLS", d->stall_monitor().isolated_stalls_for(Stall::MEMORY));
-    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(Stall::MAGIC_STATE));
-    print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(Stall::EPR));
+    print_stat_line(out, "ISOLATED_MEMORY_STALLS", d->stall_monitor().isolated_stalls_for(StallType::MEMORY));
+    print_stat_line(out, "ISOLATED_MAGIC_STATE_STALLS", d->stall_monitor().isolated_stalls_for(StallType::MAGIC_STATE));
+    print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(StallType::EPR));
     print_stat_line(out, "TOTAL_STALLS", d->stall_monitor().cycles_with_stalls());
 
     if (GL_RDR_ENABLED)

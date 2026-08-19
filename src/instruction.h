@@ -136,7 +136,8 @@ public:
      * them and can change them at will:
      * */
     int64_t  number{INVALID_NUMBER};
-    uint64_t cycle_done{std::numeric_limits<uint64_t>::max()};
+    cycle_type first_ready_cycle{std::numeric_limits<uint64_t>::max()},
+               cycle_done{std::numeric_limits<uint64_t>::max()};
 
     /*
      * Other exposed variables that may be useful:
@@ -161,12 +162,15 @@ public:
      * */
     bool deletable{false};
 
-    std::optional<cycle_type> first_ready_cycle{};
-    std::optional<cycle_type> first_ready_cycle_for_current_uop{};
-    std::optional<cycle_type> first_cycle_with_all_load_results_available{};
-    std::optional<cycle_type> first_cycle_with_available_resource_state{};
-
     uint64_t original_unrolled_inst_count{};
+
+    /* Stall information */
+    struct
+    {
+        std::optional<cycle_type> ready,
+                                  all_load_results_avail,
+                                  resource_avail;
+    } stall_data;
 
     /* Rotation-Directed Runahead state variables */
     struct

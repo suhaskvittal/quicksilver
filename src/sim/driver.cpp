@@ -41,6 +41,9 @@ bool _current_uop_is_t_like(inst_ptr);
 template <class T>
 void _assign_if_empty(std::optional<T>&, T);
 
+template <class T, class F>
+void _assign_if_empty(std::optional<T>&, const F&);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -191,6 +194,47 @@ Driver::done() const
         all_done &= d;
     }
     return all_done;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+std::optional<cycle_type>
+Driver::skip_to_cycle() const
+{
+    // check that all factories cannot do anything
+    const bool all_fact_stuck = std::all_of(t_factories_.begin(), t_factories_.end(),
+                                    [] (const auto* f) { return f->buffer_occupancy() >= f->buffer_capacity; });
+
+    const bool ok_to_skip = all_fact_stuck
+                            && !GL_RDR_ENABLED;
+    if (ok_to_skip)
+    {
+        cycle_type earliest_cycle = std::numeric_limits<cycle_type>::max();
+
+        std::vector<Qubit*> operands;
+        operands.reserve(3);
+        for (auto* c : active_clients_)
+        {
+            auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
+            for (auto* inst : front_layer)
+            {
+                auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
+                operands.clear();
+                std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
+                        [&c] (auto q_id) { return c->qubits()[q_id]; });
+                if (!is_instruction_ready(executed_inst, operands))
+                    continue;
+                cycle_type ready_cycle{0};
+                for (auto* q : operands)
+                    ready_cycle = std::max(ready_cycle, q->cycle_available);
+                earliest_cycle = std::min(earliest_cycle, ready_cycle);
+            }
+        }
+        if (earliest_cycle > current_cycle())
+            return std::make_optional(earliest_cycle);
+    }
+    return std::nullopt;
 }
 
 ////////////////////////////////////////////////////////////
@@ -405,7 +449,10 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
     auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
     std::sort(front_layer.begin(), front_layer.end(),
             [] (const auto* a, const auto* b) { return a->number < b->number; });
-    std::vector<Qubit*> operands(3);
+
+    std::vector<Qubit*> operands;
+    operands.reserve(3);
+
     long success_count{0};
     for (auto* inst : front_layer)
     {
@@ -418,8 +465,9 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
         }
 
         // translate the operands of the instruction into the actual program qubits
+        operands.clear();
         auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-        std::transform(executed_inst->q_begin(), executed_inst->q_end(), operands.begin(),
+        std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
                 [&c] (auto q_id) { return c->qubits()[q_id]; });
 
         // check if the operands are ready:
@@ -427,7 +475,13 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
             continue;
 
         // update stats:
-        update_instruction_stats_on_fetch(inst, operands);
+        inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
+        update_instruction_stats_on_fetch(executed_inst, operands);
+
+        const bool are_operands_ready = std::all_of(operands.begin(), operands.end(),
+                                            [c=current_cycle()] (const auto& q) { return c >= q->cycle_available; });
+        if (!are_operands_ready)
+            continue;
 
         /* RDR logic: first check if the rotation's magic state is already available    *
          * if so, then try and apply the magic state                                    */
@@ -452,7 +506,7 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
             success_count += result.progress;
             if (result.progress)
             {
-                update_instruction_stats_before_retire(inst);
+                update_instruction_stats_before_retire(executed_inst);
                 if (inst->uop_count() == 0 || inst->retire_current_uop())
                     retire_instruction(c, inst, result.latency);
             }
@@ -471,34 +525,31 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
 void
 Driver::update_instruction_stats_on_fetch(inst_ptr inst, const std::vector<Qubit*>& operands)
 {
-    _assign_if_empty(inst->first_ready_cycle, current_cycle());
-    _assign_if_empty(inst->first_ready_cycle_for_current_uop, current_cycle());
-
-    const size_t qubit_count = (inst->uop_count() > 0) ? inst->current_uop()->qubit_count : inst->qubit_count;
-
-    if (!inst->first_cycle_with_all_load_results_available.has_value())
-    {
-        cycle_type latest_load_result_cycle{current_cycle()};
-        for (size_t i = 0; i < qubit_count; i++)
-            if (operands[i]->last_operation_was_memory_access)
-                latest_load_result_cycle = std::max(operands[i]->cycle_available, latest_load_result_cycle);
-        inst->first_cycle_with_all_load_results_available = latest_load_result_cycle;
-    }
-    
-    if (!inst->first_cycle_with_available_resource_state.has_value())
-    {
-        if (_current_uop_is_t_like(inst))
-        {
-            bool any_magic_state_avail = std::any_of(t_factories_.begin(), t_factories_.end(),
-                                                     [] (const auto* f) { return f->buffer_occupancy() > 0; });
-            if (any_magic_state_avail)
-                _assign_if_empty(inst->first_cycle_with_available_resource_state, current_cycle());
-        }
-        else
-        {
-            inst->first_cycle_with_available_resource_state = current_cycle();
-        }
-    }
+    _assign_if_empty(inst->stall_data.ready, current_cycle());
+    _assign_if_empty(inst->stall_data.all_load_results_avail,
+                    [this, &operands] ()
+                    {
+                        cycle_type latest = current_cycle();
+                        for (size_t i = 0; i < operands.size(); i++)
+                            if (operands[i]->last_operation_was_memory_access)
+                                latest = std::max(latest, operands[i]->cycle_available);
+                        return std::make_optional(latest);
+                    });
+    _assign_if_empty(inst->stall_data.resource_avail,
+                    [this, t=inst->type] ()
+                    {
+                        if (is_t_like_instruction(t))
+                        {
+                            if (compute_subsystem_->count_available_magic_states() > 0)
+                                return std::make_optional(current_cycle());
+                            else
+                                return std::optional<cycle_type>{};
+                        }
+                        else
+                        {
+                            return std::make_optional(current_cycle());
+                        }
+                    });
 }
 
 ////////////////////////////////////////////////////////////
@@ -507,18 +558,13 @@ Driver::update_instruction_stats_on_fetch(inst_ptr inst, const std::vector<Qubit
 void
 Driver::update_instruction_stats_before_retire(inst_ptr inst)
 {
-    cycle_type s = *inst->first_ready_cycle_for_current_uop,
-               x = *inst->first_cycle_with_all_load_results_available,
-               y = *inst->first_cycle_with_available_resource_state;
+    cycle_type s = *inst->stall_data.ready,
+               x = *inst->stall_data.all_load_results_avail,
+               y = *inst->stall_data.resource_avail;
 
-    stall_monitor_.add_stall_range(Stall::MEMORY, s, x, false);
+    stall_monitor_.add_stall_range(StallType::MEMORY, s, x, false);
     if (is_t_like_instruction(inst->type))
-        stall_monitor_.add_stall_range(Stall::MAGIC_STATE, s, y, false);
-
-    // reset any stats:
-    inst->first_ready_cycle_for_current_uop.reset();
-    inst->first_cycle_with_all_load_results_available.reset();
-    inst->first_cycle_with_available_resource_state.reset();
+        stall_monitor_.add_stall_range(StallType::MAGIC_STATE, s, y, false);
 }
 
 ////////////////////////////////////////////////////////////
@@ -529,8 +575,8 @@ Driver::is_instruction_ready(inst_ptr inst, const std::vector<Qubit*>& operands)
 {
     auto begin = operands.begin(),
          end = operands.begin() + inst->qubit_count;
-    bool all_available = std::all_of(begin, end,
-                                [this] (const auto* q) { return q->cycle_available <= current_cycle(); });
+    bool all_available = true; //std::all_of(begin, end,
+                               //[this] (const auto* q) { return q->cycle_available <= current_cycle(); });
 
     if (inst->type == Instruction::Type::COUPLED_LOAD_STORE)
     {
@@ -619,6 +665,17 @@ _assign_if_empty(std::optional<T>& x, T y)
 {
     if (!x.has_value())
         x = y;
+}
+
+template <class T, class F> void
+_assign_if_empty(std::optional<T>& x, const F& fn)
+{
+    if (!x.has_value())
+    {
+        auto y = fn();
+        if (y.has_value())
+            x = *y;
+    }
 }
 
 } // anon

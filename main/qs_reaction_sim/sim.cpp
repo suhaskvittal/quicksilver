@@ -413,7 +413,7 @@ Driver::handle_routing(inst_ptr inst)
 void
 Driver::update_stats(inst_ptr inst)
 {
-    auto latency = (current_cycle() - *inst->first_ready_cycle);
+    auto latency = (current_cycle() - inst->first_ready_cycle);
     if (is_t_like_instruction(inst->type))
     {
         s_t_latency.add(latency);

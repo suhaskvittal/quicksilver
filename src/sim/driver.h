@@ -44,8 +44,8 @@ public:
      *      to add to this type if you want new stats.
      *  `StallMonitor` tracks where these stalls occur.
      * */
-    enum class Stall { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
-    using stall_monitor_type = StallMonitor<static_cast<size_t>(Stall::SIZE), Stall>;
+    enum class StallType { MEMORY, MAGIC_STATE, EPR, RDR, SIZE };
+    using stall_monitor_type = StallMonitor<static_cast<size_t>(StallType::SIZE), StallType>;
 
     /*
      * Fidelity output type
@@ -124,6 +124,16 @@ public:
     void print_deadlock_info(std::ostream&) const override;
 
     bool done() const;
+
+    /*
+     * In simulations where memory access latency dominates, use
+     * `skip_to_cycle()` to jump to a point where a memory access
+     * has completed.
+     * 
+     * Whenever you add something, make sure `skip_to_cycle()` remains
+     * valid (or disable it).
+     * */
+    std::optional<cycle_type> skip_to_cycle() const;
 
     /*
      * This function should be called at the end of the simulation to cleanup any

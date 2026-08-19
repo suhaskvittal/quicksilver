@@ -69,7 +69,7 @@ Client::warmup_dag(size_t s)
 void
 Client::retire_instruction(inst_ptr inst)
 {
-    cycle_type inst_latency = inst->cycle_done - *inst->first_ready_cycle;
+    cycle_type inst_latency = inst->cycle_done - inst->first_ready_cycle;
 
     if (is_memory_access(inst->type))
     {

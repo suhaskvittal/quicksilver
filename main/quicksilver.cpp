@@ -85,6 +85,7 @@ main(int argc, char* argv[])
     int64_t print_progress;
     int64_t ratemode;
     int64_t skip_threshold;
+    bool    skip_verbose;
     bool    jit;
     std::string regime;
     int64_t total_inst;
@@ -107,7 +108,9 @@ main(int argc, char* argv[])
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
-        .optional("", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
+        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
+        .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
+
         .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
         .optional("", "--regime", 
                     "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
@@ -272,17 +275,23 @@ main(int argc, char* argv[])
             x->tick();
 
         // check if we should do a skip:
-        /*
-        if (compute_subsystem->cycles_without_progress > skip_threshold)
+        if (skip_threshold > 0 && driver->cycles_with_no_progress() >= skip_threshold)
         {
-            auto skip = compute_subsystem->skip_to_cycle();
-            if (skip.has_value() && compute_subsystem->current_cycle() < *skip)
+            auto skip = driver->skip_to_cycle();
+            if (skip.has_value())
             {
-                uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, compute_subsystem->freq_khz);
+                if (skip_verbose)
+                {
+                    std::cout << "==== ALERT ====\n"
+                                << "simulation has skipped to cycle " << *skip << ", was = " << driver->current_cycle() 
+                                << ", delta = " << (*skip - driver->current_cycle())
+                                << "\n";
+                }
+                
+                uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, driver->freq_khz);
                 sim::fast_forward_all_operables_to_time_ns(all_operables, skip_time_ns);
             }
         }
-        */
     }
     while (!driver->done());
     driver->stop_simulation();
