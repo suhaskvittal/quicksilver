@@ -258,6 +258,16 @@ target_link_libraries(qs_report PRIVATE qs_common)
 ###################################################
 ###################################################
 
+# V-gate (Clifford+V) synthesis reduction estimate (qs_v_synthesis_estimate)
+
+add_executable(qs_v_synthesis_estimate main/qs_v_synthesis_estimate.cpp)
+target_include_directories(qs_v_synthesis_estimate PRIVATE "src")
+target_compile_options(qs_v_synthesis_estimate PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_v_synthesis_estimate PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Synthetic single-qubit T benchmark generator (qs_generate_synthetic_t_benchmark)
 
 add_executable(qs_generate_synthetic_t_benchmark main/qs_generate_synthetic_t_benchmark.cpp)

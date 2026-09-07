@@ -17,54 +17,122 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ProducerBase::ProducerBase(std::string_view name,
-                                double freq_khz,
-                                double _output_error_probability,
-                                size_t _buffer_capacity,
-                                size_t _input_count,
-                                size_t _output_count)
-    :Operable(name, freq_khz),
-    output_error_probability(_output_error_probability),
-    buffer_capacity(_buffer_capacity),
-    input_count(_input_count),
-    output_count(_output_count)
+namespace
 {
-    if (output_count > buffer_capacity)
+
+using level_type = BulkProducer::level_type;
+using event_type = BulkProducer::level_type::event_type;
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+level_type::level_type(ProducerQuantum q, size_t n)
+    :traits{q},
+    producer_count{n},
+    unified_buffer_occupancy{0},
+    unified_buffer_capacity{ n * q.buffer_size },
+    next_available_cycle(n, 0)
+{}
+
+bool
+level_type::pop_event(cycle_type c)
+{
+    if (event_queue.front() < c)
     {
-        std::cerr << "in instantiation of ProducerBase " << name << ": buffer capacity cannot"
-                    << " hold all output resource states." << _die{};
+        event_queue.pop_front();
+        lvl.unified_buffer_occupancy++;
+        return true;
+    }
+    else
+    {
+        return false;
     }
 }
 
-void
-ProducerBase::consume(size_t count)
-{
-    assert(count <= buffer_occupancy_);
-    buffer_occupancy_ -= count;
-    s_consumed += count;
-}
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
-void
-ProducerBase::print_deadlock_info(std::ostream& out) const
-{
-    out << name << ": buffer occupancy = " << buffer_occupancy_ << " of " << buffer_capacity << "\n";
-}
+BulkProducer::BulkProducer(std::string_view name, double freq_khz)
+    :Operable(name, freq_khz)
+{}
 
 long
-ProducerBase::operate()
+BulkProducer::operate()
 {
-    if (buffer_occupancy_ + output_count > buffer_capacity || production_step())
-        return 1;
-    else 
-        return 0;
+    long progress{};
+    for (ssize_t i = levels_.size()-1; i >= 0; i++)
+    {
+        auto& lvl = levels_[i];
+        progress += handle_resource_completions(lvl, i);
+        progress += handle_resource_initiations(lvl, i);
+    }
+    return progress;
 }
 
 void
-ProducerBase::install_resource_states()
+BulkProducer::add_level(ProducerQuantum q, size_t n)
 {
-    assert(buffer_occupancy_ + output_count <= buffer_capacity);
-    buffer_occupancy_ += output_count;
+    if (levels_.size() > 0 && levels_.back().traits.resource != q.resource)
+        std::cerr << "BulkProducer::add_level(): tried to mix resources" << _die{};
+    levels_.push_bacK(level_type(q, n));
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+long
+BulkProducer::handle_resource_completions(level_type& lvl, ssize_t i)
+{
+    // assumption: cycles are ordered
+    long progress{0};
+    while (lvl.occupancy_remaining() > 0 && lvl.event_queue.size() > 0)
+    {
+        if (lvl.pop_event(current_cycle()))
+            progress++;
+        else
+            break;
+    }
+    return progress;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+long
+BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
+{
+    long progress{0};
+    for (size_t j = 0; j < producer_count; j++)
+    {
+        if (i > 0 && levels_[i-1].unified_buffer_occupancy < lvl.traits.d_input_states)
+            break;
+
+        if (lvl.next_available_cycle[j] > current_cycle())
+            continue;
+
+        cycle_type ready_cycle = current_cycle() + lvl.cycles_per_production;
+        if (lvl.is_distiller)
+        {
+            if (i > 0)
+                levels_[i-1].unified_buffer_occupancy -= lvl.traits.d_input_states;
+            lvl.event_queue.push_back(event_type{ lvl.traits.d_output_states, ready_cycle });
+        }
+        else
+        {
+            lvl.event_queue.push_back(event_type{ 1, ready_cycle });
+        }
+        lvl.next_available_cycle[j] = ready_cycle+1;
+        progress++;
+    }
+    return progress;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+#include "production/t_quantum.inl"
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

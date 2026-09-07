@@ -18,69 +18,106 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class ProducerBase : public Operable
+enum class ResourceType { T, CCZ, EPR };
+    
+/*
+ * Represents one unit of production for the specified
+ * `resource`.
+ * */
+struct ProducerQuantum
+{
+    ResourceType resource;
+
+    /*
+     * Distillation data (un-needed for cultivation quantum)
+     * */
+    bool is_distiller;
+    size_t d_input_states,
+           d_output_states;
+
+    size_t buffer_size{1};
+
+    /*
+     * Resource estimation metadata:
+     * */
+    double infidelity;
+    size_t physical_qubit_count;
+    cycle_type cycles_per_production;
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Bulk production object that manages creation of resource states.
+ *
+ * This takes away a lot of resolution from implementing magic states (i.e., distillation
+ * protocols can be pipelined as all states are not consumed at once), but this is faster
+ * for simulation.
+ *
+ * Plus, if that level of fidelity is really necessary, write a custom `ProducerQuantum` that
+ * models it.
+ * */
+class BulkProducer : public Operable
 {
 public:
-    const double output_error_probability;
-    const size_t buffer_capacity;
+    struct level_type
+    {
+        using event_type = std::pair<size_t, cycle_type>;  // number of resources + event
 
-    /*
-     * Producers that produce resource states for consumption
-     * by this producer. If empty, then it should be assumed
-     * that this is a first-level production (state-injection).
-     * */
-    std::vector<ProducerBase*> previous_level;
+        ProducerQuantum traits;
+        size_t          producer_count,
+                        unified_buffer_occupancy,
+                        unified_buffer_capacity;
 
-    /*
-     * Statistics:
-     * */
-    uint64_t s_production_attempts{0};
-    uint64_t s_failures{0};
-    uint64_t s_consumed{0};
+        // one entry per `producer_count`
+        std::vector<cycle_type> next_available_cycle;
 
-    const size_t input_count;
-    const size_t output_count;
-protected:
+        // essentially a glorified event queue
+        std::deque<event_type> event_queue;
+    
+        /*
+         * Constructor: quantum and count
+         * */
+        level_type(ProducerQuantum, size_t);
+
+        /*
+         * Checks if the head of `event_queue` is at or earlier than `current_cycle`. If so, returns true
+         * and updates data structures.
+         * */
+        bool pop_event(cycle_type current_cycle);
+
+        size_t occupancy_remaining() const { return unified_buffer_capacity - unified_buffer_occupancy; }
+    };
+private:
     /*
-     * Number of resources in local buffer (max `buffer_capacity`)
+     * A higher level is further into `levels_` . So `levels_.back()` contains
+     * highest fidelity resource states.
      * */
-    size_t buffer_occupancy_{0};
+    std::vector<level_type> levels_;
 public:
-    ProducerBase(std::string_view name, 
-                    double freq_khz, 
-                    double output_error_prob,
-                    size_t buffer_capacity,
-                    size_t input_count,
-                    size_t output_count);
+    BulkProducer(std::string_view name, double freq_khz);
 
-    /*
-     * Safely consumes `count` resource states from the buffer.
-     * */
-    void consume(size_t count);
-
-    void print_deadlock_info(std::ostream&) const override;
-
-    size_t buffer_occupancy() const { return buffer_occupancy_; }
-protected:
     long operate() override;
 
-    /*
-     * Adds resource states to the buffer. Marked virtual
-     * in case other classes want to add any stats atop
-     * this function.
-     * */
-    virtual void install_resource_states();
+    void add_level(ProducerQuantum, size_t);
 
-    /*
-     * `operate()` calls `production_step`, which advances
-     * magic state production by one cycle. Implementation
-     * is defined by descendant class.
-     *
-     * This function should return true if anything was
-     * attempted (regardless of failure).
-     * */
-    virtual bool production_step() =0;
+    size_t top_level_buffer_occupancy() const { return levels_.back().unified_buffer_occupancy; }
+    ProducerQuantum level_traits(size_t i) const { return levels_[i].traits; }
+private:
+    long handle_resource_completions(level_type&, ssize_t level_idx);
+    long handle_resource_initiations(level_type&, ssize_t level_idx);
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Pre-defined `ProducerQuantum` objects.
+ * */
+
+ProducerQuantum t_cc_cultivation(size_t d);
+ProducerQuantum t_15to1_distillation(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

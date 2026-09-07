@@ -14,6 +14,19 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+template <class IMPL>
+class RemoteMemory : public MemoryLevel
+{
+public:
+    using typename MemoryLevel::storage_type;
+    using routing_type = typename IMPL::routing_type;
+private:
+    IMPL* impl_;
+public:
+    RemoteMemory(IMPL*);
+    
+};
+
 class RemoteStorage : public Storage
 {
 public:
