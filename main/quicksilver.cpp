@@ -9,6 +9,7 @@
 #include "sim/compute_subsystem.h"
 #include "sim/driver.h"
 #include "sim/memory/bivariate_bicycle.h"
+#include "sim/memory/remote_memory.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 
@@ -82,6 +83,9 @@ main(int argc, char* argv[])
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
+    bool    remote_memory;
+    int64_t remote_memory_epr_budget;
+
     int64_t oc_base_ro_latency;
     double oc_ro_latency_fraction;
 
@@ -93,8 +97,8 @@ main(int argc, char* argv[])
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
         .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
         .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
-
         .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
+
         .optional("", "--regime", 
                     "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
                     regime, "T")
@@ -136,8 +140,14 @@ main(int argc, char* argv[])
                       factory_ll_buffer_capacity, 2)
 
         /*
-         * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of
-         * it
+         *
+         * */
+        .optional("-rm", "--remote-memory", "Operate memory as a remote region", remote_memory, false)
+        .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production",
+                      remote_memory_epr_budget, 100000)
+
+        /*
+         * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of it
          * */
         .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
@@ -214,14 +224,44 @@ main(int argc, char* argv[])
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
     main_memory_qubits -= compute_local_memory_capacity;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
+
+    /* initialize EPR production (only used for remote memory) */
+
+    sim::BulkProducer* epr_producer{nullptr};
+    sim::configuration::Allocation epr_alloc{};
+    if (remote_memory)
+    {
+        std::vector<sim::ProducerQuantum> ed_specs{
+            sim::ed_protocol_1a(sim::EDImplMethod::DISAGGREGATED_TYPE_A),
+            sim::ed_protocol_1b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+        epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
+
+        epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
+        for (const auto& [quantum, count] : epr_alloc.levels)
+            epr_producer->add_level(quantum, count);
+    }
+
     std::vector<sim::MemoryLevel*> memory_subsystem;
     if (main_memory_qubits > 0)
     {
-        sim::MemoryLevel* bb_memory = new sim::BBMemory(m_freq_khz, 
-                                                            main_memory_qubits, 
-                                                            memory_block_physical_qubits, 
-                                                            memory_block_capacity, 
-                                                            memory_code_distance);
+        sim::MemoryLevel* bb_memory;
+        if (remote_memory)
+        {
+            bb_memory = new sim::RemoteMemory<sim::BBMemory>(m_freq_khz,
+                                                                main_memory_qubits,
+                                                                memory_block_physical_qubits,
+                                                                memory_block_capacity,
+                                                                memory_code_distance,
+                                                                epr_producer);
+        }
+        else
+        {
+            bb_memory = new sim::BBMemory(m_freq_khz, 
+                                                main_memory_qubits, 
+                                                memory_block_physical_qubits, 
+                                                memory_block_capacity, 
+                                                memory_code_distance);
+        }
         memory_subsystem.push_back(bb_memory);
     }
 
@@ -240,11 +280,14 @@ main(int argc, char* argv[])
                                             inst_sim,
                                             compute_subsystem,
                                             t_producer,
+                                            epr_producer,
                                             memory_subsystem);
 
     /* initialize simulation */
 
     std::vector<sim::Operable*> all_operables{driver, compute_subsystem, t_producer};
+    if (epr_producer != nullptr)
+        all_operables.push_back(epr_producer);
     std::copy(memory_subsystem.begin(), memory_subsystem.end(), std::back_inserter(all_operables));
     sim::coordinate_clock_scale(all_operables);
 
@@ -293,6 +336,8 @@ main(int argc, char* argv[])
     /* print stats */
 
     sim::print_sim_stats(std::cout, driver);
+    if (epr_producer != nullptr)
+        sim::print_stats_for_factories(std::cout, "EPR_FACTORY", epr_producer);
 
     print_stat_line(std::cout, "COMPUTE_CODE_DISTANCE", compute_code_distance);
     print_stat_line(std::cout, "MEMORY_CODE_DISTANCE", memory_code_distance);
@@ -350,7 +395,14 @@ main(int argc, char* argv[])
     std::cout << "FACTORY_FOOTPRINT\n";
     print_stat_line(std::cout, "    TOTAL", ms_alloc.physical_qubit_count);
 
-    const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint + ms_alloc.physical_qubit_count;
+    if (remote_memory)
+    {
+        std::cout << "EPR_FOOTPRINT\n";
+        print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
+    }
+
+    const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint
+                                        + ms_alloc.physical_qubit_count + epr_alloc.physical_qubit_count;
     print_stat_line(std::cout, "TOTAL_FOOTPRINT", total_footprint);
 
     auto fidelity = driver->application_fidelity(0, total_inst, sim::GL_PHYSICAL_ERROR_RATE);
@@ -361,6 +413,8 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "    RDR", fidelity.rdr);
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
+    if (remote_memory)
+        print_stat_line(std::cout, "EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* cleanup simulation */
@@ -368,6 +422,7 @@ main(int argc, char* argv[])
     delete driver;
     delete compute_subsystem;
     delete t_producer;
+    delete epr_producer;
     for (auto* m : memory_subsystem)
         delete m;
 

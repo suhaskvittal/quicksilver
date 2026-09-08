@@ -57,15 +57,7 @@ BBMemory::BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size
 cycle_type
 BBMemory::next_ready_cycle_for_load(Qubit* q) const
 {
-    size_t idx = 0;
-    for (size_t i = 0; i < blocks_.size(); i++)
-    {
-        if (blocks_[i].count(q))
-        {
-            idx = i;
-            break;
-        }
-    }
+    size_t idx = block_index_of(q);
 
     cycle_type ready_cycle = adapters_[idx];
     routing_.for_each_resource_between(idx, routing::MCB_LEFT_ENTRY,
@@ -118,19 +110,29 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
     MemoryAccessResult out{.latency=latency, .freq_khz=freq_khz};
 
     // check if we can lock the routing space for the surgery operation:
-    bool surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle() + latency);
+    bool surgery_ok{true};
+    if (enable_routing_)
+        surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle() + latency);
 
     // routing space out of the memory is also locked for d cycles
-    bool exit_ok = routing_.test_resources_between(
+    bool exit_ok{true};
+    if (enable_routing_)
+    {
+        exit_ok = routing_.test_resources_between(
                                 idx, routing::MCB_LEFT_ENTRY, current_cycle()+latency, current_cycle()+latency+d);
+    }
 
     if (surgery_ok && exit_ok)
     {
         out.success = true;
-        routing_.lock_local_resource(idx, current_cycle(), current_cycle()+latency);
-        routing_.lock_resources_between(
-                            idx, routing::MCB_LEFT_ENTRY, current_cycle()+latency, current_cycle()+latency+d);
         adapters_[idx] = current_cycle() + latency;
+
+        if (enable_routing_)
+        {
+            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+latency);
+            routing_.lock_resources_between(
+                                idx, routing::MCB_LEFT_ENTRY, current_cycle()+latency, current_cycle()+latency+d);
+        }
 
         s_surgery_operations++;
         s_shift_automorphisms += (latency > storage_code_distance) ? 1 : 0;
@@ -155,11 +157,14 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
     MemoryAccessResult out{.freq_khz=freq_khz};
 
     // check if we can route to the block
-    bool ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
+    bool ok{true};
+    if (enable_routing_)
+        ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
     if (ok)
     {
         out.success =true;
-        routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
+        if (enable_routing_)
+            routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
         adapters_[idx] = current_cycle()+latency;
         s_surgery_operations++;
         s_shift_automorphisms += (latency > storage_code_distance) ? 1 : 0;
@@ -184,15 +189,28 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
 
     MemoryAccessResult out{.latency=ld_latency, .freq_khz=freq_khz};
 
-    bool ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_latency);
-    bool exit_and_st_ok = routing_.test_resources_between(
+    bool ld_surgery_ok{true};
+    if (enable_routing_)
+        ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_latency);
+
+    bool exit_and_st_ok{true};
+    if (enable_routing_)
+    {
+        exit_and_st_ok = routing_.test_resources_between(
                             idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_latency, current_cycle()+ld_latency+2*d);
+    }
+
     if (ld_surgery_ok && exit_and_st_ok)
     {
         out.success = true;
-        routing_.lock_local_resource(idx, current_cycle(), current_cycle()+ld_latency);
-        routing_.lock_resources_between(
+
+        if (enable_routing_)
+        {
+            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+ld_latency);
+            routing_.lock_resources_between(
                             idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_latency, current_cycle()+ld_latency+2*d);
+        }
+
         adapters_[idx] = current_cycle()+ld_latency+2*d;
         s_surgery_operations += 2;
         s_shift_automorphisms += (ld_latency > d) ? 1 : 0;

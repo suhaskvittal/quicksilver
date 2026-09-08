@@ -32,23 +32,29 @@ public:
      * */
     uint64_t s_surgery_operations{0};
     uint64_t s_shift_automorphisms{0};
-private:
+protected:
     routing_type routing_;
 
     /*
      * `adapters_` contains the ready cycle for each BB code adapter.
      * */
     std::vector<cycle_type> adapters_;
+
+    bool enable_routing_{true};
 public:
     BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
     cycle_type next_ready_cycle_for_load(Qubit*) const override;
     double log_fidelity(Client*, double, double, double) const override;
-private:
+protected:
+    /*
+     * These are `protected` (not `private`) so that wrappers such as
+     * `RemoteMemory<BBMemory>` can delegate to them.
+     * */
     MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
-
+private:
     cycle_type get_latency_of_surgery_operation(size_t idx) const;
 };
 

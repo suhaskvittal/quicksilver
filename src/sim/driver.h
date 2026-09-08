@@ -100,6 +100,7 @@ private:
 
     ComputeSubsystem* compute_subsystem_;
     BulkProducer* t_producer_;
+    BulkProducer* epr_producer_;
     std::vector<MemoryLevel*> memory_subsystem_;
 
     /*
@@ -117,6 +118,7 @@ public:
             uint64_t simulation_instructions,
             ComputeSubsystem*,
             BulkProducer* t_producer,
+            BulkProducer* epr_producer,
             std::vector<MemoryLevel*>);
     ~Driver();
 

@@ -54,6 +54,7 @@ Driver::Driver(std::vector<std::string> client_trace_files,
                 uint64_t _simulation_instructions,
                 ComputeSubsystem* compute_subsystem,
                 BulkProducer* t_producer,
+                BulkProducer* epr_producer,
                 std::vector<MemoryLevel*> memory_subsystem)
     :Operable("sim", compute_subsystem->freq_khz),
     concurrent_clients(_concurrent_clients),
@@ -65,6 +66,7 @@ Driver::Driver(std::vector<std::string> client_trace_files,
     client_context_table_(total_clients),
     compute_subsystem_(compute_subsystem),
     t_producer_(t_producer),
+    epr_producer_(epr_producer),
     memory_subsystem_(memory_subsystem),
     stall_monitor_(STALL_MONITOR_MAX_RANGES)
 {
@@ -141,6 +143,8 @@ void
 Driver::print_deadlock_info(std::ostream& out) const
 {
     t_producer_->print_deadlock_info(out);
+    if (epr_producer_ != nullptr)
+        epr_producer_->print_deadlock_info(out);
 
     out << "local memory contents:";
     for (auto* q : compute_subsystem_->local_memory())
@@ -203,6 +207,7 @@ Driver::skip_to_cycle() const
 {
     // check that production cannot do anything (top-level buffer is full)
     const bool ok_to_skip = t_producer_->is_saturated()
+                            && (epr_producer_ == nullptr || epr_producer_->is_saturated())
                             && !GL_RDR_ENABLED;
     if (ok_to_skip)
     {

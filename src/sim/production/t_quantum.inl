@@ -40,7 +40,7 @@ t_cc_cultivation(size_t d)
                 .resource = ResourceType::T,
                 .is_distiller = false,
                 .buffer_size = 1,
-                .infidelity = 1e-6,
+                .infidelity = infidelity,
                 .physical_qubit_count = configuration::surface_code_physical_qubit_count(escape_dist),
                 .cycles_per_production = t
             };

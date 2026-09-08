@@ -113,6 +113,12 @@ public:
 
     const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:
+    /*
+     * Returns the index of the block holding `q`. If `q` is not resident in this
+     * level, returns 0.
+     * */
+    size_t block_index_of(Qubit*) const;
+
     virtual MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) =0;

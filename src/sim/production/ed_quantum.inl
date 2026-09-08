@@ -3,21 +3,8 @@
  *  date:   7 September 2026
  * */
 
-enum class EDImplMethod 
-{ 
-    BARE,
-    YOKED_SURFACE_CODE,
-    BIVARIATE_BICYCLE_CODE,
-
-    /*
-     * Disaggregated is where ED is implemented on two systems with very
-     * different latencies. For purposes of timing, we assume the time taken
-     * by the compute substrate is much lower than the memory substrate (which
-     * should always be true.) But, the compute substrate matters for physical
-     * qubit estimates.
-     * */
-    DISAGGREGATED_TYPE_A   // YSC on compute qubits, BB code on memory substrate
-};
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 namespace
 {
@@ -40,13 +27,8 @@ constexpr size_t D_EXT_CMP{4};
 
 } // anon
 
-/*
- * Protocol 1:
- *  [[14,6,4]] into [[32,25,3]]
- *
- *  First level infidelity: 4.4e-6
- *  Second level infidelity: 6.1e-13
- * */
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 ProducerQuantum
 ed_protocol_1a(EDImplMethod m)
@@ -57,7 +39,7 @@ ed_protocol_1a(EDImplMethod m)
         .is_distiller = true,
         .d_input_states = 14,
         .d_output_states = 6,
-        .d_buffer_size = 6,
+        .buffer_size = 6,
         .infidelity = 4.4e-6
     };
 
@@ -88,7 +70,7 @@ ed_protocol_1b(EDImplMethod m)
         .is_distiller = true,
         .d_input_states = 32,
         .d_output_states = 25,
-        .d_buffer_size = 25,
+        .buffer_size = 25,
         .infidelity = 6.1e-13
     };
 
@@ -105,11 +87,14 @@ ed_protocol_1b(EDImplMethod m)
         dm = 24;
     }
 
-    q.physical_qubit_count = _ed_physical_qubit_count(m, 14, dp, dm);
-    q.cycles_per_production = _ed_latency(m, 14, 8, dp, dm);
+    q.physical_qubit_count = _ed_physical_qubit_count(m, 32, dp, dm);
+    q.cycles_per_production = _ed_latency(m, 32, 7, dp, dm);
     return q;
 }
 
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 namespace
 {
@@ -162,3 +147,6 @@ _ed_latency(EDImplMethod m, size_t n, size_t c, size_t dp, size_t dm)
 }
 
 } // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////

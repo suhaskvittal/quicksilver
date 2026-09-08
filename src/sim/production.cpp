@@ -34,7 +34,8 @@ level_type::level_type(ProducerQuantum q, size_t n)
     producer_count{n},
     unified_buffer_occupancy{0},
     unified_buffer_capacity{ n * q.buffer_size },
-    next_available_cycle(n, 0)
+    next_available_cycle(n, 0),
+    preq_resource_count(n, 0)
 {}
 
 bool
@@ -160,7 +161,7 @@ BulkProducer::print_deadlock_info(std::ostream& out) const
             out << " " << (static_cast<int64_t>(cyc) - static_cast<int64_t>(current_cycle()));
             shown++;
         }
-        out << " ]\n";
+        out << " ], total = " << lvl.event_queue.size() << "\n";
     }
 }
 
@@ -205,9 +206,6 @@ BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
     long progress{0};
     for (size_t j = 0; j < lvl.producer_count; j++)
     {
-        if (lvl.traits.is_distiller && i > 0 && levels_[i-1].unified_buffer_occupancy < lvl.traits.d_input_states)
-            break;
-
         if (lvl.next_available_cycle[j] > current_cycle())
             continue;
 
@@ -215,7 +213,17 @@ BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
         if (lvl.traits.is_distiller)
         {
             if (i > 0)
-                levels_[i-1].unified_buffer_occupancy -= lvl.traits.d_input_states;
+            {
+                // Add input states to the current level (if it is not the lowest level)
+                // Only proceed if the number of input states is equal to the amount required.
+                size_t input_count = std::min(lvl.traits.d_input_states - lvl.preq_resource_count[j], 
+                                              levels_[i-1].unified_buffer_occupancy);
+                lvl.preq_resource_count[j] += input_count;
+                if (lvl.preq_resource_count[j] < lvl.traits.d_input_states)
+                    continue;
+
+                levels_[i-1].unified_buffer_occupancy -= input_count;
+            }
             lvl.event_queue.push_back(event_type{ lvl.traits.d_output_states, ready_cycle });
         }
         else
@@ -223,6 +231,7 @@ BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
             lvl.event_queue.push_back(event_type{ 1, ready_cycle });
         }
         lvl.next_available_cycle[j] = ready_cycle+1;
+        lvl.preq_resource_count[j] = 0;
         progress++;
     }
     return progress;
@@ -232,6 +241,7 @@ BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
 ////////////////////////////////////////////////////////////
 
 #include "production/t_quantum.inl"
+#include "production/ed_quantum.inl"
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

@@ -72,7 +72,8 @@ public:
                         unified_buffer_capacity;
 
         // one entry per `producer_count`
-        std::vector<cycle_type> next_available_cycle;
+        std::vector<cycle_type> next_available_cycle,   // availabiliity cycle
+                                preq_resource_count;    // number of resources given to the producer
 
         // essentially a glorified event queue
         std::deque<event_type> event_queue;
@@ -151,11 +152,42 @@ private:
 ////////////////////////////////////////////////////////////
 
 /*
- * Pre-defined `ProducerQuantum` objects.
+ * Pre-defined `ProducerQuantum` objects. for T production
  * */
 
 ProducerQuantum t_cc_cultivation(size_t d);
 ProducerQuantum t_15to1_distillation(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
+
+
+/*
+ * Pre-defined `ProducerQuantum objects` for EPR production
+ * */
+enum class EDImplMethod 
+{ 
+    BARE,
+    YOKED_SURFACE_CODE,
+    BIVARIATE_BICYCLE_CODE,
+
+    /*
+     * Disaggregated is where ED is implemented on two systems with very
+     * different latencies. For purposes of timing, we assume the time taken
+     * by the compute substrate is much lower than the memory substrate (which
+     * should always be true.) But, the compute substrate matters for physical
+     * qubit estimates.
+     * */
+    DISAGGREGATED_TYPE_A   // YSC on compute qubits, BB code on memory substrate
+};
+
+/*
+ * Protocol 1:
+ *  [[14,6,4]] into [[32,25,3]]
+ *
+ *  First level infidelity: 4.4e-6
+ *  Second level infidelity: 6.1e-13
+ * */
+
+ProducerQuantum ed_protocol_1a(EDImplMethod);
+ProducerQuantum ed_protocol_1b(EDImplMethod);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
