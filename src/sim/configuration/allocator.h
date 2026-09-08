@@ -6,7 +6,10 @@
 #ifndef SIM_CONFIGURATION_ALLOCATOR_h
 #define SIM_CONFIGURATION_ALLOCATOR_h
 
-#include "sim/production/magic_state.h"
+#include "sim/production.h"
+
+#include <utility>
+#include <vector>
 
 namespace sim
 {
@@ -18,12 +21,14 @@ namespace configuration
 
 struct Allocation
 {
-    using array_type = std::vector<std::vector<ProducerBase*>>;
+    using level_type = std::pair<ProducerQuantum, size_t>;  // (quantum, producer count)
+    using array_type = std::vector<level_type>;
 
     /*
-     * Producers is organized by level (index 0 = L1 production, etc.)
+     * `levels` is organized by level (index 0 = L1 production, etc.). Each entry is fed
+     * directly to `BulkProducer::add_level`.
      * */
-    array_type producers{};
+    array_type levels{};
     size_t     physical_qubit_count{0};
     double     estimated_throughput{0.0};
 
@@ -35,60 +40,34 @@ struct Allocation
 ////////////////////////////////////////////////////////////
 
 /*
- * `throughput_aware_allocation` is a generic function that provisions
- * production for a given physical qubit budget. This budget is never
- * exceeded.
+ * `throughput_aware_allocation` provisions a stack of `BulkProducer` levels for a given
+ * physical qubit budget. This budget is never exceeded.
  *
- * The template parameters are as follows:
- *      1. `Spec` corresponds to the specification that defines a production level. This is
- *          user-defined.
- *      2. `Allocator` is a function that takes in `Spec` and returns a `ProducerBase*`
- *      3. `QubitEstimator` is a function that takes in `Spec` and returns the physical qubit
- *          overhead of allocating a production given that specification.
- *      4. `BandwidthEstimator` is a function that takes in `Spec` and a `double` (the error
- *          rate of the previous level) and returns the resource production rate (in Hz) assuming 
- *          resources from the previous level are always available. If there is no previous level,
- *          the second input is negative (so the function can then set this to some value relative
- *          to `GL_PHYSICAL_ERROR_RATE`).
- *      5. `ConsumptionEstimator` is a function that takes in `Spec` and returns the resource
- *          consumption rate (in Hz)
+ * `quanta` describes each production level (index 0 = L1, closest to state injection). Level
+ * i's `ProducerQuantum` is expected to already account for the infidelity of level i-1 (see
+ * e.g. `t_15to1_distillation`'s `input_state_infidelity` argument) -- this function only
+ * decides *how many* producers to allocate at each level, not their per-unit characteristics.
  *
- * This is a generic function so it works regardless of configuration.
- * The verbosity, in terms of the number of templates, is rather high.
- * We recommend providing wrappers for specific resource states that
- * calls this function to enable ease-of-use.
+ * `freq_khz` is the clock the resulting `BulkProducer` will run at; `ProducerQuantum::cycles_per_production`
+ * is interpreted at this frequency.
  * */
-template <class Spec, 
-            class Allocator, 
-            class QubitEstimator,
-            class BandwidthEstimator,
-            class ConsumptionEstimator>
-Allocation throughput_aware_allocation(size_t budget, 
-                                        std::vector<Spec>, 
-                                        const Allocator&, 
-                                        const QubitEstimator&,
-                                        const BandwidthEstimator&,
-                                        const ConsumptionEstimator&);
+Allocation throughput_aware_allocation(size_t budget, std::vector<ProducerQuantum> quanta, double freq_khz);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 /*
- * Computes throughput of the total allocation. `BandwidthEstimator` and `ConsumptionEstimator` are
- * as above for `throughput_aware_allocation`
+ * Computes the throughput (Hz) of the top level of an allocation with the given per-level
+ * producer `counts`, accounting for production/consumption rate mismatches between levels.
  * */
-template <class Spec, class BandwidthEstimator, class ConsumptionEstimator>
-double estimate_throughput_of_allocation(const std::vector<Spec>& specs,
-                                            const std::vector<size_t>& counts, 
-                                            const BandwidthEstimator&, 
-                                            const ConsumptionEstimator&);
+double estimate_throughput_of_allocation(const std::vector<ProducerQuantum>& quanta,
+                                            const std::vector<size_t>& counts,
+                                            double freq_khz);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 }  // namespace configuration
 }  // namespace sim
-
-#include "allocator.tpp"
 
 #endif // SIM_CONFIGURATION_ALLOCATOR_h

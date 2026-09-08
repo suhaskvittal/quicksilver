@@ -111,9 +111,7 @@ set(COMPILER_FILES
     src/compiler/pass/util.cpp)
 
 set(SIM_FILES
-    src/sim/configuration/allocator/epr.cpp
-    src/sim/configuration/allocator/magic_state.cpp
-    src/sim/configuration/predefined_ed_protocols.cpp
+    src/sim/configuration/allocator.cpp
     src/sim/configuration/resource_estimation.cpp
     src/sim/client.cpp
     src/sim/compute_subsystem.cpp
@@ -123,8 +121,6 @@ set(SIM_FILES
     src/sim/memory_level.cpp
     src/sim/operable.cpp
     src/sim/production.cpp
-    src/sim/production/epr.cpp
-    src/sim/production/magic_state.cpp
     src/sim/routing.cpp
     src/sim.cpp)
 

@@ -136,37 +136,31 @@ print_sim_stats(std::ostream& out, Driver* d)
 
     for (auto* c : d->clients())
         _print_client_stats(out, d, c);
+    print_stats_for_factories(out, "T_FACTORY", d->compute_subsystem()->t_producer());
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-print_stats_for_factories(std::ostream& out, std::string_view header, std::vector<ProducerBase*> factories)
+print_stats_for_factories(std::ostream& out, std::string_view header, const BulkProducer* producer)
 {
-    if (factories.empty())
+    if (producer == nullptr || producer->level_count() == 0)
         return;
 
     out << header << "\n";
-    
-    // accumulate stats:
-    double freq_khz = factories[0]->freq_khz;
-    uint64_t total_attempts{0},
-             total_failures{0},
-             total_consumed{0};
-    for (auto* f : factories)
-    {
-        total_attempts += f->s_production_attempts;
-        total_failures += f->s_failures;
-        total_consumed += f->s_consumed;
-    }
-    double kill_rate = fpdiv(total_failures, total_attempts);
 
-    print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", freq_khz);
-    print_stat_line(std::cout, "    FACTORY_COUNT", factories.size());
-    print_stat_line(std::cout, "    PRODUCED", total_attempts - total_failures);
-    print_stat_line(std::cout, "    CONSUMED", total_consumed);
-    print_stat_line(std::cout, "    KILL_RATE", kill_rate);
+    print_stat_line(std::cout, "    FACTORY_FREQ_KHZ", producer->freq_khz);
+    print_stat_line(std::cout, "    OVERALL_INFIDELITY", producer->top_level_infidelity());
+    for (size_t i = 0; i < producer->level_count(); i++)
+    {
+        const auto& lvl = producer->level(i);
+        std::string prefix = "    L" + std::to_string(i) + "_";
+        print_stat_line(std::cout, prefix + "PRODUCER_COUNT", lvl.producer_count);
+        print_stat_line(std::cout, prefix + "COMPLETED", lvl.s_completions);
+        print_stat_line(std::cout, prefix + "CYCLES_NO_INPUT", lvl.s_cycles_stalled_on_input);
+        print_stat_line(std::cout, prefix + "CYCLES_BUFFER_FULL", lvl.s_cycles_stalled_on_buffer);
+    }
 }
 
 ////////////////////////////////////////////////////////////

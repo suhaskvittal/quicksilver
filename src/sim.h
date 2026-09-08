@@ -22,7 +22,7 @@ namespace sim
 class Driver;
 class ComputeSubsystem;
 class Client;
-class ProducerBase;
+class BulkProducer;
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -122,7 +122,7 @@ double walltime_s();
  * */
 
 void print_sim_stats(std::ostream&, Driver*);
-void print_stats_for_factories(std::ostream&, std::string_view header, std::vector<ProducerBase*>);
+void print_stats_for_factories(std::ostream&, std::string_view header, const BulkProducer*);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

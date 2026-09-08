@@ -99,7 +99,7 @@ private:
     std::vector<std::pair<Qubit*, Qubit*>> context_switch_memory_access_buffer_;
 
     ComputeSubsystem* compute_subsystem_;
-    std::vector<ProducerBase*> t_factories_;
+    BulkProducer* t_producer_;
     std::vector<MemoryLevel*> memory_subsystem_;
 
     /*
@@ -116,7 +116,7 @@ public:
             size_t concurrent_clients,
             uint64_t simulation_instructions,
             ComputeSubsystem*,
-            std::vector<ProducerBase*> top_level_t_factories,
+            BulkProducer* t_producer,
             std::vector<MemoryLevel*>);
     ~Driver();
 
@@ -149,9 +149,10 @@ public:
     fidelity_data_type application_fidelity(int client_id, uint64_t scale_to_inst, double p) const;
 
     ComputeSubsystem* compute_subsystem() const { return compute_subsystem_; }
+    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
+
     const std::vector<Client*>& clients() const { return clients_; }
     const stall_monitor_type& stall_monitor() const { return stall_monitor_; }
-    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
 protected:
     long operate() override;
 private:

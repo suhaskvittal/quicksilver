@@ -25,7 +25,6 @@ class ComputeSubsystem : public Operable
 public:
     using inst_ptr = Instruction*;
     using local_storage_type = std::vector<Qubit*>;
-    using production_level_type = std::vector<ProducerBase*>;
     using memory_subsystem_type = std::vector<MemoryLevel*>;
     
     /*
@@ -74,7 +73,7 @@ public:
     inst_usage_array s_inst_executed_by_type{};
 private:
     local_storage_type local_memory_;
-    production_level_type t_factories_;
+    BulkProducer* t_producer_;
     memory_subsystem_type memory_subsystem_;
 
     routing_type routing_;
@@ -96,7 +95,7 @@ public:
     ComputeSubsystem(double freq_khz, 
                         size_t code_distance, 
                         size_t local_memory_capacity,
-                        production_level_type t_factories,
+                        BulkProducer* t_producer,
                         memory_subsystem_type memory_subsystem);
     ~ComputeSubsystem();
 
@@ -147,7 +146,7 @@ public:
     double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const; 
 
     const local_storage_type& local_memory() const { return local_memory_; }
-    const production_level_type& t_factories() const { return t_factories_; }
+    BulkProducer* t_producer() const { return t_producer_; }
     const memory_subsystem_type& memory_subsystem() const { return memory_subsystem_; }
     const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
 

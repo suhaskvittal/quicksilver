@@ -97,14 +97,14 @@ ComputeSubsystem::routing_type::translate(Qubit* q) const
 ComputeSubsystem::ComputeSubsystem(double freq_khz,
                                       size_t _code_distance,
                                       size_t _local_memory_capacity,
-                                      production_level_type t_factories,
+                                      BulkProducer* t_producer,
                                       memory_subsystem_type memory_subsystem)
     :Operable("compute_subsystem", freq_khz),
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
     dedicated_ancilla_count(_dedicated_ancilla_count()),
     local_memory_(local_memory_capacity),
-    t_factories_(t_factories),
+    t_producer_(t_producer),
     memory_subsystem_(memory_subsystem),
     routing_(this),
     dedicated_ancilla_(dedicated_ancilla_count)
@@ -279,11 +279,8 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
         // operation occurs on an ancilla: assume operation always succeeds
         if (is_t_like_instruction(uop->type))
         {
-            auto f_it = std::find_if(t_factories_.begin(), t_factories_.end(),
-                                    [] (const auto* f) { return f->buffer_occupancy() > 0; });
-            if (f_it == t_factories_.end())
+            if (!t_producer_->consume(1))
                 break;
-            (*f_it)->consume(1);
             // need one cycle to measure |Y> ancilla
             result.latency += 1 + GL_REACTION_TIME;  
             remaining--;
@@ -373,21 +370,12 @@ double
 ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, double p) const
 {
     const double cycles = convert_cycles_between_frequencies(c->s_cycle_complete, d_freq_khz, freq_khz) * scale;
-    const double ler_per_d_cycles = configuration::surface_code_logical_error_rate(code_distance, p);
+    const double ler_per_cycle = configuration::surface_code_logical_error_rate(code_distance, p);
     const double t_gates = c->s_t_gates_done * scale;
-    const double t_infidelity = t_factories_[0]->output_error_probability;
-
-    // assert that all `t_factories_` have the same fidelity:
-    const bool all_fact_have_same_fidelity = std::all_of(t_factories_.begin(), t_factories_.end(),
-                                                [x=t_infidelity] (const auto* f)
-                                                {
-                                                    return std::abs(x - f->output_error_probability) < 1e-12;
-                                                });
-    if (!all_fact_have_same_fidelity)
-        std::cerr << "ComputeSubsystem::log_fidelity: T factories do not have similar fidelities" << _die{};
+    const double t_infidelity = t_producer_->top_level_infidelity();
 
     // memory (idle) fidelity
-    const double log_f_mem = local_memory_capacity * fpdiv(cycles, code_distance) * std::log(1 - ler_per_d_cycles);
+    const double log_f_mem = local_memory_capacity * cycles * std::log(1 - ler_per_cycle);
     // T gate fidelity
     const double log_f_t = t_gates * std::log(1.0 - t_infidelity);
     // total fidelity:
@@ -401,8 +389,7 @@ ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, doubl
 size_t
 ComputeSubsystem::count_available_magic_states() const
 {
-    return std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0}, std::plus<size_t>{},
-                                [] (const auto* f) { return f->buffer_occupancy(); });
+    return t_producer_->top_level_buffer_occupancy();
 }
 
 ////////////////////////////////////////////////////////////
@@ -442,10 +429,8 @@ ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 execute_result_type
 ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 {
-    // first get factory with magic state:
-    auto f_it = std::find_if(t_factories_.begin(), t_factories_.end(),
-                            [] (const auto* f) { return f->buffer_occupancy() > 0; });
-    if (f_it == t_factories_.end())
+    // first make sure a magic state is available:
+    if (t_producer_->top_level_buffer_occupancy() == 0)
         return execute_result_type{};
 
     // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
@@ -461,7 +446,7 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 
     // estimate decoding latency:
     const cycle_type total_latency = code_distance + GL_REACTION_TIME;
-    (*f_it)->consume(1);
+    t_producer_->consume(1);
     return execute_result_type{.progress=1, .latency=total_latency};
 }
 

@@ -53,7 +53,7 @@ Driver::Driver(std::vector<std::string> client_trace_files,
                 size_t _concurrent_clients,
                 uint64_t _simulation_instructions,
                 ComputeSubsystem* compute_subsystem,
-                std::vector<ProducerBase*> t_factories,
+                BulkProducer* t_producer,
                 std::vector<MemoryLevel*> memory_subsystem)
     :Operable("sim", compute_subsystem->freq_khz),
     concurrent_clients(_concurrent_clients),
@@ -64,7 +64,7 @@ Driver::Driver(std::vector<std::string> client_trace_files,
     inactive_clients_(total_clients - concurrent_clients),
     client_context_table_(total_clients),
     compute_subsystem_(compute_subsystem),
-    t_factories_(t_factories),
+    t_producer_(t_producer),
     memory_subsystem_(memory_subsystem),
     stall_monitor_(STALL_MONITOR_MAX_RANGES)
 {
@@ -140,8 +140,7 @@ Driver::print_progress(std::ostream& out) const
 void
 Driver::print_deadlock_info(std::ostream& out) const
 {
-    for (auto* f : t_factories_)
-        f->print_deadlock_info(out);
+    t_producer_->print_deadlock_info(out);
 
     out << "local memory contents:";
     for (auto* q : compute_subsystem_->local_memory())
@@ -202,11 +201,8 @@ Driver::done() const
 std::optional<cycle_type>
 Driver::skip_to_cycle() const
 {
-    // check that all factories cannot do anything
-    const bool all_fact_stuck = std::all_of(t_factories_.begin(), t_factories_.end(),
-                                    [] (const auto* f) { return f->buffer_occupancy() >= f->buffer_capacity; });
-
-    const bool ok_to_skip = all_fact_stuck
+    // check that production cannot do anything (top-level buffer is full)
+    const bool ok_to_skip = t_producer_->is_saturated()
                             && !GL_RDR_ENABLED;
     if (ok_to_skip)
     {
@@ -269,17 +265,17 @@ Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
                                                                             compute_subsystem_->freq_khz,
                                                                             freq_khz);
         double t_gates_per_req = c->s_rotation_uops.mean();
-        double t_infidelity = t_factories_[0]->output_error_probability;
+        double t_infidelity = t_producer_->top_level_infidelity();
         double reqs = rdr_->s_requests_used * scale;
 
         size_t d = compute_subsystem_->code_distance;
 
-        double ler_per_d_cycles = configuration::surface_code_logical_error_rate(d, p);
+        double ler_per_cycle = configuration::surface_code_logical_error_rate(d, p);
 
-        lg_rdr_f = reqs * fpdiv(mean_cycles_per_req, d) * std::log(1 - ler_per_d_cycles)
+        lg_rdr_f = reqs * mean_cycles_per_req * std::log(1 - ler_per_cycle)
                     + 0.5 * reqs * t_gates_per_req * std::log(1 - t_infidelity) // we need to multiply by 0.5 to avoid
                                                                                 // double counting with `lg_compute_f`
-                    + reqs * fpdiv(mean_idle_time_per_req, d) * std::log(1 - ler_per_d_cycles);
+                    + reqs * mean_idle_time_per_req * std::log(1 - ler_per_cycle);
     }
 
 
@@ -344,9 +340,7 @@ Driver::operate()
 
     if (GL_RDR_ENABLED)
     {
-        size_t magic_states_avail = std::transform_reduce(t_factories_.begin(), t_factories_.end(), size_t{0},
-                                                        std::plus<size_t>{},
-                                                        [] (const auto* f) { return f->buffer_occupancy(); });
+        size_t magic_states_avail = t_producer_->top_level_buffer_occupancy();
         if (magic_states_avail > 1)
             progress += rdr_->operate();
     }

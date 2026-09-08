@@ -1,30 +1,74 @@
 /*
- *  author: Suhas Vittal
- *  date:   20 February 2026
+ *  author: Claude (Opus 5)
+ *  date:   7 September 2026
  * */
 
+#include "sim/configuration/allocator.h"
 #include "sim/configuration/resource_estimation.h"
 
 #include <cassert>
+#include <cmath>
 #include <iostream>
+#include <numeric>
 
 namespace sim
 {
+
+extern double GL_PHYSICAL_ERROR_RATE;
+
 namespace configuration
 {
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-#define TEMPL_PARAMS  template <class Spec, class Allocator, class QubitEstimator, class BandwidthEstimator, class ConsumptionEstimator>
+namespace
+{
 
-TEMPL_PARAMS Allocation
-throughput_aware_allocation(size_t b, 
-                            std::vector<Spec> specs, 
-                            const Allocator& f_alloc,
-                            const QubitEstimator& f_est_qubit_count,
-                            const BandwidthEstimator& f_est_bandwidth,
-                            const ConsumptionEstimator& f_est_consumption)
+/*
+ * Helper estimators, driven directly off `ProducerQuantum`. These replace the old
+ * `QubitEstimator`/`BandwidthEstimator`/`ConsumptionEstimator` template callbacks now that
+ * the quantum already carries per-unit resource-estimation metadata.
+ * */
+
+size_t
+output_count(const ProducerQuantum& q)
+{
+    return q.is_distiller ? q.d_output_states : 1;
+}
+
+/*
+ * Bare factory footprint plus the buffer overhead required to hold `q.buffer_size` output
+ * states at `q.infidelity`.
+ * */
+size_t
+physical_qubit_count_with_buffer(const ProducerQuantum& q)
+{
+    size_t d_buffer = surface_code_distance_for_target_logical_error_rate(q.infidelity, GL_PHYSICAL_ERROR_RATE);
+    return q.physical_qubit_count + (q.buffer_size - output_count(q)) * surface_code_physical_qubit_count(d_buffer);
+}
+
+double
+bandwidth_hz(const ProducerQuantum& q, double freq_khz)
+{
+    return (1e3 * freq_khz * output_count(q)) / q.cycles_per_production;
+}
+
+double
+consumption_hz(const ProducerQuantum& q, double freq_khz)
+{
+    if (!q.is_distiller)
+        return 0.0;
+    return (1e3 * freq_khz * q.d_input_states) / q.cycles_per_production;
+}
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+Allocation
+throughput_aware_allocation(size_t b, std::vector<ProducerQuantum> quanta, double freq_khz)
 {
     constexpr bool verbose{true};
 
@@ -32,17 +76,16 @@ throughput_aware_allocation(size_t b,
         std::cout << "throughput_aware_allocation ---------------------------------------------\n";
 
     /* 1. Identify physical qubit overheads for each production level */
-    std::vector<size_t> pq_counts(specs.size());
-    std::vector<double> production_rates(specs.size());
-    std::vector<double> consumption_rates(specs.size());
-    for (size_t i = 0; i < specs.size(); i++)
+    std::vector<size_t> pq_counts(quanta.size());
+    std::vector<double> production_rates(quanta.size());
+    std::vector<double> consumption_rates(quanta.size());
+    for (size_t i = 0; i < quanta.size(); i++)
     {
-        const auto& s = specs[i];
-        double input_error_rate = (i == 0) ? -1.0 : specs[i-1].output_error_rate;
+        const auto& q = quanta[i];
 
-        pq_counts[i] = f_est_qubit_count(s);
-        production_rates[i] = f_est_bandwidth(s, input_error_rate);
-        consumption_rates[i] = (i == 0) ? 0.0 : f_est_consumption(s, input_error_rate);
+        pq_counts[i] = physical_qubit_count_with_buffer(q);
+        production_rates[i] = bandwidth_hz(q, freq_khz);
+        consumption_rates[i] = (i == 0) ? 0.0 : consumption_hz(q, freq_khz);
 
         if (verbose)
         {
@@ -66,10 +109,10 @@ throughput_aware_allocation(size_t b,
 
     /* 3. Using `production_rates` and `consumption_rates`, determine the physical qubit count required *
      *    to allocate a factory at a given level with saturated bandwidth                               */
-    std::vector<size_t> pq_counts_sat(specs.size());
-    std::vector<size_t> counts_for_sat_alloc(specs.size()-1);
+    std::vector<size_t> pq_counts_sat(quanta.size());
+    std::vector<size_t> counts_for_sat_alloc(quanta.size()-1);
     pq_counts_sat[0] = pq_counts[0];  // same for L1 since there is no prior level
-    for (size_t i = 1; i < specs.size(); i++)
+    for (size_t i = 1; i < quanta.size(); i++)
     {
         const double prod_rate_prev_level = production_rates[i-1],
                      cons_rate = consumption_rates[i];
@@ -80,7 +123,7 @@ throughput_aware_allocation(size_t b,
 
     /* 4. Greedily form allocations */
 
-    std::vector<size_t> counts(specs.size(), 0);
+    std::vector<size_t> counts(quanta.size(), 0);
     double curr_tp{0.0};
     size_t remaining{b};
     do
@@ -88,7 +131,7 @@ throughput_aware_allocation(size_t b,
         std::vector<size_t> prev_counts(counts);
         double prev_tp{curr_tp};
         size_t remaining_in_loop{remaining};
-        for (ssize_t i = specs.size()-1; i >= 0; i--)
+        for (ssize_t i = quanta.size()-1; i >= 0; i--)
         {
             size_t c = pq_counts_sat[i];
             if (remaining_in_loop < c)
@@ -122,7 +165,7 @@ throughput_aware_allocation(size_t b,
             }
         }
 
-        curr_tp = estimate_throughput_of_allocation(specs, counts, f_est_bandwidth, f_est_consumption);
+        curr_tp = estimate_throughput_of_allocation(quanta, counts, freq_khz);
 
         if (verbose)
         {
@@ -150,40 +193,30 @@ throughput_aware_allocation(size_t b,
     }
     while (remaining >= pq_min_required);
 
-    /* 5. Actually do the allocations on the heap and return */
+    /* 5. Package the per-level (quantum, count) pairs -- the caller feeds these directly to
+     *    `BulkProducer::add_level`.                                                        */
     Allocation out{};
-    out.producers.resize(specs.size());
+    out.levels.reserve(quanta.size());
     for (size_t i = 0; i < counts.size(); i++)
-    {
-        for (size_t j = 0; j < counts[i]; j++)
-        {
-            auto* p = f_alloc(specs[i]);
-            if (i > 0)
-                p->previous_level = out.producers[i-1];
-            out.producers[i].push_back(p);
-        }
-    }
+        out.levels.push_back({quanta[i], counts[i]});
     out.physical_qubit_count = b - remaining;
     out.estimated_throughput = curr_tp;
 
     return out;
 }
 
-#undef TEMPL_PARAMS
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class Spec, class BandwidthEstimator, class ConsumptionEstimator> double
-estimate_throughput_of_allocation(const std::vector<Spec>& specs,
+double
+estimate_throughput_of_allocation(const std::vector<ProducerQuantum>& quanta,
                                     const std::vector<size_t>& counts,
-                                    const BandwidthEstimator& f_bandwidth_est,
-                                    const ConsumptionEstimator& f_consumption_est)
+                                    double freq_khz)
 {
-    double prod_rate = counts[0] * f_bandwidth_est(specs[0], -1.0);
-    for (size_t i = 1; i < specs.size(); i++)
+    double prod_rate = counts[0] * bandwidth_hz(quanta[0], freq_khz);
+    for (size_t i = 1; i < quanta.size(); i++)
     {
-        double cons_rate = counts[i] * f_consumption_est(specs[i], specs[i-1].output_error_rate);
+        double cons_rate = counts[i] * consumption_hz(quanta[i], freq_khz);
         // estimate the ratio between the consumption and production rates
         //
         //  if `prod_rate > cons_rate`, then the new production rate for this level is
@@ -192,7 +225,7 @@ estimate_throughput_of_allocation(const std::vector<Spec>& specs,
         //  else, then the production rate is scaled by `prod_rate / cons_rate` since
         //  lower level bandwidth is not maximized
         double r = std::min(1.0, prod_rate / cons_rate);
-        prod_rate = r * counts[i] * f_bandwidth_est(specs[i], specs[i-1].output_error_rate);
+        prod_rate = r * counts[i] * bandwidth_hz(quanta[i], freq_khz);
     }
     return prod_rate;
 }

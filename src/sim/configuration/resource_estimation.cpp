@@ -38,7 +38,10 @@ double
 surface_code_logical_error_rate(size_t _d, double p)
 {
     const double d = static_cast<double>(_d);
-    return 0.1 * std::pow(100*p, 0.5*(d+1));
+    // `0.1 * (100p)^(0.5*(d+1))` is the standard estimate for the logical error rate
+    // accumulated over one full `d`-round syndrome extraction cycle; dividing by `d` converts
+    // this to a per (single-round) cycle rate.
+    return (0.1 * std::pow(100*p, 0.5*(d+1))) / d;
 }
 
 double
@@ -62,13 +65,22 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
 size_t
 surface_code_distance_for_target_logical_error_rate(double e, double p)
 {
-    constexpr double ROUNDING_TOL{0.3};  // `0.3` is arbitrary, feel free to change to your favorite float
+    // `surface_code_logical_error_rate` is per-cycle (divides the closed-form `d`-cycle
+    // estimate by `d`), so there's no closed-form inverse for `d` anymore -- `d` appears both
+    // in the exponent and as a linear divisor. `surface_code_logical_error_rate(d, p)` is
+    // monotonically decreasing in `d` for `p < 0.01`, so a linear search is sufficient (code
+    // distances of interest are small).
+    constexpr size_t D_MAX{201};
 
-    double d = 2.0 * ( (std::log(e) - std::log(0.1)) / std::log(100*p) ) - 1.0;
-    // need to round intelligently while avoiding floating point issues.
-    double _d_out = (d - std::floor(d) < ROUNDING_TOL) ? std::floor(d) : std::ceil(d);
-    size_t d_out = static_cast<size_t>(_d_out);
-    return std::max(static_cast<size_t>(d_out), size_t{2});
+    size_t d = 2;
+    while (d < D_MAX && surface_code_logical_error_rate(d, p) > e)
+        d++;
+    if (d == D_MAX)
+    {
+        std::cerr << "surface_code_distance_for_target_logical_error_rate: could not find a distance <= "
+                    << D_MAX << " achieving target error rate " << e << " at p = " << p << _die{};
+    }
+    return d;
 }
 
 size_t

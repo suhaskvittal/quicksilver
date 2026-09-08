@@ -10,6 +10,7 @@
 #include "sim/operable.h"
 
 #include <deque>
+#include <optional>
 #include <vector>
 
 namespace sim
@@ -75,7 +76,14 @@ public:
 
         // essentially a glorified event queue
         std::deque<event_type> event_queue;
-    
+
+        /*
+         * Statistics:
+         * */
+        uint64_t s_completions{0};
+        uint64_t s_cycles_stalled_on_input{0};
+        uint64_t s_cycles_stalled_on_buffer{0};
+
         /*
          * Constructor: quantum and count
          * */
@@ -102,8 +110,38 @@ public:
 
     void add_level(ProducerQuantum, size_t);
 
+    /*
+     * Drains `count` resource states from the top-level buffer. Returns false (and does
+     * nothing) if fewer than `count` are available.
+     * */
+    bool consume(size_t count);
+
     size_t top_level_buffer_occupancy() const { return levels_.back().unified_buffer_occupancy; }
+    size_t top_level_buffer_capacity() const { return levels_.back().unified_buffer_capacity; }
+    double top_level_infidelity() const { return levels_.back().traits.infidelity; }
     ProducerQuantum level_traits(size_t i) const { return levels_[i].traits; }
+    const level_type& level(size_t i) const { return levels_[i]; }
+    size_t level_count() const { return levels_.size(); }
+
+    /*
+     * Total physical qubit footprint across all levels (excludes buffer overheads, which
+     * are accounted for separately during allocation).
+     * */
+    size_t physical_qubit_count() const;
+
+    /*
+     * True if the top-level buffer is full -- i.e., production cannot make any further
+     * progress until the buffer is drained by a consumer.
+     * */
+    bool is_saturated() const { return top_level_buffer_occupancy() >= top_level_buffer_capacity(); }
+
+    /*
+     * Earliest cycle at which any level has a pending event, if any. Used to compute
+     * skip-cycle targets.
+     * */
+    std::optional<cycle_type> next_event_cycle() const;
+
+    void print_deadlock_info(std::ostream&) const override;
 private:
     long handle_resource_completions(level_type&, ssize_t level_idx);
     long handle_resource_initiations(level_type&, ssize_t level_idx);

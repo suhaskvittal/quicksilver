@@ -4,15 +4,13 @@
  * */
 
 #include "sim.h"
-#include "sim/configuration/allocator/impl.h"
-#include "sim/configuration/predefined_ed_protocols.h"
+#include "sim/configuration/allocator.h"
 #include "sim/configuration/resource_estimation.h"
 #include "sim/compute_subsystem.h"
 #include "sim/driver.h"
 #include "sim/memory/bivariate_bicycle.h"
 #include "sim/memory_level.h"
-#include "sim/production/epr.h"
-#include "sim/production/magic_state.h"
+#include "sim/production.h"
 
 #include "compiler/pass/memory_scheduler.h"
 #include "compiler/pass/memory_scheduler/impl.h"
@@ -26,9 +24,6 @@
 
 namespace 
 {
-
-using FactorySpecification = sim::configuration::FactorySpecification;
-using EDSpecification = sim::configuration::EDSpecification;
 
 std::vector<std::string> split_trace_string(std::string);
 
@@ -50,24 +45,12 @@ size_t get_compute_code_distance(std::string_view);
 size_t get_memory_code_distance(std::string_view);
 
 /*
- * These two functions get the default production specifications for magic state factories
- * and entanglement distillation (parametrized by values that can be extended by the user).
+ * Gets the default production specifications for magic state factories (parametrized by
+ * values that can be extended by the user).
  * */
-std::vector<FactorySpecification> get_default_factory_specifications(std::string_view regime,
+std::vector<sim::ProducerQuantum> get_default_factory_specifications(std::string_view regime,
                                                                       int64_t compute_cycle_time_ns,
                                                                       int64_t ll_buffer_capacity);
-std::vector<EDSpecification>      get_default_ed_specifications(std::string_view regime,
-                                                                    int64_t compute_cycle_time_ns,
-                                                                    int64_t ll_buffer_capacity);
-
-/*
- * Computes the number of physical qubits required for ED on the faster substrate.
- * Unlike the slower substrate, the faster substrate can highly serialize ED, and does
- * not need many ED units either, so the overhead of ED is just the number of physical
- * qubits required for the last level of ED (first argument) and the amount of idling
- * time (can be computed using `substrate_mismatch_factor` and `EDSpecification`)
- * */
-size_t faster_substrate_ed_overhead(EDSpecification&, int64_t substrate_mismatch_factor);
 
 } // anon
 
@@ -204,10 +187,24 @@ main(int argc, char* argv[])
 
     /* initialize magic state factories */
 
+    const double c_freq_khz = sim::compute_freq_khz(compute_cycle_time_ns);
+
     auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
     if (oc_base_ro_latency >= 0)
-        ms_specs.back().cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_ro_latency_fraction*oc_base_ro_latency ));
-    auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
+    {
+        // The last production level runs its syndrome extraction on a separate (typically
+        // faster) clock. `BulkProducer` runs every level on a single clock (`c_freq_khz`), so
+        // fold that clock ratio into the level's cycle count instead.
+        const int64_t last_level_cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_ro_latency_fraction*oc_base_ro_latency ));
+        const double scale = static_cast<double>(last_level_cycle_time_ns) / static_cast<double>(compute_cycle_time_ns);
+        auto& last = ms_specs.back();
+        last.cycles_per_production = static_cast<cycle_type>(std::ceil(last.cycles_per_production * scale));
+    }
+    auto ms_alloc = sim::configuration::throughput_aware_allocation(factory_physical_qubit_budget, ms_specs, c_freq_khz);
+
+    auto* t_producer = new sim::BulkProducer("t_producer", c_freq_khz);
+    for (const auto& [quantum, count] : ms_alloc.levels)
+        t_producer->add_level(quantum, count);
 
     /* initialize memory subsystem */
 
@@ -230,11 +227,10 @@ main(int argc, char* argv[])
 
     /* initialize compute subsystem */
 
-    double c_freq_khz = sim::compute_freq_khz(compute_cycle_time_ns);
-    auto* compute_subsystem = new sim::ComputeSubsystem(c_freq_khz, 
+    auto* compute_subsystem = new sim::ComputeSubsystem(c_freq_khz,
                                                          compute_code_distance,
                                                          compute_local_memory_capacity,
-                                                         ms_alloc.producers.back(),
+                                                         t_producer,
                                                          memory_subsystem);
 
     /* initialize driver */
@@ -243,15 +239,13 @@ main(int argc, char* argv[])
                                             concurrent_clients,
                                             inst_sim,
                                             compute_subsystem,
-                                            ms_alloc.producers.back(),
+                                            t_producer,
                                             memory_subsystem);
 
     /* initialize simulation */
 
-    std::vector<sim::Operable*> all_operables{driver, compute_subsystem};
+    std::vector<sim::Operable*> all_operables{driver, compute_subsystem, t_producer};
     std::copy(memory_subsystem.begin(), memory_subsystem.end(), std::back_inserter(all_operables));
-    for (const auto& level : ms_alloc.producers)
-        std::copy(level.begin(), level.end(), std::back_inserter(all_operables));
     sim::coordinate_clock_scale(all_operables);
 
     /* run simulation */
@@ -373,11 +367,9 @@ main(int argc, char* argv[])
 
     delete driver;
     delete compute_subsystem;
+    delete t_producer;
     for (auto* m : memory_subsystem)
         delete m;
-    for (auto& p : ms_alloc.producers)
-        for (auto* f : p)
-            delete f;
 
     return 0;
 }
@@ -499,65 +491,21 @@ get_memory_code_distance(std::string_view regime)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<FactorySpecification>
+std::vector<sim::ProducerQuantum>
 get_default_factory_specifications(std::string_view regime,
-                                    int64_t c_round_time_ns,
+                                    int64_t /* compute_cycle_time_ns -- unused: BulkProducer runs every level
+                                                on a single clock, so ProducerQuantum carries cycle *counts*,
+                                                not a per-level ns clock */,
                                     int64_t ll_buffer_capacity)
 {
-    FactorySpecification l1_spec /* d = 3 color code cultivation */
-    {
-        .is_cultivation=true,
-        .cycle_time_ns=c_round_time_ns,
-        .buffer_capacity=1,
-        .output_error_rate=1e-6,
-        .escape_distance=13,
-        .rounds=18,
-        .probability_of_success=0.2
-    };
-
-    FactorySpecification l2_spec /* 15:1, (dx,dz,dm) = (25,11,11) distillation */
-    {
-        .is_cultivation=false,
-        .cycle_time_ns=c_round_time_ns,
-        .buffer_capacity=ll_buffer_capacity,
-        .output_error_rate=1e-12,
-        .dx=25,
-        .dz=11,
-        .dm=11,
-        .input_count=4,
-        .output_count=1,
-        .rotations=11
-    };
-
     if (regime == "G")
-    {
-        // change parameters of d = 3 cultivation to d = 5 cultivation
-        l1_spec.output_error_rate = 1e-8;
-        l1_spec.escape_distance = 15;
-        l1_spec.rounds = 25;
-        l1_spec.probability_of_success = 0.02;
-    }
+        return { sim::t_cc_cultivation(5) };
 
-    if (regime == "T")
-        return {l1_spec, l2_spec};
-    else
-        return {l1_spec};
-}
+    sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);              // d = 3 color code cultivation
+    sim::ProducerQuantum l2 = sim::t_15to1_distillation(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
+    l2.buffer_size = ll_buffer_capacity;
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::vector<EDSpecification>
-get_default_ed_specifications(std::string_view regime,
-                                int64_t c_round_time_ns,
-                                int64_t ll_buffer_capacity)
-{
-    /*
-    auto specs = sim::configuration::ed::protocol_3(ll_buffer_capacity);
-    for (auto& s : specs)
-        s.cycle_time_ns = c_round_time_ns;
-    return specs;
-    */
+    return {l1, l2};
 }
 
 ////////////////////////////////////////////////////////////
