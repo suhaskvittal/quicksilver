@@ -232,8 +232,8 @@ main(int argc, char* argv[])
     if (remote_memory)
     {
         std::vector<sim::ProducerQuantum> ed_specs{
-            sim::ed_protocol_1a(sim::EDImplMethod::DISAGGREGATED_TYPE_A),
-            sim::ed_protocol_1b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+            sim::ed_protocol_2a(sim::EDImplMethod::DISAGGREGATED_TYPE_A),
+            sim::ed_protocol_2b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
         epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
 
         epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);

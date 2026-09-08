@@ -189,6 +189,17 @@ enum class EDImplMethod
 ProducerQuantum ed_protocol_1a(EDImplMethod);
 ProducerQuantum ed_protocol_1b(EDImplMethod);
 
+/*
+ * Protocol 2:
+ *  [[4,2,2]] into [[27,18,4]]
+ *
+ *  First level infidelity: 4.9e-4
+ *  Second level infidelity: 4.3e-10
+ * */
+
+ProducerQuantum ed_protocol_2a(EDImplMethod);
+ProducerQuantum ed_protocol_2b(EDImplMethod);
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

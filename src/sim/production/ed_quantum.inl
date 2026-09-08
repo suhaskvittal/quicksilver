@@ -92,6 +92,70 @@ ed_protocol_1b(EDImplMethod m)
     return q;
 }
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+ProducerQuantum
+ed_protocol_2a(EDImplMethod m)
+{
+    ProducerQuantum q
+    {
+        .resource = ResourceType::EPR,
+        .is_distiller = true,
+        .d_input_states = 4,
+        .d_output_states = 2,
+        .buffer_size = 2,
+        .infidelity = 4.9e-4
+    };
+
+    // remaining variables in `q` depend on `m`
+    size_t dp = 9,
+           dm = 9;
+    if (m == EDImplMethod::YOKED_SURFACE_CODE)
+    {
+        dp = 5;
+    }
+    else if (m == EDImplMethod::BIVARIATE_BICYCLE_CODE || m == EDImplMethod::DISAGGREGATED_TYPE_A)
+    {
+        dp = 12;
+        dm = 12;
+    }
+
+    q.physical_qubit_count = _ed_physical_qubit_count(m, 4, dp, dm);
+    q.cycles_per_production = _ed_latency(m, 4, 2, dp, dm);
+    return q;
+}
+
+ProducerQuantum
+ed_protocol_2b(EDImplMethod m)
+{
+    ProducerQuantum q
+    {
+        .resource = ResourceType::EPR,
+        .is_distiller = true,
+        .d_input_states = 27,
+        .d_output_states = 18,
+        .buffer_size = 18,
+        .infidelity = 4.3e-10
+    };
+
+    // remaining variables in `q` depend on `m`
+    size_t dp = 17,
+           dm = 17;
+    if (m == EDImplMethod::YOKED_SURFACE_CODE)
+    {
+        dp = 11;
+    }
+    else if (m == EDImplMethod::BIVARIATE_BICYCLE_CODE || m == EDImplMethod::DISAGGREGATED_TYPE_A)
+    {
+        dp = 18;
+        dm = 18;
+    }
+
+    q.physical_qubit_count = _ed_physical_qubit_count(m, 27, dp, dm);
+    q.cycles_per_production = _ed_latency(m, 28, 9, dp, dm);
+    return q;
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -102,7 +166,7 @@ namespace
 size_t
 _ed_physical_qubit_count(EDImplMethod m, size_t n, size_t dp, size_t dm)
 {
-    size_t dis_ysc_dp = std::max(size_t{9}, (dp+D_EXT_CMP+1)/2 + 1);
+    size_t dis_ysc_dp = std::max(size_t{5}, (dp+D_EXT_CMP+1)/2 + 1);
     if (dis_ysc_dp % 2 == 0)
         dis_ysc_dp++;
 
