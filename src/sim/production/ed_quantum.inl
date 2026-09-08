@@ -1,0 +1,164 @@
+/*
+ *  author: Suhas Vittal
+ *  date:   7 September 2026
+ * */
+
+enum class EDImplMethod 
+{ 
+    BARE,
+    YOKED_SURFACE_CODE,
+    BIVARIATE_BICYCLE_CODE,
+
+    /*
+     * Disaggregated is where ED is implemented on two systems with very
+     * different latencies. For purposes of timing, we assume the time taken
+     * by the compute substrate is much lower than the memory substrate (which
+     * should always be true.) But, the compute substrate matters for physical
+     * qubit estimates.
+     * */
+    DISAGGREGATED_TYPE_A   // YSC on compute qubits, BB code on memory substrate
+};
+
+namespace
+{
+
+size_t _ed_physical_qubit_count(EDImplMethod, 
+                                size_t input_count, 
+                                size_t pauli_distance,
+                                size_t meas_distance);
+cycle_type _ed_latency(EDImplMethod, 
+                        size_t input_count, 
+                        size_t check_count, 
+                        size_t pauli_distance, 
+                        size_t meas_distance);
+
+/*
+ * Additional code distance required in disaggregated setting on compute side as
+ * compute must wait for memory to finish.
+ * */
+constexpr size_t D_EXT_CMP{4};
+
+} // anon
+
+/*
+ * Protocol 1:
+ *  [[14,6,4]] into [[32,25,3]]
+ *
+ *  First level infidelity: 4.4e-6
+ *  Second level infidelity: 6.1e-13
+ * */
+
+ProducerQuantum
+ed_protocol_1a(EDImplMethod m)
+{
+    ProducerQuantum q
+    {
+        .resource = ResourceType::EPR,
+        .is_distiller = true,
+        .d_input_states = 14,
+        .d_output_states = 6,
+        .d_buffer_size = 6,
+        .infidelity = 4.4e-6
+    };
+
+    // remaining variables in `q` depend on `m`
+    size_t dp = 13,
+           dm = 13;
+    if (m == EDImplMethod::YOKED_SURFACE_CODE)
+    {
+        dp = 9;
+    }
+    else if (m == EDImplMethod::BIVARIATE_BICYCLE_CODE || m == EDImplMethod::DISAGGREGATED_TYPE_A)
+    {
+        dp = 12;
+        dm = 12;
+    }
+
+    q.physical_qubit_count = _ed_physical_qubit_count(m, 14, dp, dm);
+    q.cycles_per_production = _ed_latency(m, 14, 8, dp, dm);
+    return q;
+}
+
+ProducerQuantum
+ed_protocol_1b(EDImplMethod m)
+{
+    ProducerQuantum q
+    {
+        .resource = ResourceType::EPR,
+        .is_distiller = true,
+        .d_input_states = 32,
+        .d_output_states = 25,
+        .d_buffer_size = 25,
+        .infidelity = 6.1e-13
+    };
+
+    // remaining variables in `q` depend on `m`
+    size_t dp = 25,
+           dm = 25;
+    if (m == EDImplMethod::YOKED_SURFACE_CODE)
+    {
+        dp = 15;
+    }
+    else if (m == EDImplMethod::BIVARIATE_BICYCLE_CODE || m == EDImplMethod::DISAGGREGATED_TYPE_A)
+    {
+        dp = 24;
+        dm = 24;
+    }
+
+    q.physical_qubit_count = _ed_physical_qubit_count(m, 14, dp, dm);
+    q.cycles_per_production = _ed_latency(m, 14, 8, dp, dm);
+    return q;
+}
+
+
+namespace
+{
+
+size_t
+_ed_physical_qubit_count(EDImplMethod m, size_t n, size_t dp, size_t dm)
+{
+    size_t dis_ysc_dp = std::max(size_t{9}, (dp+D_EXT_CMP+1)/2 + 1);
+    if (dis_ysc_dp % 2 == 0)
+        dis_ysc_dp++;
+
+    switch (m)
+    {
+    using enum EDImplMethod;
+
+    case BARE:
+        // multiply by two as both systems need to support ED.
+        return 2 * (3*n/2) * configuration::surface_code_physical_qubit_count(dp);
+    case YOKED_SURFACE_CODE:
+        return 2 * (3*(n+2)/2) * configuration::surface_code_physical_qubit_count(dp);
+    case BIVARIATE_BICYCLE_CODE:
+        return 2 * ((n+11)/12) * configuration::bivariate_bicycle_code_physical_qubit_count(dp);
+    case DISAGGREGATED_TYPE_A:
+        return (3*(n+2)/2) * configuration::surface_code_physical_qubit_count(dis_ysc_dp)
+                + ((n+11)/12) * configuration::bivariate_bicycle_code_physical_qubit_count(dp);
+    default:
+        std::cerr << "_ed_physical_qubit_count: unsupported method" << _die{}; 
+    }
+}
+
+cycle_type
+_ed_latency(EDImplMethod m, size_t n, size_t c, size_t dp, size_t dm)
+{
+    switch (m)
+    {
+    using enum EDImplMethod;
+
+    case BARE:
+        return c*dm;
+    case YOKED_SURFACE_CODE:
+        // load overhead is d per input
+        return n*dm + c*dm;
+    case BIVARIATE_BICYCLE_CODE:
+        return c*dm;  // assume inplace state preparation
+    case DISAGGREGATED_TYPE_A:
+        return c*dm;
+    default:
+        std::cerr << "_ed_physical_qubit_count: unsupported method" << _die{}; 
+    }
+}
+
+} // anon
