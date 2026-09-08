@@ -23,7 +23,9 @@ namespace sim
 
 struct MemoryAccessResult
 {
-    bool success{false};
+    enum class Code { SUCCESS, FAIL_UNAVAILABLE, FAIL_NO_CREDIT };
+
+    Code code{Code::FAIL_UNAVAILABLE};
 
     /*
      * Time it takes to get the "result" of the request back.
@@ -36,6 +38,8 @@ struct MemoryAccessResult
      * Frequency of the memory level that gave the result.
      * */
     double freq_khz;
+
+    bool success() const { return code == Code::SUCCESS; }
 };
 
 ////////////////////////////////////////////////////////////
@@ -110,6 +114,13 @@ public:
      * number of operations by. `d_freq_khz` is the frequency of the driver.
      * */
     virtual double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const =0;
+
+    /*
+     * True if a coupled load-store touching `q` currently has the EPR credit it would
+     * need to proceed. Trivially true for any non-remote level; `RemoteMemory` overrides
+     * this to check its credit pool.
+     * */
+    virtual bool has_epr_credit(Qubit*) const { return true; }
 
     const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:

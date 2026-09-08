@@ -50,6 +50,7 @@ public:
 
     cycle_type next_ready_cycle_for_load(Qubit*) const override;
     double     log_fidelity(Client*, double, double, double) const override;
+    bool       has_epr_credit(Qubit*) const override;
 protected:
     long operate() override;
 

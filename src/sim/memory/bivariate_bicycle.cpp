@@ -124,7 +124,7 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 
     if (surgery_ok && exit_ok)
     {
-        out.success = true;
+        out.code = MemoryAccessResult::Code::SUCCESS;
         adapters_[idx] = current_cycle() + latency;
 
         if (enable_routing_)
@@ -162,7 +162,7 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
         ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
     if (ok)
     {
-        out.success =true;
+        out.code = MemoryAccessResult::Code::SUCCESS;
         if (enable_routing_)
             routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+latency);
         adapters_[idx] = current_cycle()+latency;
@@ -202,7 +202,7 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
 
     if (ld_surgery_ok && exit_and_st_ok)
     {
-        out.success = true;
+        out.code = MemoryAccessResult::Code::SUCCESS;
 
         if (enable_routing_)
         {

@@ -395,6 +395,18 @@ ComputeSubsystem::count_available_magic_states() const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+bool
+ComputeSubsystem::epr_credit_available_for(Qubit* ld) const
+{
+    auto it = memory_level_map_.find(ld);
+    if (it == memory_level_map_.end() || it->second < 0)
+        return true;   // not currently resident in remote memory
+    return memory_subsystem_[it->second]->has_epr_credit(ld);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 execute_result_type
 ComputeSubsystem::do_h_gate(inst_ptr inst, Qubit* q)
 {
@@ -478,7 +490,7 @@ ComputeSubsystem::do_memory_access(inst_ptr inst, std::vector<Qubit*> args)
     // find memory location that contains this memory:
     MemoryLevel* m = memory_subsystem_[memory_level_map_[ld]];
     MemoryAccessResult result = m->do_coupled_load_store(ld, st);
-    if (!result.success)
+    if (!result.success())
         return execute_result_type{};
 
     // update data structures

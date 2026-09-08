@@ -97,17 +97,32 @@ TEMPL_CLASS::log_fidelity(Client* c, double scale, double d_freq_khz, double p) 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TEMPL_PARAMS bool
+TEMPL_CLASS::has_epr_credit(Qubit* q) const
+{
+    return credits_in_block_[this->block_index_of(q)] >= 2;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
 {
+    // unavailability (adapter not ready) takes priority over a credit stall: with
+    // routing disabled for remote memory, the adapter check is IMPL's entire
+    // availability condition, so we can read it directly without invoking IMPL.
+    if (this->adapters_[idx] > this->current_cycle())
+        return MemoryAccessResult{};
+
     // check if credits are available in storage
     if (credits_in_block_[idx] < 1)
     {
         s_cycles_stalled_on_epr++;
-        return MemoryAccessResult{};
+        return MemoryAccessResult{.code = MemoryAccessResult::Code::FAIL_NO_CREDIT};
     }
     auto out = IMPL::load_impl(idx, s, q);
-    if (out.success)
+    if (out.success())
     {
         credits_in_block_[idx]--;
         s_epr_consumed++;
@@ -121,14 +136,17 @@ TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 {
+    if (this->adapters_[idx] > this->current_cycle())
+        return MemoryAccessResult{};
+
     // check if credits are available in storage
     if (credits_in_block_[idx] < 1)
     {
         s_cycles_stalled_on_epr++;
-        return MemoryAccessResult{};
+        return MemoryAccessResult{.code = MemoryAccessResult::Code::FAIL_NO_CREDIT};
     }
     auto out = IMPL::store_impl(idx, s, q);
-    if (out.success)
+    if (out.success())
     {
         credits_in_block_[idx]--;
         s_epr_consumed++;
@@ -142,14 +160,17 @@ TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::coupled_load_store_impl(size_t idx, storage_type& s, Qubit* ld, Qubit* st)
 {
+    if (this->adapters_[idx] > this->current_cycle())
+        return MemoryAccessResult{};
+
     // check if credits are available in storage
     if (credits_in_block_[idx] < 2)
     {
         s_cycles_stalled_on_epr++;
-        return MemoryAccessResult{};
+        return MemoryAccessResult{.code = MemoryAccessResult::Code::FAIL_NO_CREDIT};
     }
     auto out = IMPL::coupled_load_store_impl(idx, s, ld, st);
-    if (out.success)
+    if (out.success())
     {
         credits_in_block_[idx] -= 2;
         s_epr_consumed += 2;

@@ -151,6 +151,12 @@ public:
     const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
 
     size_t count_available_magic_states() const;
+
+    /*
+     * True if a coupled load-store targeting `ld` currently has the EPR credit it would
+     * need (trivially true if `ld` is not resident in remote memory).
+     * */
+    bool epr_credit_available_for(Qubit* ld) const;
 protected:
     long operate() override { return 1; }
 private:

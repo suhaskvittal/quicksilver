@@ -169,7 +169,8 @@ public:
     {
         std::optional<cycle_type> ready,
                                   all_load_results_avail,
-                                  resource_avail;
+                                  resource_avail,
+                                  epr_avail;
     } stall_data;
 
     /* Rotation-Directed Runahead state variables */

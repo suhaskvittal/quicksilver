@@ -38,7 +38,7 @@ MemoryLevel::do_load(Qubit* q)
         if (q_it != s.end())
         {
             auto result = load_impl(i, s, q);
-            if (result.success)
+            if (result.success())
                 s.erase(q_it);
             return result;
         }
@@ -62,7 +62,7 @@ MemoryLevel::do_store(Qubit* q)
         std::cerr << "MemoryLevel::do_store: could not find empty location for store to qubit " << *q << _die{};
     size_t idx = std::distance(blocks_.begin(), s_it);
     auto result = store_impl(idx, *s_it, q);
-    if (result.success)
+    if (result.success())
         s_it->insert(q);
     return result;
 }
@@ -80,7 +80,7 @@ MemoryLevel::do_coupled_load_store(Qubit* ld, Qubit* st)
         if (q_it != s.end())
         {
             auto result = coupled_load_store_impl(i, s, ld, st);
-            if (result.success)
+            if (result.success())
             {
                 s.erase(q_it);
                 s.insert(st);

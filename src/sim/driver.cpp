@@ -549,6 +549,14 @@ Driver::update_instruction_stats_on_fetch(inst_ptr inst, const std::vector<Qubit
                             return std::make_optional(current_cycle());
                         }
                     });
+    _assign_if_empty(inst->stall_data.epr_avail,
+                    [this, &operands, t=inst->type] ()
+                    {
+                        if (is_memory_access(t) && !compute_subsystem_->epr_credit_available_for(operands[0]))
+                            return std::optional<cycle_type>{};
+                        else
+                            return std::make_optional(current_cycle());
+                    });
 }
 
 ////////////////////////////////////////////////////////////
@@ -564,6 +572,8 @@ Driver::update_instruction_stats_before_retire(inst_ptr inst)
     stall_monitor_.add_stall_range(StallType::MEMORY, s, x, false);
     if (is_t_like_instruction(inst->type))
         stall_monitor_.add_stall_range(StallType::MAGIC_STATE, s, y, false);
+    if (is_memory_access(inst->type))
+        stall_monitor_.add_stall_range(StallType::EPR, s, *inst->stall_data.epr_avail, false);
 }
 
 ////////////////////////////////////////////////////////////
