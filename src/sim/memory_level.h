@@ -79,11 +79,16 @@ public:
     const size_t num_blocks;
     const size_t total_capacity;
 
-    virtual ~MemoryLevel() = default;
+    /*
+     * Statistics:
+     * */
+    uint64_t s_surgery_operations{0};
+    uint64_t s_shift_automorphisms{0};
 protected:
     std::vector<storage_type> blocks_;
 public:
     MemoryLevel(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
+    virtual ~MemoryLevel() = default;
 
     /*
      * Stripes all qubits within the range across all code blocks in the system.

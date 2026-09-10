@@ -140,8 +140,8 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
                             idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+transit);
         }
 
-        s_surgery_operations++;
-        s_shift_automorphisms += (surgery > d) ? 1 : 0;
+        s_surgery_operations += 2;
+        s_shift_automorphisms++;
     }
 
     return out;
@@ -179,8 +179,14 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
         if (enable_routing_)
             routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+transit);
         adapters_[idx] = current_cycle()+transit+surgery;
-        s_surgery_operations++;
-        s_shift_automorphisms += (surgery > d) ? 1 : 0;
+        
+        // note that if we are using teleportation (`!enable_routing_`) then there is no surgery that occurs as
+        // teleportation is compute side
+        if (enable_routing_)
+        {
+            s_surgery_operations++;
+            s_shift_automorphisms++;
+        }
     }
 
     return out;
@@ -233,8 +239,11 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
         else
             adapters_[idx] = current_cycle()+surgery;
 
-        s_surgery_operations += 2;
-        s_shift_automorphisms += (surgery > d) ? 1 : 0;
+        if (enable_routing_)
+            s_surgery_operations += 3;
+        else
+            s_surgery_operations += 2;
+        s_shift_automorphisms++;
     }
 
     return out;

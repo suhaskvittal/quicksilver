@@ -82,6 +82,7 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
 
             stats.memory_accesses += out.memory_accesses.size();
             stats.unused_bandwidth.add(out.unused_bandwidth);
+            stats.memory_level_parallelism.add(out.memory_accesses.size());
             stats.scheduler_epochs++;
 
             /* --- memory stream instrumentation --- */

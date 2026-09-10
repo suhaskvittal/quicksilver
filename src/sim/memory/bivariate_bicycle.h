@@ -26,12 +26,6 @@ public:
             :MultiChannelBus(c, w)
         {}
     };
-
-    /*
-     * Statistics:
-     * */
-    uint64_t s_surgery_operations{0};
-    uint64_t s_shift_automorphisms{0};
 protected:
     routing_type routing_;
 

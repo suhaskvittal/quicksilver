@@ -100,6 +100,7 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "COMPUTE_INTENSITY", compute_intensity);
     print_stat_line(std::cout, "COMPILATION_TIME_SECONDS", compile_time_seconds);
     stats.unused_bandwidth.dump(std::cout);
+    stats.memory_level_parallelism.dump(std::cout);
 }
 
 ////////////////////////////////////////////////////////////

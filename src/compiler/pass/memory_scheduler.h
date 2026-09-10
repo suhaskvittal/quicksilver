@@ -93,6 +93,7 @@ struct Stats
     uint64_t memory_accesses{0};
     uint64_t scheduler_epochs{0};
     stats::Histogram<uint64_t> unused_bandwidth{"UNUSED_BANDWIDTH", 0, 32, 8};
+    stats::Histogram<uint64_t> memory_level_parallelism{"MEMORY_LEVEL_PARALLELISM", 0, 32, 8};
 };
 
 ////////////////////////////////////////////////////////////

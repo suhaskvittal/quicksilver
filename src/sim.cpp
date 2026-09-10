@@ -104,7 +104,7 @@ print_sim_stats(std::ostream& out, Driver* d)
     for (auto t : {Instruction::Type::T, Instruction::Type::TX, Instruction::Type::TDG, Instruction::Type::TXDG})
         t_gates += d->compute_subsystem()->s_inst_executed_by_type[static_cast<int>(t)];
 
-    double t_consumption_rate_per_s = fpdiv(t_gates, d->current_cycle() / (1e3*d->freq_khz));
+    double t_consumption_rate_per_s = fpdiv(t_gates, d->current_cycle()) * (1e3*d->freq_khz);
     print_stat_line(out, "TOTAL_SIMULATION_CYCLES", d->current_cycle());
 
     print_stat_line(out, "CX_GATES_EXECUTED", cx_gates);
@@ -116,6 +116,17 @@ print_sim_stats(std::ostream& out, Driver* d)
     print_stat_line(out, "ISOLATED_EPR_STALLS", d->stall_monitor().isolated_stalls_for(StallType::EPR));
     print_stat_line(out, "TOTAL_STALLS", d->stall_monitor().cycles_with_stalls());
 
+    auto m = d->compute_subsystem()->memory_subsystem();
+    for (size_t i = 0; i < m.size(); i++)
+    {
+        out << "MEMORY_SUBSYSTEM_L" << (i+1) << "\n";
+        print_stat_line(out, "    NAME", m[i]->name);
+        print_stat_line(out, "    FREQ_KHZ", m[i]->freq_khz);
+        print_stat_line(out, "    CYCLES", m[i]->current_cycle());
+        print_stat_line(out, "    SURGERY_OPERATIONS", m[i]->s_surgery_operations);
+        print_stat_line(out, "    SHIFT_AUTOMOPRHISMS", m[i]->s_shift_automorphisms);
+    }
+    
     if (GL_RDR_ENABLED)
     {
         out << "RDR\n";

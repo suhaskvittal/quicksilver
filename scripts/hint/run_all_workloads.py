@@ -9,12 +9,44 @@ from sys import argv
 PROJECT = 'hint_isca2026'
 
 '''
+    Workloads targeted by this study: beauregard Shor, three trotterization
+    chemistry benchmarks (chromium, ethylene oxide, hc3h2cn), and Grover.
+
+    NOTE: this intentionally does not use `workload_list()` from
+    `scripts/common.py` -- that shared list still contains `_q.xz` traces that
+    no longer exist on disk (split into `_q_prep`/`_q_sel`), and is kept as-is
+    for `scripts/rdr/`.
+'''
+HINT_WORKLOADS = [
+    'benchmarks/bin/BQ_beauregard_shor_rsa256_iter_4.xz',
+    'benchmarks/bin/BQ_chromium_t.xz',
+    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
+    'benchmarks/bin/BQ_hc3h2cn_t.xz',
+    'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz',
+]
+
+'''
     Simulation settings:
 '''
 SIM_INST_COUNT = 100_000_000
 PRINT_PROGRESS = SIM_INST_COUNT
-EPR_BULK_COUNT = 2*3472
 FACTORY_BUDGET = 50000
+
+REGIME = 'T'
+MEMORY_CYCLE_TIME_NS = 1_250_000   # remote memory: ~1042x the 1200 ns compute default
+
+# Remote-memory runs can go a long stretch (tens of thousands of cycles) between
+# EPR-gated memory accesses becoming ready, which trips the simulator's default
+# 1,000,000-cycle deadlock detector even though the access is about to become
+# ready. Raise it 10x for every sim run in this study.
+MAX_CYCLES_NO_PROGRESS = 10_000_000
+
+# EPR_UNIT is a physical-qubit budget for entanglement distillation (matches
+# `--remote-memory-epr-budget`, not a count of ED units). The base remote-memory
+# runs use 2*EPR_UNIT = 50k physical qubits; the ED sensitivity sweep scales the
+# same unit by u in {4, 8, 16} -> 100k / 200k / 400k.
+EPR_UNIT = 25_000
+EPR_BUDGET = 2*EPR_UNIT
 
 '''
     Compiler settings:
@@ -27,16 +59,35 @@ OPT_INST_COUNT = 100
 ##############################################
 ##############################################
 
+def remote_kwargs(epr_budget=EPR_BUDGET) -> dict:
+    return {
+        '--regime': REGIME,
+        '-rm': '',
+        '--memory-cycle-time-ns': MEMORY_CYCLE_TIME_NS,
+        '--remote-memory-epr-budget': epr_budget,
+        '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
+    }
+
+def local_kwargs(memory_cycle_time_ns=MEMORY_CYCLE_TIME_NS) -> dict:
+    return {
+        '--regime': REGIME,
+        '--memory-cycle-time-ns': memory_cycle_time_ns,
+        '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
+    }
+
+##############################################
+##############################################
+
 experiment = argv[1]
 
 ''' Compilation for EIF and HINT '''
 if experiment == 'compile_eif':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             run_memory_scheduler(w, PROJECT, f'eif_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=0)
 
 elif experiment == 'compile_eif_la':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             for ld in [8, 16, 32, 64, 128, 256, 512]:
                 run_memory_scheduler(w, PROJECT, f'eif_la_ld{ld}_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=0,
@@ -45,10 +96,10 @@ elif experiment == 'compile_eif_la':
                                     })
 
 elif experiment == 'compile_hint':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             for ld in [8, 16, 32, 64, 128, 256, 512]:
-                run_memory_scheduler(w, PROJECT, f'hint_ld{ld}_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=1, 
+                run_memory_scheduler(w, PROJECT, f'hint_ld{ld}_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=1,
                                     kwargs={
                                         '--hint-lookahead-depth': ld,
                                         '--hint-use-coalescing': '',
@@ -56,150 +107,108 @@ elif experiment == 'compile_hint':
                                     })
 
 elif experiment == 'compile_test_opt':
-    for w in workload_list():
+    # NOTE: ./build/qs_memory_optimality only exists when CMake is configured
+    # with -DCOMPILE_ILP_OPT=ON (it depends on OR-Tools).
+    for w in HINT_WORKLOADS:
         run_memory_optimality(w, PROJECT, f'opt', active_set_capacity=4, inst_limit=OPT_INST_COUNT)
 
 elif experiment == 'sim_baseline':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             run_quicksilver(w, PROJECT, f'baseline_a{a}', f'eif_a{a}',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-syndrome-extraction-round-time-ns': 1250,
-                                 })
+                                 kwargs=local_kwargs(1250))
 
 elif experiment == 'sim_eif':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             run_quicksilver(w, PROJECT, f'eif_a{a}', f'eif_a{a}',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': 2*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs())
 
 elif experiment == 'sim_eif_la':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             run_quicksilver(w, PROJECT, f'eif_la_a{a}', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a{a}',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': 2*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs())
 
 elif experiment == 'sim_hint':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for a in [8, 12, 16, 24, 32]:
             run_quicksilver(w, PROJECT, f'hint_a{a}', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a{a}',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': 2*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs())
 
 elif experiment == 'sim_eif_ed_sensitivity':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
             run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_u{epr_unit_count}', f'eif_a12',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=12,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': epr_unit_count*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
         run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_perfect', f'eif_a12',
-                             inst_limit=SIM_INST_COUNT, 
+                             inst_limit=SIM_INST_COUNT,
                              active_set_capacity=12,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs={
-                                '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                             })
+                             kwargs=local_kwargs())
 
 elif experiment == 'sim_eif_la_ed_sensitivity':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
             run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_u{epr_unit_count}', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a12',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=12,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': epr_unit_count*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
         run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_perfect', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a12',
-                             inst_limit=SIM_INST_COUNT, 
+                             inst_limit=SIM_INST_COUNT,
                              active_set_capacity=12,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs={
-                                '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                             })
+                             kwargs=local_kwargs())
 
 elif experiment == 'sim_hint_ed_sensitivity':
-    for w in workload_list():
+    for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
             run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_u{epr_unit_count}', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a12',
-                                 inst_limit=SIM_INST_COUNT, 
+                                 inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=12,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
-                                 kwargs={
-                                    '--memory-is-remote': '',
-                                    '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                                    '-epr': epr_unit_count*EPR_BULK_COUNT,
-                                    '--epr-ll-buffer-capacity': 1,
-                                    '--substrate-mismatch-factor': 1000
-                                 })
+                                 kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
         run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_perfect', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a12',
-                             inst_limit=SIM_INST_COUNT, 
+                             inst_limit=SIM_INST_COUNT,
                              active_set_capacity=12,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs={
-                                '--memory-syndrome-extraction-round-time-ns': 1_250_000,
-                             })
+                             kwargs=local_kwargs())
 
 else:
     print(f'unknown experiment: {experiment}')

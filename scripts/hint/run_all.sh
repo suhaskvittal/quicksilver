@@ -1,23 +1,39 @@
 #!/bin/bash
+# author: Suhas Vittal
 
-rm -rf commands.out
+set -e
+
+MODE="$1"
+
+case "$MODE" in
+    compile)
+        EXPERIMENTS=(
+            compile_eif
+            compile_eif_la
+            compile_hint
+        )
+        ;;
+    sim)
+        EXPERIMENTS=(
+            sim_baseline
+            sim_eif
+            sim_eif_la
+            sim_hint
+            sim_eif_ed_sensitivity
+            sim_eif_la_ed_sensitivity
+            sim_hint_ed_sensitivity
+        )
+        ;;
+    *)
+        echo "usage: $0 {compile|sim}" >&2
+        exit 1
+        ;;
+esac
+
+rm -f commands.out
 touch commands.out
 
-if [ "$1" == "compile" ]; then
-    python3 -m scripts.hint.run_all_workloads compile_eif >> commands.out
-    python3 -m scripts.hint.run_all_workloads compile_eif_la >> commands.out
-    python3 -m scripts.hint.run_all_workloads compile_hint >> commands.out
-
-elif [ "$1" == "sim" ]; then
-    python3 -m scripts.hint.run_all_workloads sim_baseline >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_eif >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_eif_la >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_hint >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_eif_ed_sensitivity >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_eif_la_ed_sensitivity >> commands.out
-    python3 -m scripts.hint.run_all_workloads sim_hint_ed_sensitivity >> commands.out
-
-else
-    echo "Usage: $0 [compile|sim]"
-    exit 1
-fi
+for exp in "${EXPERIMENTS[@]}"; do
+    echo "Running experiment: $exp"
+    python3 -m scripts.hint.run_all_workloads $exp >> commands.out
+done

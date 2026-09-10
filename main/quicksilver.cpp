@@ -97,6 +97,10 @@ main(int argc, char* argv[])
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
         .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
         .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
+        .optional("", "--max-cycles-no-progress",
+                    "Maximum consecutive cycles any single component may spend with no progress before the "
+                    "simulation declares a deadlock and aborts",
+                    sim::GL_MAX_CYCLES_WITH_NO_PROGRESS, 1'000'000)
         .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
 
         .optional("", "--regime", 
@@ -382,10 +386,14 @@ main(int argc, char* argv[])
                                                         memory_subsystem.end(),
                                                         size_t{0},
                                                         std::plus<size_t>{},
-                                                        [sc_footprint] (const auto* m)
+                                                        [sc_footprint, remote_memory] (const auto* m)
                                                         {
                                                             size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
-                                                            size_t routing_overhead = 0.5*m->num_blocks*sc_footprint;
+                                                            size_t routing_overhead;
+                                                            if (remote_memory)
+                                                                routing_overhead = 0;
+                                                            else
+                                                                routing_overhead = 0.5*m->num_blocks*sc_footprint;
                                                             return memory_overhead + routing_overhead;
                                                         });
     
@@ -414,7 +422,14 @@ main(int argc, char* argv[])
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
     if (remote_memory)
-        print_stat_line(std::cout, "EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
+    {
+        // calculate L0 ingress rate (physical EPR generation rate)
+        auto [l0_q, l0_n] = epr_alloc.levels[0];
+        double l0_ingress_rate = l0_n * fpdiv(l0_q.d_input_states, l0_q.cycles_per_production) * (epr_producer->freq_khz * 1e3);
+
+        print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
+        print_stat_line(std::cout, "PHYSICAL_EPR_DISTR_RATE_MAX_PER_S", l0_ingress_rate);
+    }
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* cleanup simulation */
