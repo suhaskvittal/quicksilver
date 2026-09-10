@@ -99,6 +99,13 @@ public:
     std::vector<inst_ptr> get_front_layer() const { return get_front_layer_if([] (const auto*) { return true; }); }
 
     /*
+     * O(1) front-layer width, for callers that only need the count
+     * (e.g. visualization sampling) and want to avoid materializing
+     * a vector via `get_front_layer()`.
+     * */
+    size_t front_layer_size() const { return front_layer_.size(); }
+
+    /*
      * This is a modified version of the above function that
      * returns instructions in the front layer that meet the given
      * predicate.

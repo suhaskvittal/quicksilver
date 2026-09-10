@@ -40,7 +40,16 @@ protected:
      * */
     std::vector<cycle_type> adapters_;
 
+    /* a shift automorphism costs at most this many cycles */
+    constexpr static cycle_type SHIFT_AUT_LATENCY{2};
+
     bool enable_routing_{true};
+
+    /*
+     * True for a `RemoteMemory<BBMemory>` (set from its constructor): a remote block is reached
+     * over entanglement rather than the on-chip bus, so it has no bus transit phase.
+     * */
+    bool is_remote_{false};
 public:
     BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
@@ -54,8 +63,15 @@ protected:
     MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
+
+    /* the on-chip bus transit phase, absent for a remote block */
+    cycle_type transit_latency() const { return is_remote_ ? 0 : storage_code_distance; }
 private:
-    cycle_type get_latency_of_surgery_operation(size_t idx) const;
+    /*
+     * Latency of a `d`-round surgery operation that begins at cycle `ref`, including the shift
+     * automorphism if the adapter has not been idle long enough by then to hide it.
+     * */
+    cycle_type latency_of_surgery_operation(cycle_type ref, size_t idx) const;
 };
 
 ////////////////////////////////////////////////////////////

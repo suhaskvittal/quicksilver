@@ -32,7 +32,7 @@ struct MemoryAccessResult
      * Return value is in the cycles in the clock domain of servicing
      * memory tier.
      * */
-    cycle_type latency;
+    cycle_type latency{0};
 
     /*
      * Frequency of the memory level that gave the result.

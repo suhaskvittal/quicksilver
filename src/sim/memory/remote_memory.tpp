@@ -28,9 +28,12 @@ TEMPL_CLASS::RemoteMemory(double freq_khz,
     epr_producer_(epr_producer)
 {
     // a remote region is not reached over the on-chip bus, so there is no routing
-    // space to contend for.
+    // space to contend for, nor a bus transit phase in the access latency.
     if constexpr (std::is_same<IMPL, BBMemory>::value)
+    {
         this->enable_routing_ = false;
+        this->is_remote_ = true;
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -136,7 +139,10 @@ TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 {
-    if (this->adapters_[idx] > this->current_cycle())
+    // matches BBMemory::store_impl's gate: locally the adapter only needs to be free by the
+    // end of the transit phase; remotely there is no transit phase, so this reduces to
+    // `current_cycle()` on its own.
+    if (this->adapters_[idx] > this->current_cycle() + this->transit_latency())
         return MemoryAccessResult{};
 
     // check if credits are available in storage

@@ -1,0 +1,103 @@
+/* author: Claude Code */
+:root {
+  --bg: #f0f2f5;
+  --panel: #fff;
+  --text: #222;
+  --muted: #666;
+  --border: #bbb;
+  --shadow: rgba(0,0,0,.10);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+#app { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+#header { margin-bottom: 16px; }
+#header h1 { font-size: 22px; font-weight: 700; color: #1a3a5c; margin-bottom: 8px; }
+#summary-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+.card {
+  background: var(--panel); border-radius: 8px;
+  padding: 10px 16px; min-width: 140px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+}
+.card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.card .value { font-size: 20px; font-weight: 700; color: #1a3a5c; margin-top: 2px; }
+.card .value.hot { color: #c0392b; }
+.card .value.warn { color: #d68910; }
+
+.section {
+  background: var(--panel); border-radius: 10px;
+  padding: 16px; margin-bottom: 16px;
+  box-shadow: 0 1px 4px var(--shadow);
+}
+.section-header {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;
+}
+.section-header h2 { font-size: 16px; color: #1a3a5c; flex: 1 1 200px; }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.controls label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+button {
+  padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 5px; background: #f4f6fa;
+  cursor: pointer; font-size: 13px;
+}
+button:hover { background: #dce7f7; border-color: #4a7fc1; }
+input[type=range] { cursor: pointer; }
+
+#heatmap-outer { display: flex; gap: 0; }
+#heatmap-y-axis-wrapper { flex: 0 0 auto; display: flex; flex-direction: column; }
+#heatmap-scroll-wrapper { flex: 1 1 auto; overflow: hidden; position: relative; }
+#heatmap-x-axis-wrapper { display: flex; gap: 0; margin-top: 2px; }
+#heatmap-scrollbar-wrapper { margin-top: 4px; }
+#heatmap-scrollbar { width: 100%; }
+
+#metrics-canvas-wrapper { overflow: hidden; position: relative; }
+
+#legend { display: flex; gap: 14px; font-size: 12px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-swatch { width: 14px; height: 14px; border-radius: 2px; display: inline-block; }
+
+#epoch-detail { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.detail-block { flex: 0 0 auto; }
+.detail-block .dl { font-weight: 600; color: #555; }
+.detail-block .dv { color: #111; }
+.qubit-chip { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin: 1px; }
+.chip-loaded  { background: #d4efdf; color: #1e8449; }
+.chip-evicted { background: #fde8e8; color: #a93226; }
+.chip-active  { background: #d6eaf8; color: #1a5276; }
+
+#distributions { display: flex; flex-wrap: wrap; gap: 16px; }
+.dist-panel { flex: 1 1 260px; }
+.dist-panel h3 { font-size: 13px; color: #444; margin-bottom: 6px; }
+
+#hot-region-list { font-size: 12px; color: #a93226; margin-bottom: 8px; max-height: 60px; overflow-y: auto; }
+
+#tooltip {
+  position: fixed; pointer-events: none;
+  background: rgba(20,40,70,.88); color: #fff;
+  padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; line-height: 1.5;
+  display: none; z-index: 999; max-width: 260px;
+}
+
+.metric-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.metric-legend label { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.metric-swatch { width: 12px; height: 3px; display: inline-block; border-radius: 2px; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181f;
+    --panel: #1c222c;
+    --text: #dde3ec;
+    --muted: #93a0b4;
+    --border: #3a4250;
+    --shadow: rgba(0,0,0,.4);
+  }
+  #header h1, .card .value, .section-header h2 { color: #7fb2ff; }
+  button { background: #232a36; color: var(--text); }
+  button:hover { background: #2c3547; border-color: #5a86c9; }
+}
