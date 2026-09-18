@@ -160,7 +160,8 @@ TEMPL_CLASS::_get_local_resource_ref(this auto& self, T obj)
 {
     id_type x = self.translate(obj);
     auto it = self.location_map_.find(x);
-    assert(it != self.location_map_.end());
+    if (it == self.location_map_.end())
+        std::cerr << "MultiChannelBus::_get_local_resource_ref(): no location registered for object" << _die{};
     auto [ch,ro,co] = it->second;
     return self.channels_[ch][co];
 }

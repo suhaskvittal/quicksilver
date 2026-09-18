@@ -19,9 +19,9 @@ PROJECT = 'hint_isca2026'
 '''
 HINT_WORKLOADS = [
     'benchmarks/bin/BQ_beauregard_shor_rsa256_iter_4.xz',
-    'benchmarks/bin/BQ_chromium_t.xz',
-    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
-    'benchmarks/bin/BQ_hc3h2cn_t.xz',
+#   'benchmarks/bin/BQ_chromium_t.xz',
+#   'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
+#   'benchmarks/bin/BQ_hc3h2cn_t.xz',
     'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz',
 ]
 
@@ -30,7 +30,11 @@ HINT_WORKLOADS = [
 '''
 SIM_INST_COUNT = 100_000_000
 PRINT_PROGRESS = SIM_INST_COUNT
-FACTORY_BUDGET = 50000
+FACTORY_BUDGET = 75000
+REACTION_TIME = 30
+
+DEFAULT_CAPACITY = 12
+CAP_ARRAY = [8, 12, 16, 24, 32]
 
 REGIME = 'T'
 MEMORY_CYCLE_TIME_NS = 1_250_000   # remote memory: ~1042x the 1200 ns compute default
@@ -66,6 +70,8 @@ def remote_kwargs(epr_budget=EPR_BUDGET) -> dict:
         '--memory-cycle-time-ns': MEMORY_CYCLE_TIME_NS,
         '--remote-memory-epr-budget': epr_budget,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
+        '--reaction-time': REACTION_TIME,
+        '-skip': 1
     }
 
 def local_kwargs(memory_cycle_time_ns=MEMORY_CYCLE_TIME_NS) -> dict:
@@ -73,6 +79,7 @@ def local_kwargs(memory_cycle_time_ns=MEMORY_CYCLE_TIME_NS) -> dict:
         '--regime': REGIME,
         '--memory-cycle-time-ns': memory_cycle_time_ns,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
+        '--reaction-time': REACTION_TIME
     }
 
 ##############################################
@@ -83,12 +90,12 @@ experiment = argv[1]
 ''' Compilation for EIF and HINT '''
 if experiment == 'compile_eif':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             run_memory_scheduler(w, PROJECT, f'eif_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=0)
 
 elif experiment == 'compile_eif_la':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             for ld in [8, 16, 32, 64, 128, 256, 512]:
                 run_memory_scheduler(w, PROJECT, f'eif_la_ld{ld}_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=0,
                                     kwargs={
@@ -97,7 +104,7 @@ elif experiment == 'compile_eif_la':
 
 elif experiment == 'compile_hint':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             for ld in [8, 16, 32, 64, 128, 256, 512]:
                 run_memory_scheduler(w, PROJECT, f'hint_ld{ld}_a{a}', active_set_capacity=a, inst_limit=COMPILE_INST_COUNT, scheduler_id=1,
                                     kwargs={
@@ -114,7 +121,7 @@ elif experiment == 'compile_test_opt':
 
 elif experiment == 'sim_baseline':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             run_quicksilver(w, PROJECT, f'baseline_a{a}', f'eif_a{a}',
                                  inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
@@ -125,7 +132,7 @@ elif experiment == 'sim_baseline':
 
 elif experiment == 'sim_eif':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             run_quicksilver(w, PROJECT, f'eif_a{a}', f'eif_a{a}',
                                  inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
@@ -136,7 +143,7 @@ elif experiment == 'sim_eif':
 
 elif experiment == 'sim_eif_la':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             run_quicksilver(w, PROJECT, f'eif_la_a{a}', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a{a}',
                                  inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
@@ -147,7 +154,7 @@ elif experiment == 'sim_eif_la':
 
 elif experiment == 'sim_hint':
     for w in HINT_WORKLOADS:
-        for a in [8, 12, 16, 24, 32]:
+        for a in CAP_ARRAY:
             run_quicksilver(w, PROJECT, f'hint_a{a}', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a{a}',
                                  inst_limit=SIM_INST_COUNT,
                                  active_set_capacity=a,
@@ -159,56 +166,56 @@ elif experiment == 'sim_hint':
 elif experiment == 'sim_eif_ed_sensitivity':
     for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
-            run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_u{epr_unit_count}', f'eif_a12',
+            run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_u{epr_unit_count}', f'eif_a{DEFAULT_CAPACITY}',
                                  inst_limit=SIM_INST_COUNT,
-                                 active_set_capacity=12,
+                                 active_set_capacity=DEFAULT_CAPACITY,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
                                  kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
-        run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_perfect', f'eif_a12',
+        run_quicksilver(w, PROJECT, f'eif_ed_sensitivity_perfect', f'eif_a{DEFAULT_CAPACITY}',
                              inst_limit=SIM_INST_COUNT,
-                             active_set_capacity=12,
+                             active_set_capacity=DEFAULT_CAPACITY,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs=local_kwargs())
+                             kwargs=remote_kwargs(100*EPR_UNIT))
 
 elif experiment == 'sim_eif_la_ed_sensitivity':
     for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
-            run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_u{epr_unit_count}', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a12',
+            run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_u{epr_unit_count}', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a{DEFAULT_CAPACITY}',
                                  inst_limit=SIM_INST_COUNT,
-                                 active_set_capacity=12,
+                                 active_set_capacity=DEFAULT_CAPACITY,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
                                  kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
-        run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_perfect', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a12',
+        run_quicksilver(w, PROJECT, f'eif_la_ed_sensitivity_perfect', f'eif_la_ld{HINT_LOOKAHEAD_DEPTH}_a{DEFAULT_CAPACITY}',
                              inst_limit=SIM_INST_COUNT,
-                             active_set_capacity=12,
+                             active_set_capacity=DEFAULT_CAPACITY,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs=local_kwargs())
+                             kwargs=remote_kwargs(100*EPR_UNIT))
 
 elif experiment == 'sim_hint_ed_sensitivity':
     for w in HINT_WORKLOADS:
         for epr_unit_count in [4, 8, 16]:
-            run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_u{epr_unit_count}', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a12',
+            run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_u{epr_unit_count}', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a{DEFAULT_CAPACITY}',
                                  inst_limit=SIM_INST_COUNT,
-                                 active_set_capacity=12,
+                                 active_set_capacity=DEFAULT_CAPACITY,
                                  total_program_inst=get_total_inst_count_for_workload(w),
                                  print_progress=PRINT_PROGRESS,
                                  factory_budget=FACTORY_BUDGET,
                                  kwargs=remote_kwargs(epr_unit_count*EPR_UNIT))
-        run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_perfect', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a12',
+        run_quicksilver(w, PROJECT, f'hint_ed_sensitivity_perfect', f'hint_ld{HINT_LOOKAHEAD_DEPTH}_a{DEFAULT_CAPACITY}',
                              inst_limit=SIM_INST_COUNT,
-                             active_set_capacity=12,
+                             active_set_capacity=DEFAULT_CAPACITY,
                              total_program_inst=get_total_inst_count_for_workload(w),
                              print_progress=PRINT_PROGRESS,
                              factory_budget=FACTORY_BUDGET,
-                             kwargs=local_kwargs())
+                             kwargs=remote_kwargs(100*EPR_UNIT))
 
 else:
     print(f'unknown experiment: {experiment}')

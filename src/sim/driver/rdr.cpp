@@ -437,7 +437,10 @@ RotationDirectedRunahead::allocate_free_qubit(Qubit* q)
     {
         request_queue_.pop_front();
         if (request_queue_.empty())
+        {
+            free_qubits_.push_back(q);   // don't lose the ancilla
             return;
+        }
         r = request_queue_.front();
     }
     request_queue_.pop_front();

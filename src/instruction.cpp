@@ -109,11 +109,13 @@ Instruction::Instruction(const Instruction& other)
     corr_urotseq_array(other.corr_urotseq_array),
     qubit_count(other.qubit_count),
     number(other.number),
+    first_ready_cycle(other.first_ready_cycle),
     cycle_done(other.cycle_done),
     deletable(other.deletable),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
     stall_data(other.stall_data),
     rdr(other.rdr),
+    rx(other.rx),
     current_uop_(other.current_uop_ ? new Instruction(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)
 {}

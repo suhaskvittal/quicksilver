@@ -223,10 +223,15 @@ main(int argc, char* argv[])
     /* initialize memory subsystem */
 
     // determine number of qubits for each trace:
-    size_t main_memory_qubits = std::transform_reduce(traces.begin(), traces.end(), size_t{0},
+    size_t total_trace_qubits = std::transform_reduce(traces.begin(), traces.end(), size_t{0},
                                                 std::plus<size_t>{},
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
-    main_memory_qubits -= compute_local_memory_capacity;
+    // `compute_local_memory_capacity` may exceed the trace's own qubit count (e.g. small/synthetic
+    // traces run with the default local-capacity budget) -- clamp instead of underflowing `size_t`,
+    // which used to request a memory subsystem sized to ~2^64 qubits.
+    size_t main_memory_qubits = (total_trace_qubits > compute_local_memory_capacity)
+                                    ? total_trace_qubits - compute_local_memory_capacity
+                                    : 0;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
 
     /* initialize EPR production (only used for remote memory) */

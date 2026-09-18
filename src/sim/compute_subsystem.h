@@ -153,10 +153,10 @@ public:
     size_t count_available_magic_states() const;
 
     /*
-     * True if a coupled load-store targeting `ld` currently has the EPR credit it would
-     * need (trivially true if `ld` is not resident in remote memory).
+     * True if an access of the given type targeting `ld` currently has the EPR credit it
+     * would need (trivially true if `ld` is not resident in remote memory).
      * */
-    bool epr_credit_available_for(Qubit* ld) const;
+    bool epr_credit_available_for(Qubit* ld, Instruction::Type) const;
 protected:
     long operate() override { return 1; }
 private:

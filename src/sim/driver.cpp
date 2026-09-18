@@ -153,7 +153,12 @@ Driver::print_deadlock_info(std::ostream& out) const
 
     for (auto* c : active_clients_)
     {
-        out << "Client " << static_cast<int>(c->id) << " front layer:\n";
+        out << "Client " << static_cast<int>(c->id)
+            << " dag_inst_count=" << c->dag()->inst_count()
+            << " eof=" << c->eof()
+            << " s_inst_read=" << c->s_inst_read
+            << " s_unrolled_inst_done=" << c->s_unrolled_inst_done
+            << " front layer:\n";
         for (const auto* inst : c->dag()->get_front_layer())
         {
             out << "\t" << *inst;
@@ -332,16 +337,27 @@ Driver::operate()
     }
 
     /* 3. Handle pending instructions for any active clients */
-    size_t ii{last_used_client_idx_};
-    for (size_t i = 0; i < concurrent_clients; i++)
+    //
+    // `active_clients_.size()` is normally `concurrent_clients`, but can be smaller near the
+    // end of a run: `handle_completed_clients()` (above) erases a finished client outright
+    // once `inactive_clients_` is exhausted, rather than replacing it. Indexing/wrapping by
+    // `concurrent_clients` here would then read `active_clients_` out of bounds (or, once it
+    // empties completely, divide by zero below) -- so this uses `active_clients_.size()`
+    // itself, visiting every currently-active client exactly once.
+    const size_t n_active = active_clients_.size();
+    if (n_active > 0)
     {
-        Client* c = active_clients_[ii];
-        progress += fetch_and_execute_instructions_from_client(c);
-        ii++;
-        if (ii >= concurrent_clients)
-            ii = 0;
+        size_t ii{last_used_client_idx_ % n_active};
+        for (size_t i = 0; i < n_active; i++)
+        {
+            Client* c = active_clients_[ii];
+            progress += fetch_and_execute_instructions_from_client(c);
+            ii++;
+            if (ii >= n_active)
+                ii = 0;
+        }
+        last_used_client_idx_ = (last_used_client_idx_+1) % n_active;
     }
-    last_used_client_idx_ = (last_used_client_idx_+1) % active_clients_.size();
 
     if (GL_RDR_ENABLED)
     {
@@ -552,7 +568,7 @@ Driver::update_instruction_stats_on_fetch(inst_ptr inst, const std::vector<Qubit
     _assign_if_empty(inst->stall_data.epr_avail,
                     [this, &operands, t=inst->type] ()
                     {
-                        if (is_memory_access(t) && !compute_subsystem_->epr_credit_available_for(operands[0]))
+                        if (is_memory_access(t) && !compute_subsystem_->epr_credit_available_for(operands[0], t))
                             return std::optional<cycle_type>{};
                         else
                             return std::make_optional(current_cycle());

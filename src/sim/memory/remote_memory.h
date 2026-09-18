@@ -32,31 +32,28 @@ public:
     using typename MemoryLevel::storage_type;
 
     /*
-     * We reserve `EPR_CREDITS_PER_BLOCK` for EPR pairs used
-     * in a memory acccess.
-     * */
-    constexpr static size_t EPR_CREDITS_PER_BLOCK{4};
-
-    /*
      * Statistics:
      * */
     uint64_t s_epr_consumed{0};
     uint64_t s_cycles_stalled_on_epr{0};
 private:
-    std::vector<size_t> credits_in_block_;
-    BulkProducer*       epr_producer_;
+    BulkProducer* epr_producer_;
+    std::vector<cycle_type> epr_producer_adapter_ready_;
 public:
     RemoteMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d, BulkProducer* epr_producer);
 
     cycle_type next_ready_cycle_for_load(Qubit*) const override;
     double     log_fidelity(Client*, double, double, double) const override;
-    bool       has_epr_credit(Qubit*) const override;
+    bool       has_epr_credit(Qubit*, Instruction::Type) const override;
 protected:
-    long operate() override;
-
     MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
+private:
+    bool can_consume_epr(size_t amt) const;
+    void consume_epr(size_t amt, cycle_type);
+
+    size_t epr_adapter_count() const;
 };
 
 ////////////////////////////////////////////////////////////

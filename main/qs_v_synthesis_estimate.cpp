@@ -101,7 +101,7 @@ main(int argc, char* argv[])
 
     while (!generic_strm_eof(istrm))
     {
-        if (inst_count % print_progress == 0)
+        if (print_progress > 0 && inst_count % print_progress == 0)
             std::cerr << "progress: " << inst_count << " instructions read\n";
 
         Instruction* inst = read_instruction_from_stream(istrm);

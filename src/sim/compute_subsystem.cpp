@@ -396,12 +396,12 @@ ComputeSubsystem::count_available_magic_states() const
 ////////////////////////////////////////////////////////////
 
 bool
-ComputeSubsystem::epr_credit_available_for(Qubit* ld) const
+ComputeSubsystem::epr_credit_available_for(Qubit* ld, Instruction::Type t) const
 {
     auto it = memory_level_map_.find(ld);
     if (it == memory_level_map_.end() || it->second < 0)
         return true;   // not currently resident in remote memory
-    return memory_subsystem_[it->second]->has_epr_credit(ld);
+    return memory_subsystem_[it->second]->has_epr_credit(ld, t);
 }
 
 ////////////////////////////////////////////////////////////

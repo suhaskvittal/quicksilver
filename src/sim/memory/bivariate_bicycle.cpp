@@ -16,7 +16,7 @@ namespace sim
 namespace
 {
 
-constexpr size_t NUM_CHANNELS{4};
+constexpr size_t NUM_CHANNELS{1};
 
 /*
  * Computes the width of each channel given number of channels
@@ -108,7 +108,7 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 
     // d rounds of surgery, plus the shift automorphism at the head of them
     cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (!enable_routing_)  // using teleportation -- need extra d cycles (two PPMs)
+    if (is_remote_)  // using teleportation -- need extra d cycles (two PPMs)
         surgery += d;
 
     // the loaded qubit is exposed as soon as surgery completes; the transit out of the block
@@ -161,9 +161,8 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
         return MemoryAccessResult{};
 
     // shift automorphism arises from the second d rounds (the surgery, once routed in)
+    // if using remote memory, then there is an inter-module measurement between credit block and this block
     cycle_type surgery = latency_of_surgery_operation(current_cycle()+transit, idx);
-    if (!enable_routing_)
-        surgery = 0;  // no overhead with teleportation
 
     // unlike load, since store does not affect the execution of dependent instructions,
     // latency exposed to user is 0. But, it does lock down routing resources
@@ -182,11 +181,8 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
         
         // note that if we are using teleportation (`!enable_routing_`) then there is no surgery that occurs as
         // teleportation is compute side
-        if (enable_routing_)
-        {
-            s_surgery_operations++;
-            s_shift_automorphisms++;
-        }
+        s_surgery_operations++;
+        s_shift_automorphisms++;
     }
 
     return out;
@@ -205,22 +201,22 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
 
     // by convention the load goes first, so it takes the one shift automorphism; the store
     // surgery that follows (once the store qubit has transited in) is a plain d rounds
-    cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (!enable_routing_)  // extra PPM with teleportation (no overhead from st)
-        surgery += d;
+    cycle_type ld_surgery = latency_of_surgery_operation(current_cycle(), idx);
+    if (is_remote_)  // extra PPM with teleportation
+        ld_surgery += d;
 
-    MemoryAccessResult out{.latency=surgery, .freq_khz=freq_khz};
+    MemoryAccessResult out{.latency=ld_surgery, .freq_khz=freq_khz};
 
     bool ld_surgery_ok{true};
     if (enable_routing_)
-        ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+surgery);
+        ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
 
     // load exit and store entry are contiguous on the bus
     bool exit_and_st_ok{true};
     if (enable_routing_)
     {
         exit_and_st_ok = routing_.test_resources_between(
-                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+2*transit);
+                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
     }
 
     if (ld_surgery_ok && exit_and_st_ok)
@@ -229,20 +225,17 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
 
         if (enable_routing_)
         {
-            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+surgery);
+            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
             routing_.lock_resources_between(
-                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+2*transit);
+                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
         }
 
         if (enable_routing_)
-            adapters_[idx] = current_cycle()+surgery+2*transit+d; // load surgery, load exit, store entry, then the store's own d-round surgery
+            adapters_[idx] = current_cycle()+ld_surgery+2*transit+d; // load surgery, load exit, store entry, then the store's own d-round surgery
         else
-            adapters_[idx] = current_cycle()+surgery;
+            adapters_[idx] = current_cycle()+ld_surgery+d;  // +d for store.
 
-        if (enable_routing_)
-            s_surgery_operations += 3;
-        else
-            s_surgery_operations += 2;
+        s_surgery_operations += 3;
         s_shift_automorphisms++;
     }
 

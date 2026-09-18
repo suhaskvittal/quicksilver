@@ -64,7 +64,12 @@ class BulkProducer : public Operable
 public:
     struct level_type
     {
-        using event_type = std::pair<size_t, cycle_type>;  // number of resources + event
+        struct event_type
+        {
+            size_t prod_id;
+            size_t count;
+            cycle_type ready_cycle;
+        };
 
         ProducerQuantum traits;
         size_t          producer_count,
@@ -89,6 +94,11 @@ public:
          * Constructor: quantum and count
          * */
         level_type(ProducerQuantum, size_t);
+
+        /*
+         * Adds an event to `event_queue` and updates other structures
+         * */
+        void add_event(size_t producer_id, size_t count, cycle_type ready_cycle);
 
         /*
          * Checks if the head of `event_queue` is at or earlier than `current_cycle`. If so, returns true
@@ -117,11 +127,14 @@ public:
      * */
     bool consume(size_t count);
 
+    size_t top_level_count() const { return levels_.back().producer_count; }
     size_t top_level_buffer_occupancy() const { return levels_.back().unified_buffer_occupancy; }
     size_t top_level_buffer_capacity() const { return levels_.back().unified_buffer_capacity; }
     double top_level_infidelity() const { return levels_.back().traits.infidelity; }
     ProducerQuantum level_traits(size_t i) const { return levels_[i].traits; }
+    ProducerQuantum top_level_traits() { return levels_.back().traits; }
     const level_type& level(size_t i) const { return levels_[i]; }
+    const level_type& top_level() const { return levels_.back(); }
     size_t level_count() const { return levels_.size(); }
 
     /*

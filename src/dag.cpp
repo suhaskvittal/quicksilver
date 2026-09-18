@@ -122,27 +122,37 @@ DAG::remove_instruction_from_front_layer(inst_ptr inst)
 void
 DAG::clear(bool dealloc_inst)
 {
-    // delete all nodes and instructions remaining in the DAG:
-    // can do this efficiently via DFS:
+    // Delete every node (and, if requested, its instruction) remaining in the
+    // DAG. Deallocation doesn't need topological order -- unlike
+    // `operate_on_nodes_in_layer_order`, we don't have to wait until every
+    // predecessor of a node has been processed before touching it -- so this
+    // is a plain mark-and-sweep DFS over `dependent` edges, seeded from the
+    // front layer. `visited` (rather than `tmp_pred_count_`) tracks which
+    // nodes have already been pushed, since a node reachable from more than
+    // one predecessor must still only be deleted once, and `tmp_pred_count_`
+    // may carry residue from an earlier `operate_on_nodes_in_layer_order`
+    // call that never reached its own reset.
+    std::unordered_set<node_type*> visited;
     std::vector<node_type*> dfss;
     for (const auto& [__unused_inst, node] : front_layer_)
+    {
+        visited.insert(node);
         dfss.push_back(node);
+    }
 
     while (!dfss.empty())
     {
         auto* x = dfss.back();
         dfss.pop_back();
 
-        x->tmp_pred_count_++;
-        if (x->tmp_pred_count_ == x->predecessors.size())
+        for (auto* y : x->dependent)
         {
-            // traverse now -- since we will delete `x`
-            for (auto* y : x->dependent)
+            if (visited.insert(y).second)
                 dfss.push_back(y);
-            if (dealloc_inst)
-                delete x->inst;
-            delete x;
         }
+        if (dealloc_inst)
+            delete x->inst;
+        delete x;
     }
 
     // reset the DAG back to an empty state:

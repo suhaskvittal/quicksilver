@@ -7,6 +7,7 @@
 #define SIM_MEMORY_SUBSYSTEM_h
 
 #include "globals.h"
+#include "instruction.h"
 #include "sim/operable.h"
 #include "sim/qubit.h"
 
@@ -121,11 +122,11 @@ public:
     virtual double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const =0;
 
     /*
-     * True if a coupled load-store touching `q` currently has the EPR credit it would
-     * need to proceed. Trivially true for any non-remote level; `RemoteMemory` overrides
-     * this to check its credit pool.
+     * True if an access of the given type touching `q` currently has the EPR credit it
+     * would need to proceed (2 credits for `COUPLED_LOAD_STORE`, 1 otherwise). Trivially
+     * true for any non-remote level; `RemoteMemory` overrides this to check its credit pool.
      * */
-    virtual bool has_epr_credit(Qubit*) const { return true; }
+    virtual bool has_epr_credit(Qubit*, Instruction::Type) const { return true; }
 
     const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:

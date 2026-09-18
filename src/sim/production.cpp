@@ -38,12 +38,25 @@ level_type::level_type(ProducerQuantum q, size_t n)
     preq_resource_count(n, 0)
 {}
 
+void
+level_type::add_event(size_t p_id, size_t n, cycle_type c)
+{
+    event_queue.push_back(event_type{ p_id, n, c });
+    // producer can only become busy when the event is popped
+    next_available_cycle[p_id] = std::numeric_limits<cycle_type>::max();
+    preq_resource_count[p_id] = 0;
+}
+
 bool
 level_type::pop_event(cycle_type c)
 {
-    if (!event_queue.empty() && event_queue.front().second <= c)
+    if (event_queue.empty())
+        return false;
+    auto e = event_queue.front();
+    if (e.ready_cycle <= c)
     {
-        unified_buffer_occupancy += event_queue.front().first;
+        unified_buffer_occupancy += e.count;
+        next_available_cycle[e.prod_id] = c+1;
         event_queue.pop_front();
         return true;
     }
@@ -127,7 +140,7 @@ BulkProducer::next_event_cycle() const
     {
         if (lvl.event_queue.empty())
             continue;
-        cycle_type c = lvl.event_queue.front().second;
+        cycle_type c = lvl.event_queue.front().ready_cycle;
         if (!earliest.has_value() || c < *earliest)
             earliest = c;
     }
@@ -149,7 +162,7 @@ BulkProducer::print_deadlock_info(std::ostream& out) const
             << ", pending_event_deltas = [";
 
         size_t shown{0};
-        for (const auto& [count, cyc] : lvl.event_queue)
+        for (const auto& e : lvl.event_queue)
         {
             if (shown == 5)
             {
@@ -158,7 +171,7 @@ BulkProducer::print_deadlock_info(std::ostream& out) const
             }
             if (shown > 0)
                 out << ",";
-            out << " " << (static_cast<int64_t>(cyc) - static_cast<int64_t>(current_cycle()));
+            out << " " << ( static_cast<int64_t>(e.ready_cycle) - static_cast<int64_t>(current_cycle()) );
             shown++;
         }
         out << " ], total = " << lvl.event_queue.size() << "\n";
@@ -173,7 +186,7 @@ BulkProducer::handle_resource_completions(level_type& lvl, ssize_t i)
 {
     // assumption: cycles are ordered
     long progress{0};
-    while (!lvl.event_queue.empty() && lvl.occupancy_remaining() >= lvl.event_queue.front().first)
+    while (!lvl.event_queue.empty() && lvl.occupancy_remaining() >= lvl.event_queue.front().count)
     {
         if (lvl.pop_event(current_cycle()))
         {
@@ -185,12 +198,6 @@ BulkProducer::handle_resource_completions(level_type& lvl, ssize_t i)
             break;
         }
     }
-    if (!lvl.event_queue.empty()
-        && lvl.event_queue.front().second <= current_cycle()
-        && lvl.occupancy_remaining() < lvl.event_queue.front().first)
-    {
-        lvl.s_cycles_stalled_on_buffer++;
-    }
     return progress;
 }
 
@@ -200,6 +207,12 @@ BulkProducer::handle_resource_completions(level_type& lvl, ssize_t i)
 long
 BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
 {
+    if (lvl.unified_buffer_occupancy >= lvl.unified_buffer_capacity)
+    {
+        lvl.s_cycles_stalled_on_buffer++;
+        return 1;
+    }
+
     if (lvl.traits.is_distiller && i > 0 && levels_[i-1].unified_buffer_occupancy < lvl.traits.d_input_states)
         lvl.s_cycles_stalled_on_input++;
 
@@ -214,24 +227,22 @@ BulkProducer::handle_resource_initiations(level_type& lvl, ssize_t i)
         {
             if (i > 0)
             {
+                size_t states_required = lvl.traits.d_input_states - lvl.preq_resource_count[j];
                 // Add input states to the current level (if it is not the lowest level)
                 // Only proceed if the number of input states is equal to the amount required.
-                size_t input_count = std::min(lvl.traits.d_input_states - lvl.preq_resource_count[j], 
+                size_t input_count = std::min(states_required, 
                                               levels_[i-1].unified_buffer_occupancy);
                 lvl.preq_resource_count[j] += input_count;
+                levels_[i-1].unified_buffer_occupancy -= input_count;
                 if (lvl.preq_resource_count[j] < lvl.traits.d_input_states)
                     continue;
-
-                levels_[i-1].unified_buffer_occupancy -= input_count;
             }
-            lvl.event_queue.push_back(event_type{ lvl.traits.d_output_states, ready_cycle });
+            lvl.add_event(j, lvl.traits.d_output_states, ready_cycle);
         }
         else
         {
-            lvl.event_queue.push_back(event_type{ 1, ready_cycle });
+            lvl.add_event(j, 1, ready_cycle);
         }
-        lvl.next_available_cycle[j] = ready_cycle+1;
-        lvl.preq_resource_count[j] = 0;
         progress++;
     }
     return progress;
