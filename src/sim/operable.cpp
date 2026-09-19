@@ -34,9 +34,10 @@ Operable::tick()
         if (progress == 0)
         {
             cycles_with_no_progress_++;
-            if (cycles_with_no_progress_ >= GL_MAX_CYCLES_WITH_NO_PROGRESS)
+            if (deadlockable && cycles_with_no_progress_ >= GL_MAX_CYCLES_WITH_NO_PROGRESS)
             {
-                std::cerr << name << ": deadlock --------------------------------------\n";
+                std::cerr << name << ": deadlock -------------------------------------- cycle = "
+                            << current_cycle() << "\n";
                 print_deadlock_info(std::cerr);
                 exit(1);
             }

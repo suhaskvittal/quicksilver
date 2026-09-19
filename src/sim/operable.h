@@ -24,6 +24,8 @@ namespace sim
 class Operable
 {
 public:
+    bool deadlockable{false};
+
     const std::string name;
     const double      freq_khz;
 private:

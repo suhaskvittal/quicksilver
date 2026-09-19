@@ -39,6 +39,9 @@ public:
 private:
     BulkProducer* epr_producer_;
     std::vector<cycle_type> epr_producer_adapter_ready_;
+
+    // This is a variable to speedup the pattern of `can_consume_epr() --> consume_epr()`
+    mutable size_t epr_adapter_idx_{};
 public:
     RemoteMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d, BulkProducer* epr_producer);
 

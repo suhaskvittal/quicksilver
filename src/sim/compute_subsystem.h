@@ -106,7 +106,7 @@ public:
      * and the second operand are the pointers to the qubits this instruction
      * operates on.
      * */
-    execute_result_type execute_instruction(inst_ptr, std::vector<Qubit*>);
+    execute_result_type execute_instruction(inst_ptr, const std::vector<Qubit*>&);
 
     /*
      * Implementation of a rotation gate's uops using reaction-limited
@@ -164,7 +164,7 @@ private:
     execute_result_type do_s_like_gate(inst_ptr, Qubit*);
     execute_result_type do_cx_like_gate(inst_ptr, Qubit*, Qubit*);
     execute_result_type do_t_like_gate(inst_ptr, Qubit*);
-    execute_result_type do_memory_access(inst_ptr, std::vector<Qubit*>);
+    execute_result_type do_memory_access(inst_ptr, const std::vector<Qubit*>&);
 };
 
 ////////////////////////////////////////////////////////////

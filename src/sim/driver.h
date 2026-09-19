@@ -112,6 +112,12 @@ private:
      * `stall_monitor_` manages statistics related to stalls
      * */
     stall_monitor_type stall_monitor_;
+
+    /*
+     * This is set in `fetch_and_execute_instruction()`. Corresponds to the earliest
+     * ready cycle across all stalled instructions
+     * */
+    std::optional<cycle_type> skip_cycle_target_;
 public:
     Driver(std::vector<std::string> client_trace_files, 
             size_t concurrent_clients,
@@ -209,9 +215,9 @@ private:
      * RDR implementation -------------------------------------------------------------
      * */
 
-    enum class RDRLookupResult { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
+    enum class RDRHandleOutcome { RETIRE, RETRY, EXECUTE };
 
-    bool rdr_handle_instruction(Client*, inst_ptr, Qubit*);
+    RDRHandleOutcome rdr_handle_instruction(Client*, inst_ptr, Qubit*);
 };
 
 ////////////////////////////////////////////////////////////

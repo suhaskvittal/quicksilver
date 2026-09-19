@@ -179,7 +179,7 @@ ComputeSubsystem::initialize_qubits(std::vector<Qubit*> program_qubits)
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-ComputeSubsystem::execute_instruction(inst_ptr inst, std::vector<Qubit*> args)
+ComputeSubsystem::execute_instruction(inst_ptr inst, const std::vector<Qubit*>& args)
 {
     if (is_software_instruction(inst->type))
         return execute_result_type{.progress=1, .latency=0};
@@ -466,7 +466,7 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 ////////////////////////////////////////////////////////////
 
 execute_result_type
-ComputeSubsystem::do_memory_access(inst_ptr inst, std::vector<Qubit*> args)
+ComputeSubsystem::do_memory_access(inst_ptr inst, const std::vector<Qubit*>& args)
 {
     if (inst->type == Instruction::Type::LOAD || inst->type == Instruction::Type::STORE)
     {

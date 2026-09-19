@@ -112,6 +112,19 @@ is_toffoli_like_instruction(Instruction::Type t)
     return t == Instruction::Type::CCX || t == Instruction::Type::CCZ;
 }
 
+constexpr bool
+is_clifford_instruction(Instruction::Type t)
+{
+    return is_cx_like_instruction(t) || is_s_like_instruction(t) || (t == Instruction::Type::H)
+            || is_software_instruction(t);
+}
+
+constexpr bool
+is_nonclifford_instruction(Instruction::Type t)
+{
+    return is_toffoli_like_instruction(t) || is_rotation_instruction(t) || is_t_like_instruction(t);
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

@@ -16,10 +16,10 @@ case "$MODE" in
     sim)
         EXPERIMENTS=(
             sim_baseline
-#           sim_eif
+            sim_eif
             sim_eif_la
             sim_hint
-#           sim_eif_ed_sensitivity
+            sim_eif_ed_sensitivity
             sim_eif_la_ed_sensitivity
             sim_hint_ed_sensitivity
         )

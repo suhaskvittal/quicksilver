@@ -14,6 +14,7 @@
 #include <cassert>
 #include <iosfwd>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace sim
@@ -87,6 +88,13 @@ public:
     uint64_t s_shift_automorphisms{0};
 protected:
     std::vector<storage_type> blocks_;
+
+    /*
+     * Cache of each resident qubit's block index, populated on store and refreshed
+     * opportunistically by `block_index_of()` whenever it has to fall back to a full
+     * scan. `mutable` because that fallback path is reached from a `const` caller.
+     * */
+    mutable std::unordered_map<Qubit*, size_t> qubit_to_block_idx_;
 public:
     MemoryLevel(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
     virtual ~MemoryLevel() = default;
@@ -160,6 +168,7 @@ MemoryLevel::striped_mapping(Iter begin, Iter end)
             [this, &block_idx] (Qubit* q)
             {
                 this->blocks_[block_idx].insert(q);
+                this->qubit_to_block_idx_[q] = block_idx;
                 block_idx = (block_idx+1) % num_blocks;
             });
 }

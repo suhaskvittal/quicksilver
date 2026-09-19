@@ -108,7 +108,7 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 
     // d rounds of surgery, plus the shift automorphism at the head of them
     cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (is_remote_)  // using teleportation -- need extra d cycles (two PPMs)
+    if (is_credit_based_)  // using teleportation -- need extra d cycles (two PPMs)
         surgery += d;
 
     // the loaded qubit is exposed as soon as surgery completes; the transit out of the block
@@ -117,12 +117,12 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 
     // check if we can lock the routing space for the surgery operation:
     bool surgery_ok{true};
-    if (enable_routing_)
+    if (!is_credit_based_)
         surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle() + surgery);
 
     // routing space out of the memory is also locked for the transit phase
     bool exit_ok{true};
-    if (enable_routing_)
+    if (!is_credit_based_)
     {
         exit_ok = routing_.test_resources_between(
                             idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+transit);
@@ -133,7 +133,7 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
         out.code = MemoryAccessResult::Code::SUCCESS;
         adapters_[idx] = current_cycle() + surgery + transit;
 
-        if (enable_routing_)
+        if (!is_credit_based_)
         {
             routing_.lock_local_resource(idx, current_cycle(), current_cycle()+surgery);
             routing_.lock_resources_between(
@@ -170,17 +170,15 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 
     // check if we can route to the block
     bool ok{true};
-    if (enable_routing_)
+    if (!is_credit_based_)
         ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+transit);
     if (ok)
     {
         out.code = MemoryAccessResult::Code::SUCCESS;
-        if (enable_routing_)
+        if (!is_credit_based_)
             routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+transit);
         adapters_[idx] = current_cycle()+transit+surgery;
-        
-        // note that if we are using teleportation (`!enable_routing_`) then there is no surgery that occurs as
-        // teleportation is compute side
+
         s_surgery_operations++;
         s_shift_automorphisms++;
     }
@@ -202,18 +200,18 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
     // by convention the load goes first, so it takes the one shift automorphism; the store
     // surgery that follows (once the store qubit has transited in) is a plain d rounds
     cycle_type ld_surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (is_remote_)  // extra PPM with teleportation
+    if (is_credit_based_)  // extra PPM with teleportation
         ld_surgery += d;
 
     MemoryAccessResult out{.latency=ld_surgery, .freq_khz=freq_khz};
 
     bool ld_surgery_ok{true};
-    if (enable_routing_)
+    if (!is_credit_based_)
         ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
 
     // load exit and store entry are contiguous on the bus
     bool exit_and_st_ok{true};
-    if (enable_routing_)
+    if (!is_credit_based_)
     {
         exit_and_st_ok = routing_.test_resources_between(
                         idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
@@ -223,17 +221,16 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
     {
         out.code = MemoryAccessResult::Code::SUCCESS;
 
-        if (enable_routing_)
+        if (!is_credit_based_)
         {
             routing_.lock_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
             routing_.lock_resources_between(
                         idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
         }
 
-        if (enable_routing_)
-            adapters_[idx] = current_cycle()+ld_surgery+2*transit+d; // load surgery, load exit, store entry, then the store's own d-round surgery
-        else
-            adapters_[idx] = current_cycle()+ld_surgery+d;  // +d for store.
+        // load surgery, load exit, store entry, then the store's own d-round surgery;
+        // for a credit-based (remote) block `transit == 0`, so this reduces to `ld_surgery+d`.
+        adapters_[idx] = current_cycle()+ld_surgery+2*transit+d;
 
         s_surgery_operations += 3;
         s_shift_automorphisms++;

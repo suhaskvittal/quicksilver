@@ -21,6 +21,12 @@ namespace
 
 using inst_ptr = ComputeSubsystem::inst_ptr;
 
+struct retired_inst_type
+{
+    inst_ptr inst;
+    cycle_type latency;
+};
+
 constexpr size_t STALL_MONITOR_MAX_RANGES{2'048};
 
 /*
@@ -159,31 +165,32 @@ Driver::print_deadlock_info(std::ostream& out) const
             << " s_inst_read=" << c->s_inst_read
             << " s_unrolled_inst_done=" << c->s_unrolled_inst_done
             << " front layer:\n";
-        for (const auto* inst : c->dag()->get_front_layer())
-        {
-            out << "\t" << *inst;
-            if (inst->uop_count() > 0)
-            {
-                out << "\tcurrent uop = " << *inst->current_uop() << ", " << inst->uops_retired()
-                            << " of " << inst->uop_count();
-            }
+        c->dag()->for_each_instruction_in_front_layer(
+                [&, this] (const auto* inst)
+                {
+                    out << "\t" << *inst;
+                    if (inst->uop_count() > 0)
+                    {
+                        out << "\tcurrent uop = " << *inst->current_uop() << ", " << inst->uops_retired()
+                                    << " of " << inst->uop_count();
+                    }
 
-            out << "\tcycle ready (current cycle = " << current_cycle() << "):";
-            std::for_each(inst->q_begin(), inst->q_end(),
-                        [this, c, &out] (auto q_id)
-                        {
-                            Qubit* q = c->qubits()[q_id];
-                            out << " " << q->cycle_available;
-                        });
-            out << "\tin memory: ";
-            std::for_each(inst->q_begin(), inst->q_end(),
-                        [this, c, &out] (auto q_id)
-                        {
-                            Qubit* q = c->qubits()[q_id];
-                            out << compute_subsystem_->is_qubit_in_local_memory(q);
-                        });
-            out << "\n";
-        }
+                    out << "\tcycle ready (current cycle = " << current_cycle() << "):";
+                    std::for_each(inst->q_begin(), inst->q_end(),
+                                [this, c, &out] (auto q_id)
+                                {
+                                    Qubit* q = c->qubits()[q_id];
+                                    out << " " << q->cycle_available;
+                                });
+                    out << "\tin memory: ";
+                    std::for_each(inst->q_begin(), inst->q_end(),
+                                [this, c, &out] (auto q_id)
+                                {
+                                    Qubit* q = c->qubits()[q_id];
+                                    out << compute_subsystem_->is_qubit_in_local_memory(q);
+                                });
+                    out << "\n";
+                });
     }
 }
 
@@ -211,34 +218,18 @@ std::optional<cycle_type>
 Driver::skip_to_cycle() const
 {
     // check that production cannot do anything (top-level buffer is full)
-    const bool ok_to_skip = t_producer_->is_saturated()
-                            && (epr_producer_ == nullptr || epr_producer_->is_saturated())
-                            && !GL_RDR_ENABLED;
-    if (ok_to_skip)
+    const bool ok_to_skip = !GL_RDR_ENABLED;
+    if (ok_to_skip && skip_cycle_target_.has_value())
     {
-        cycle_type earliest_cycle = std::numeric_limits<cycle_type>::max();
-
-        std::vector<Qubit*> operands;
-        operands.reserve(3);
-        for (auto* c : active_clients_)
+        auto s = *skip_cycle_target_;
+        for (auto* p : {t_producer_, epr_producer_})
         {
-            auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
-            for (auto* inst : front_layer)
-            {
-                auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-                operands.clear();
-                std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
-                        [&c] (auto q_id) { return c->qubits()[q_id]; });
-                if (!is_instruction_ready(executed_inst, operands))
-                    continue;
-                cycle_type ready_cycle{0};
-                for (auto* q : operands)
-                    ready_cycle = std::max(ready_cycle, q->cycle_available);
-                earliest_cycle = std::min(earliest_cycle, ready_cycle);
-            }
+            auto e = p->next_event_cycle();
+            if (!p->is_saturated() && e.has_value())
+                s = std::min(s, *e);
         }
-        if (earliest_cycle > current_cycle())
-            return std::make_optional(earliest_cycle);
+        s = std::max(current_cycle()+1, s);
+        return std::make_optional(s);
     }
     return std::nullopt;
 }
@@ -461,72 +452,102 @@ Driver::retire_instruction(Client* c, inst_ptr inst, cycle_type inst_latency)
 long
 Driver::fetch_and_execute_instructions_from_client(Client* c)
 {
-    auto front_layer = c->get_ready_instructions([] (const auto* ) { return true; });
-    std::sort(front_layer.begin(), front_layer.end(),
-            [] (const auto* a, const auto* b) { return a->number < b->number; });
+    skip_cycle_target_.reset();
 
     std::vector<Qubit*> operands;
     operands.reserve(3);
 
     long success_count{0};
-    for (auto* inst : front_layer)
-    {
-        if (GL_ELIDE_CLIFFORDS
-                && !is_rotation_instruction(inst->type) 
-                && !is_t_like_instruction(inst->type) 
-                && !is_memory_access(inst->type))
-        {
-            std::cerr << "Driver::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
-        }
 
-        // translate the operands of the instruction into the actual program qubits
-        operands.clear();
-        auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-        std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
-                [&c] (auto q_id) { return c->qubits()[q_id]; });
-
-        // check if the operands are ready:
-        if (!is_instruction_ready(executed_inst, operands))
-            continue;
-
-        // update stats:
-        inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
-        update_instruction_stats_on_fetch(executed_inst, operands);
-
-        const bool are_operands_ready = std::all_of(operands.begin(), operands.end(),
-                                            [c=current_cycle()] (const auto& q) { return c >= q->cycle_available; });
-        if (!are_operands_ready)
-            continue;
-
-        /* RDR logic: first check if the rotation's magic state is already available    *
-         * if so, then try and apply the magic state                                    */
-        if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
-        {
-            if (rdr_handle_instruction(c, inst, operands[0])) 
-                continue;
-            inst->rdr.visited = true;
-        }
-
-        if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
-        {
-            // reaction-limited T teleportation:
-            auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
-            if (result.progress)
-                if (inst->uops_retired() == inst->uop_count())
-                    retire_instruction(c, inst, result.latency);
-        }
-        else
-        {
-            auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
-            success_count += result.progress;
-            if (result.progress)
+    std::vector<retired_inst_type> retired_inst;
+    retired_inst.reserve(c->dag()->front_layer_size());
+    c->for_each_instruction_in_front_layer(
+            [&, this] (auto* inst)
             {
-                update_instruction_stats_before_retire(executed_inst);
-                if (inst->uop_count() == 0 || inst->retire_current_uop())
-                    retire_instruction(c, inst, result.latency);
-            }
-        }
-    }
+                if (GL_ELIDE_CLIFFORDS
+                        && !is_rotation_instruction(inst->type) 
+                        && !is_t_like_instruction(inst->type) 
+                        && !is_memory_access(inst->type))
+                {
+                    std::cerr << "Driver::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
+                }
+
+                // translate the operands of the instruction into the actual program qubits
+                operands.clear();
+                auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
+                std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
+                        [&c] (auto q_id) { return c->qubits()[q_id]; });
+
+                // check if the operands are ready:
+                if (!is_instruction_ready(executed_inst, operands))
+                    return;
+
+                // update stats:
+                inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
+                update_instruction_stats_on_fetch(executed_inst, operands);
+
+                bool are_operands_ready{true};
+                cycle_type s{};
+                for (auto* q : operands)
+                {
+                    if (current_cycle() < q->cycle_available)
+                    {
+                        are_operands_ready = false;
+                        s = std::max(q->cycle_available, s);
+                    }
+                }
+
+                if (!are_operands_ready)
+                {
+                    if (skip_cycle_target_.has_value())
+                        skip_cycle_target_ = std::min(s, *skip_cycle_target_);
+                    else
+                        skip_cycle_target_ = s;
+                    return;
+                }
+
+                /* RDR logic: first check if the rotation's magic state is already available    *
+                 * if so, then try and apply the magic state                                    */
+                if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
+                {
+                    auto outcome = rdr_handle_instruction(c, inst, operands[0]);
+                    if (outcome == RDRHandleOutcome::RETIRE)
+                    {
+                        cycle_type latency = operands[0]->cycle_available - current_cycle();
+                        retired_inst.push_back(retired_inst_type{inst, latency});
+                        return;
+                    }
+                    else if (outcome == RDRHandleOutcome::RETRY)
+                    {
+                        return;
+                    }
+                    inst->rdr.visited = true;
+                }
+
+                if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
+                {
+                    // reaction-limited T teleportation:
+                    auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
+                    if (result.progress)
+                        if (inst->uops_retired() == inst->uop_count())
+                            retired_inst.push_back(retired_inst_type{inst, result.latency});
+                }
+                else
+                {
+                    auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
+                    success_count += result.progress;
+                    if (result.progress)
+                    {
+                        update_instruction_stats_before_retire(executed_inst);
+                        if (inst->uop_count() == 0 || inst->retire_current_uop())
+                            retired_inst.push_back(retired_inst_type{inst, result.latency});
+                    }
+                }
+            });
+
+    // retire all completed inst
+    for (const auto& r : retired_inst)
+        retire_instruction(c, r.inst, r.latency);
 
     // recursively call `fetch_and_execute_instruction_from_client` if progress was made
     if (success_count)
@@ -619,16 +640,16 @@ Driver::is_instruction_ready(inst_ptr inst, const std::vector<Qubit*>& operands)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-bool
+Driver::RDRHandleOutcome
 Driver::rdr_handle_instruction(Client* c, inst_ptr inst, Qubit* q)
 {
     if (inst->rdr.visited)
-        return false;
+        return RDRHandleOutcome::EXECUTE;
 
     if (!inst->rdr.pending)
     {
         rdr_->do_runahead(c, inst);
-        return false;
+        return RDRHandleOutcome::EXECUTE;
     }
     else if (rdr_->is_done(inst))
     {
@@ -637,11 +658,7 @@ Driver::rdr_handle_instruction(Client* c, inst_ptr inst, Qubit* q)
         auto outcome = rdr_->apply_magic_state(inst, q);
         if (outcome == outcome_type::GOOD)
         {
-//          std::cout << "RDR instruction latency: " << (q->cycle_available - *inst->first_ready_cycle) 
-//                      << " (apply time = " << (q->cycle_available - current_cycle()) 
-//                      << "\n";
-            retire_instruction(c, inst, q->cycle_available - current_cycle());
-            return true;
+            return RDRHandleOutcome::RETIRE;
         }
         else if (outcome == outcome_type::NEEDS_CORRECTION)
         {
@@ -649,20 +666,26 @@ Driver::rdr_handle_instruction(Client* c, inst_ptr inst, Qubit* q)
             inst->urotseq = inst->corr_urotseq_array.front();
             inst->corr_urotseq_array.pop_front();
             rdr_->do_runahead(c, inst);
-            return false;
+            return RDRHandleOutcome::EXECUTE;
         }
         else  // `outcome_type::ROUTING_CONTENTION`
         {
             // idle until we get routing space for the magic state
-            return true;
+            return RDRHandleOutcome::RETRY;
         }
     }
     else
     {
         bool inv = rdr_->interrupt_and_invalidate_if_necessary(inst);
         if (inv)
+        {
             rdr_->do_runahead(c, inst);
-        return !inv;
+            return RDRHandleOutcome::EXECUTE;
+        }
+        else
+        {
+            return RDRHandleOutcome::RETRY;
+        }
     }
 }
 

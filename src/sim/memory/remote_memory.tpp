@@ -31,8 +31,7 @@ TEMPL_CLASS::RemoteMemory(double freq_khz,
     // space to contend for, nor a bus transit phase in the access latency.
     if constexpr (std::is_same<IMPL, BBMemory>::value)
     {
-        this->enable_routing_ = false;
-        this->is_remote_ = true;
+        this->is_credit_based_ = true;
     }
 }
 
@@ -153,23 +152,26 @@ TEMPL_CLASS::coupled_load_store_impl(size_t idx, storage_type& s, Qubit* ld, Qub
 TEMPL_PARAMS bool
 TEMPL_CLASS::can_consume_epr(size_t n) const
 {
-    auto it = std::find_if(epr_producer_adapter_ready_.begin(), epr_producer_adapter_ready_.end(),
+    auto begin = epr_producer_adapter_ready_.begin(), 
+         end = epr_producer_adapter_ready_.end();
+    auto it = std::find_if(begin, end,
                             [this] (cycle_type c) { return c <= this->current_cycle(); });
-    if (it == epr_producer_adapter_ready_.end())
+    if (it == end)
+    {
         return false;
+    }
     else
+    {
+        epr_adapter_idx_ = std::distance(begin, it);
         return epr_producer_->top_level_buffer_occupancy() >= n;
+    }
 }
 
 
 TEMPL_PARAMS void
 TEMPL_CLASS::consume_epr(size_t n, cycle_type latency)
 {
-    auto it = std::find_if(epr_producer_adapter_ready_.begin(), epr_producer_adapter_ready_.end(),
-                            [this] (cycle_type c) { return c <= this->current_cycle(); });
-    if (it == epr_producer_adapter_ready_.end())
-        std::cerr << "RemoteMemory::consume_epr(): no adapter available" << _die{};
-    *it = this->current_cycle() + latency;
+    epr_producer_adapter_ready_[epr_adapter_idx_] = this->current_cycle() + latency;
     epr_producer_->consume(n);
     s_epr_consumed += n;
 }

@@ -291,6 +291,7 @@ main(int argc, char* argv[])
                                             t_producer,
                                             epr_producer,
                                             memory_subsystem);
+    driver->deadlockable = true;
 
     /* initialize simulation */
 

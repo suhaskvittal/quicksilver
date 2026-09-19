@@ -92,26 +92,11 @@ public:
      * */
     void clear(bool dealloc_inst=true);
 
-    /*
-     * This returns a list of all instructions in the front layer.
-     * These are the oldest instructions in the program.
-     * */
-    std::vector<inst_ptr> get_front_layer() const { return get_front_layer_if([] (const auto*) { return true; }); }
-
-    /*
-     * O(1) front-layer width, for callers that only need the count
-     * (e.g. visualization sampling) and want to avoid materializing
-     * a vector via `get_front_layer()`.
-     * */
-    size_t front_layer_size() const { return front_layer_.size(); }
-
-    /*
-     * This is a modified version of the above function that
-     * returns instructions in the front layer that meet the given
-     * predicate.
-     * */
     template <class Pred>
     std::vector<inst_ptr> get_front_layer_if(const Pred&) const;
+
+    template <class Callback>
+    void for_each_instruction_in_front_layer(const Callback&) const;
 
     /*
      * Executes the given callback for `min_layer` to `max_layer`. The callback
@@ -131,7 +116,13 @@ public:
     template <GraphSearchType S, class Callback>
     void search(inst_ptr src, const Callback&) const;
 
+    /*
+     * Simple one-liners:
+     * */
     size_t inst_count() const { return inst_count_; }
+
+    std::vector<inst_ptr> get_front_layer() const { return get_front_layer_if([] (const auto*) { return true; }); }
+    size_t front_layer_size() const { return front_layer_.size(); }
 private:
 
     /*
