@@ -19,9 +19,9 @@ PROJECT = 'hint_isca2026'
 '''
 HINT_WORKLOADS = [
     'benchmarks/bin/BQ_beauregard_shor_rsa256_iter_4.xz',
-#   'benchmarks/bin/BQ_chromium_t.xz',
-#   'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
-#   'benchmarks/bin/BQ_hc3h2cn_t.xz',
+    'benchmarks/bin/BQ_chromium_t.xz',
+    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
+    'benchmarks/bin/BQ_hc3h2cn_t.xz',
     'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz',
 ]
 
