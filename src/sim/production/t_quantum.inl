@@ -62,6 +62,6 @@ t_15to1_distillation(size_t dx, size_t dz, size_t dm, double e)
                 .d_output_states = 1,
                 .infidelity = infidelity,
                 .physical_qubit_count = physical_qubit_count,
-                .cycles_per_production = 6*dm
+                .cycles_per_production = retry_adjusted_latency(6*dm, 15, e)
             };
 }

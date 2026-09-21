@@ -57,7 +57,7 @@ ed_protocol_1a(EDImplMethod m)
     }
 
     q.physical_qubit_count = _ed_physical_qubit_count(m, 14, dp, dm);
-    q.cycles_per_production = _ed_latency(m, 14, 8, dp, dm);
+    q.cycles_per_production = retry_adjusted_latency(_ed_latency(m, 14, 8, dp, dm), 14, 0.01);
     return q;
 }
 
@@ -88,7 +88,7 @@ ed_protocol_1b(EDImplMethod m)
     }
 
     q.physical_qubit_count = _ed_physical_qubit_count(m, 32, dp, dm);
-    q.cycles_per_production = _ed_latency(m, 32, 7, dp, dm);
+    q.cycles_per_production = retry_adjusted_latency(_ed_latency(m, 32, 7, dp, dm), 32, 4.4e-6);
     return q;
 }
 
@@ -122,7 +122,7 @@ ed_protocol_2a(EDImplMethod m)
     }
 
     q.physical_qubit_count = _ed_physical_qubit_count(m, 4, dp, dm);
-    q.cycles_per_production = _ed_latency(m, 4, 2, dp, dm);
+    q.cycles_per_production = retry_adjusted_latency(_ed_latency(m, 4, 2, dp, dm), 4, 0.01);
     return q;
 }
 
@@ -153,7 +153,7 @@ ed_protocol_2b(EDImplMethod m)
     }
 
     q.physical_qubit_count = _ed_physical_qubit_count(m, 27, dp, dm);
-    q.cycles_per_production = _ed_latency(m, 28, 9, dp, dm);
+    q.cycles_per_production = retry_adjusted_latency(_ed_latency(m, 28, 9, dp, dm), 27, 4.9e-4);
     return q;
 }
 
