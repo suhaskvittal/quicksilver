@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   5 February 2026
+ *  contributor: OpenAI Codex (RoutingBase migration, 30 September 2026)
  * */
 
 #ifndef SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
@@ -26,18 +27,11 @@ namespace routing
  *
  * Each channel can be accessed concurrently.
  *
- * We want to have a "high-level" access mechanism. For example,
- * if I have a pointer to a qubit, then I want to use that pointer
- * to manipulate the routing space. This is generally hard to 
- * implement, so we give this power to the user using a CRTP (see `Impl`).
- *
- * `Impl` should implement a function `translate()` that takes
- * a type of interest and returns `id_type` (see below).
- * The types that need to be supported by `Impl` are those that
- * are potentially passed into:
+ * `Translator` converts application objects to routing IDs. It must
+ * implement `translate()` for nonintegral types passed into:
  *  (1) `set_location()`
- *  (2) `test_and_lock_local_resource()`
- *  (3) `test_and_lock_resources_between()`
+ *  (2) `test_local_resource()` and `lock_local_resource()`
+ *  (3) `test_resources_between()` and `lock_resources_between()`
  *  etc.
  *
  * Each "C" in the channel is a column, which are organized into
@@ -54,11 +48,10 @@ namespace routing
 constexpr int64_t MCB_LEFT_ENTRY{-1};
 constexpr int64_t MCB_RIGHT_ENTRY{-2};
 
-template <class Impl>
-class MultiChannelBus
+template <class Translator>
+class MultiChannelBus : public sim::RoutingBase<Translator>
 {
 public:
-    using id_type = int64_t;
     using channel_type = std::vector<Resource>;
     using coord_type = std::tuple<int, int, int>;
 
@@ -69,31 +62,13 @@ private:
     std::vector<channel_type> channels_;
 public:
     MultiChannelBus(size_t num_channels, size_t num_resources_per_channel);
+    MultiChannelBus(size_t num_channels, size_t num_resources_per_channel, Translator);
 
     /*
      * Sets the location of the given object in the routing space.
      * */
     template <class T> 
     void set_location(T, int channel, int row, int column);
-
-    /*
-     * Returns true if the requested resources are available.
-     * */
-    template <class T>
-    bool test_local_resource(T, cycle_type from, cycle_type to) const;
-
-    template <class T, class U>
-    bool test_resources_between(T, U, cycle_type from, cycle_type to) const;
-
-    /*
-     * Attempts to lock the given reosurce. If the resource is not lockable,
-     * an error is thrown.
-     * */
-    template <class T>
-    void lock_local_resource(T, cycle_type from, cycle_type to);
-
-    template <class T, class U>
-    void lock_resources_between(T, U, cycle_type, cycle_type);
 
     /*
      * `swap_locations_of()` and `replace()` are useful for
@@ -111,40 +86,31 @@ public:
     template <class T, class U>
     void replace(T outgoing, U incoming);
 
-    template <class T>
-    const Resource& get_local_resource_ref(T) const;
-
     /*
      * Returns number of patches between two points.
      * */
     template <class T, class U>
     size_t patch_distance(T, U) const;
 
-    /*
-     * Calls `Callback` for each routing resource between the two
-     * objects. `Callback` is given a `const Resource&`.
-     *
-     * If `Callback` returns true, then the function exits
-     * early.
-     * */
+    /* Calls `Callback` for each routing resource between the objects.
+     * The time interval is accepted for the common layout interface; the
+     * bus selects its path independently of resource availability. */
+    template <class T, class U, class Callback>
+    void for_each_resource_between(T, U, cycle_type from, cycle_type to, const Callback&) const;
+
     template <class T, class U, class Callback>
     void for_each_resource_between(T, U, const Callback&) const;
 private:
-    /*
-     * This function calls `Impl::translate()`, but only if `T` is not
-     * some integral type.
-     * */
-    template <class T>
-    id_type translate(T) const; 
+    bool _test_local_resource(id_type, cycle_type, cycle_type) const override;
+    bool _test_resources_between(id_type, id_type, cycle_type, cycle_type) const override;
+    void _lock_local_resource(id_type, cycle_type, cycle_type) override;
+    void _lock_resources_between(id_type, id_type, cycle_type, cycle_type) override;
 
-    /*
-     * These functions
-     * */
     template <class T>
-    auto& _get_local_resource_ref(this auto& self, T);
+    auto& get_local_resource_ref(this auto& self, T);
 
-    template <class T, class U, class Callback>
-    void _for_each_resource_between(this auto& self, T, U, const Callback&);
+    template <class Callback>
+    void _for_each_resource_between(this auto& self, id_type, id_type, const Callback&);
 };
 
 ////////////////////////////////////////////////////////////

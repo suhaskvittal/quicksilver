@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
+ *  contributor: OpenAI Codex (routing translator migration, 30 September 2026)
  * */
 
 #ifndef SIM_MEMORY_BIVARIATE_BICYCLE_h
@@ -20,12 +21,8 @@ class BBMemory : public MemoryLevel
 public:
     using typename MemoryLevel::storage_type;
 
-    struct routing_type : public routing::MultiChannelBus<routing_type>
-    {
-        routing_type(size_t c, size_t w)
-            :MultiChannelBus(c, w)
-        {}
-    };
+    struct routing_translator {};
+    using routing_type = routing::MultiChannelBus<routing_translator>;
 protected:
     routing_type routing_;
 

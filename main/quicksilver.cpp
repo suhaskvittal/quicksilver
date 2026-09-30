@@ -71,12 +71,14 @@ main(int argc, char* argv[])
     int64_t skip_threshold;
     bool    skip_verbose;
     bool    jit;
+    bool    topols_rz_standalone;
     std::string regime;
     int64_t total_inst;
 
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
     int64_t compute_cycle_time_ns;
+    std::string routing_layout;
 
     int64_t memory_cycle_time_ns;
 
@@ -113,6 +115,7 @@ main(int argc, char* argv[])
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
                       compute_local_memory_capacity, 12)
+        .optional("", "--routing-layout", "Compute routing layout: bus or edpc", routing_layout, "bus")
         .optional("", "--compute-cycle-time-ns", 
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
@@ -121,6 +124,8 @@ main(int argc, char* argv[])
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
 
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
+        .optional("", "--topols-rz", "Use TopoLS external-ancilla Rz timing model (RDR preparation takes precedence when -rdr is enabled)", sim::GL_TOPOLS_RZ, false)
+        .optional("", "--topols-rz-standalone", "Run TopoLS ancilla-side preparation even when -rdr selects a corrective-sequence ISA", topols_rz_standalone, false)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
         .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
         .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 16)
@@ -167,7 +172,13 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+    sim::GL_TOPOLS_RZ |= topols_rz_standalone;
+    sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0 && !topols_rz_standalone);
+    if (routing_layout != "bus" && routing_layout != "edpc")
+        std::cerr << "Unknown routing layout: " << routing_layout << _die{};
+    const auto compute_routing_layout = routing_layout == "edpc"
+                                            ? sim::ComputeSubsystem::RoutingLayout::EDPC
+                                            : sim::ComputeSubsystem::RoutingLayout::BUS;
 
     if (oc_base_ro_latency >= 0)
     {
@@ -280,7 +291,8 @@ main(int argc, char* argv[])
                                                          compute_code_distance,
                                                          compute_local_memory_capacity,
                                                          t_producer,
-                                                         memory_subsystem);
+                                                         memory_subsystem,
+                                                         compute_routing_layout);
 
     /* initialize driver */
 
@@ -361,19 +373,27 @@ main(int argc, char* argv[])
            rltp_footprint,
            rdr_storage_overhead,
            rdr_footprint;
-    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
-    program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+    // The bus estimate uses 0.5 routing patches per program patch. EDPC uses
+    // its allocated grid: one data patch per four physical patch positions.
+    if (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC)
+        program_active_memory_footprint =
+            (compute_subsystem->edpc_patch_count() - 4 * compute_subsystem->dedicated_ancilla_count)
+            * sc_footprint;
+    else
+        program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
     // RLTP physical qubit overheads:
     rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
                                 sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
                              ) * sc_footprint;
     // RDR phsyical qubit overheads:
-    rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+    rdr_storage_overhead = sim::GL_RDR_ENABLED && sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                               ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2)
                                     * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
                               : 0;
-    rdr_footprint = sim::GL_RDR_ENABLED
-                        ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+    rdr_footprint = (sim::GL_RDR_ENABLED || sim::GL_TOPOLS_RZ)
+                        ? ((compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC
+                                ? 4 * sim::GL_RDR_CAPACITY * sc_footprint
+                                : 1.5 * sim::GL_RDR_CAPACITY * sc_footprint) + rdr_storage_overhead)
                         : 0;
     const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
 

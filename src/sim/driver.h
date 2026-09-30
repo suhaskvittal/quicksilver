@@ -10,6 +10,7 @@
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
 #include "sim/driver/rdr.h"
+#include "sim/driver/topols_rz.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 #include "sim/stall_monitor.h"
@@ -107,6 +108,7 @@ private:
      * Rotation directed runahead logic (RDR):
      * */
     driver::RotationDirectedRunahead* rdr_{nullptr};
+    driver::TopolsRz* topols_rz_{nullptr};
 
     /*
      * `stall_monitor_` manages statistics related to stalls

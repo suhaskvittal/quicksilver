@@ -5,3 +5,7 @@ Since initial MICRO submission:
 4. Lookahead incremented when request cannot be found, decremented when request is invalidated in fifo.
 5. Min cost scaling for request is 4x instead of 2x
 6. RDR degree is 1 instead of 4
+
+Since HPCA submission:
+1. removed GL_REACTION_TIME from cultivation equation
+2. shifted factory costs by 5k.

@@ -162,11 +162,13 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
         return;
 
 #if defined(RDR_DEBUG)
-        std::cout << "-------------------------------------------------- LD = " << lookahead_depth_ << "\n";
+        std::cout << "-------------------------------------------------- LD = " << lookahead_depth_ 
+            << "\nfrom = " << *from
+            << "\n";
 #endif
 
     const double cov = (s_requests_started < 100) ? 1.0 : coverage();
-    const double tml = (s_requests_completed < 100) ? 1.0 : timeliness();
+    const double tml = (s_requests_started < 100) ? 1.0 : timeliness();
 
     size_t start_layer = 0,
            end_layer = GL_RDR_START_LAYER + lookahead_depth_;
@@ -180,7 +182,7 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
             degree *= 2;
     }
 
-#if defined(RDR_DEBUG) || defined(RDR_DEBUG_ADAPTIVE_LOOKAHEAD)
+#if defined(RDR_DEBUG)
     if (degree != GL_RDR_DEGREE)
         std::cout << "coverage = " << cov << ", degree = " << degree << "\n";
 #endif
@@ -206,6 +208,8 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
                     [this, c, cov, tml, degree, &time_to_rotation, &request_count, &install_count] 
                     (inst_ptr x, size_t layer)
                     {
+                        if (install_count >= degree)
+                            return;
                         cycle_type t = time_to_rotation[x->qubits[0]];
 
                         auto result = _update_time_to_rotation(x, 
@@ -234,14 +238,6 @@ RotationDirectedRunahead::do_runahead(Client* c, inst_ptr from)
                         request_count++;
                     });
 
-    if (install_count == 0 && !GL_RDR_FIXED_LOOKAHEAD)
-    {
-        const auto delta = (request_count == 0) ? LOOKAHEAD_DELTA : 1;
-        lookahead_depth_ = std::clamp(lookahead_depth_ + delta, MIN_LOOKAHEAD, MAX_LOOKAHEAD);
-#if defined(RDR_DEBUG) || defined(RDR_DEBUG_ADAPTIVE_LOOKAHEAD)
-        std::cout << "lookahead depth increased to " << lookahead_depth_ << " (no requests found)\n";
-#endif
-    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -336,26 +332,25 @@ RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
         const size_t progress = a_it->inst->uops_retired();
         if (progress < GL_RDR_INV_THRESHOLD*a_it->inst->uop_count())
         {
+#if defined(RDR_DEBUG)
+            std::cout << "Request invalidated (out-of-queue) @ t = " << current_cycle()
+                        << "\n\tinst = " << *a_it->inst
+                        << "\n\tinstall = " << a_it->install_cycle
+                        << "\n\texpected start = " << a_it->expected_start_cycle
+                        << "\n\tstart = " << a_it->rdr_start_cycle
+                        << "\n\tprogress = " << progress << "/" << a_it->inst->uop_count()
+                        << "\n";
+#endif
             // kill this request:
             free_qubits_.push_back(a_it->pinned_qubit);
             s_requests_invalidated++;
             active_requests_.erase(a_it);
             request_killed = true;
-
-            if (!GL_RDR_FIXED_LOOKAHEAD)
-            {
-                lookahead_depth_ = std::clamp(lookahead_depth_ - LOOKAHEAD_DELTA, MIN_LOOKAHEAD, MAX_LOOKAHEAD);
-#if defined(RDR_DEBUG) || defined(RDR_DEBUG_ADAPTIVE_LOOKAHEAD)
-                std::cout << "lookahead depth decreased to " << lookahead_depth_ << " (demand invalidation)\n";
-#endif
-            }
         }
         else
         {
             if (!a_it->interrupted)
             {
-                a_it->interrupted = true;
-                s_requests_interrupted++;
 #if defined(RDR_DEBUG)
                 std::cout << "Request interrupted @ t = " << current_cycle()
                             << "\n\tinst = " << *a_it->inst
@@ -364,14 +359,8 @@ RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
                             << "\n\tstart = " << a_it->rdr_start_cycle
                             << "\n";
 #endif
-
-                if (!GL_RDR_FIXED_LOOKAHEAD)
-                {
-                    lookahead_depth_ = std::clamp(lookahead_depth_ - 1, MIN_LOOKAHEAD, MAX_LOOKAHEAD);
-#if defined(RDR_DEBUG) || defined(RDR_DEBUG_ADAPTIVE_LOOKAHEAD)
-                    std::cout << "lookahead depth decreased to " << lookahead_depth_ << " (invalidate before issue)\n";
-#endif
-                }
+                a_it->interrupted = true;
+                s_requests_interrupted++;
             }
         }
     }
@@ -403,12 +392,13 @@ RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 double
 RotationDirectedRunahead::coverage() const
 {
-    return fpdiv(s_requests_completed, s_requests_submitted);
+    return fpdiv(s_requests_started, s_requests_submitted);
 }
 
 double
 RotationDirectedRunahead::timeliness() const
 {
+//  return fpdiv(s_requests_completed, s_requests_started);
     return fpdiv(s_requests_completed - s_requests_interrupted, s_requests_completed);
 }
 
@@ -513,7 +503,7 @@ _update_time_to_rotation(const inst_ptr inst,
 
     int cost;
     if (is_rotation_instruction(inst->type))
-        cost = inst->uop_count() * (d+GL_REACTION_TIME) * (1.0 - 0.5*cov);
+        cost = inst->uop_count() * (d+GL_REACTION_TIME) * (1.0 - 0.5*(cov*tml));
     else if (is_toffoli_like_instruction(inst->type))
         cost = 7*(d+GL_REACTION_TIME) + 8*2*d;
     else
@@ -522,8 +512,10 @@ _update_time_to_rotation(const inst_ptr inst,
     if (is_rotation_instruction(inst->type) && sim::GL_RLTP_DEGREE > 0)
         cost = cost /  sim::GL_RLTP_DEGREE; 
 
+    double adjusted_cost = GL_RDR_COST_SCALE*(1.0/cov)*(1.0/tml)*cost;
+
     bool good_rotation = is_rotation_instruction(inst->type);
-    good_rotation &= (GL_RDR_COST_SCALE*(1.0/cov)*(1.0/tml)*cost < time_to_rotation[inst->qubits[0]]);
+    good_rotation &= adjusted_cost < time_to_rotation[inst->qubits[0]];
     if (good_rotation)
     {
         if (!inst->rdr.pending && !inst->rdr.visited)
@@ -536,9 +528,12 @@ _update_time_to_rotation(const inst_ptr inst,
     {
         std::cout << "inst = " << *inst 
                     << ", cost = " << cost 
+                    << ", adjusted cost = " << adjusted_cost
                     << ", t = " << time_to_rotation[inst->qubits[0]] 
                     << ", L = " << layer
                     << ", good = " << good_rotation
+                    << ", cov = " << cov
+                    << ", tml = " << tml
                     << "\n";
     }
 #endif

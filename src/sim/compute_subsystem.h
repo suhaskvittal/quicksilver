@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
+ *  contributor: OpenAI Codex (routing pointer and EDPC integration, 30 September 2026)
  * */
 
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
@@ -11,7 +12,9 @@
 #include "sim/production.h"
 #include "sim/memory_level.h"
 #include "sim/routing/multi_channel_bus.h"
+#include "sim/routing/edpc_layout.h"
 
+#include <type_traits>
 #include <vector>
 
 namespace sim
@@ -39,17 +42,18 @@ public:
     };
 
     /*
-     * Routing implementation:
+     * Routing translator (translates qubits to a unique routing id) and data types
      * */
-    struct routing_type : routing::MultiChannelBus<routing_type>
+    struct routing_translator
     {
-        using routing::MultiChannelBus<routing_type>::id_type;
-
         ComputeSubsystem* c;
 
-        routing_type(ComputeSubsystem*);
-        id_type translate(Qubit*) const;
+        routing_translator(ComputeSubsystem*);
+        routing::id_type translate(Qubit*) const;
     };
+
+    enum class RoutingLayout { BUS, EDPC };
+    using routing_ptr = std::unique_ptr<RoutingBase<routing_translator>>;
 
     /*
      * Array type for tracking instruction frequency
@@ -66,6 +70,7 @@ public:
      * This is mainly used so that we know where to route.
      * */
     const size_t dedicated_ancilla_count;
+    const RoutingLayout routing_layout;
 
     /*
      * Statistics:
@@ -76,7 +81,7 @@ private:
     BulkProducer* t_producer_;
     memory_subsystem_type memory_subsystem_;
 
-    routing_type routing_;
+    routing_ptr routing_;
 
     local_storage_type dedicated_ancilla_;
 
@@ -96,7 +101,8 @@ public:
                         size_t code_distance, 
                         size_t local_memory_capacity,
                         BulkProducer* t_producer,
-                        memory_subsystem_type memory_subsystem);
+                        memory_subsystem_type memory_subsystem,
+                        RoutingLayout routing_layout = RoutingLayout::BUS);
     ~ComputeSubsystem();
 
     void initialize_qubits(std::vector<Qubit*> program_qubits);
@@ -137,6 +143,13 @@ public:
     bool rdr_apply_rotation_magic_state_from_surface_code(Qubit* target, Qubit* magic_state);
     bool rdr_apply_rotation_magic_state_from_memory(Qubit*);
 
+    /* Reserve the joint ZZ measurement that begins the TopoLS Rz construction. */
+    bool topols_begin_rotation(Qubit* target, Qubit* ancilla);
+
+    template <class T, class U, class Callback>
+    void for_each_resource_between(T, U, cycle_type from, cycle_type to,
+                                   const Callback&) const;
+
     /*
      * `log_fidelity()` returns the natural log of the fidelity of the compute subsystem (no error
      * occurs during execution) for the given `Client*`. `scale` indicates the amount to scale
@@ -149,6 +162,7 @@ public:
     BulkProducer* t_producer() const { return t_producer_; }
     const memory_subsystem_type& memory_subsystem() const { return memory_subsystem_; }
     const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
+    size_t edpc_patch_count() const;
 
     size_t count_available_magic_states() const;
 
@@ -169,6 +183,24 @@ private:
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+/* Definition of ComputeSubsystem's templated routing traversal. */
+template <class T, class U, class Callback>
+void
+ComputeSubsystem::for_each_resource_between(T src, U dst, cycle_type from, cycle_type to,
+                                            const Callback& callback) const
+{
+    if (routing_layout == RoutingLayout::BUS)
+    {
+        auto* bus = static_cast<const routing::MultiChannelBus<routing_translator>*>(routing_.get());
+        bus->for_each_resource_between(src, dst, from, to, callback);
+    }
+    else
+    {
+        auto* edpc = static_cast<const routing::EDPCLayout<routing_translator>*>(routing_.get());
+        edpc->for_each_resource_between(src, dst, from, to, callback);
+    }
+}
 
 } // namespace sim
 

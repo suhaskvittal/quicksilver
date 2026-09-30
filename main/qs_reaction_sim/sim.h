@@ -1,6 +1,7 @@
 /*
  * author: Suhas Vittal
  * date:    10 July 2026
+ * contributor: OpenAI Codex (routing translator migration, 30 September 2026)
  * */
 
 #ifndef RS_SIM_h
@@ -76,10 +77,9 @@ public:
      * such as number of program qubits per row, are in the
      * source file.
      * */
-    struct routing_type : public sim::routing::MultiChannelBus<routing_type>
+    struct routing_translator {};
+    struct routing_type : public sim::routing::MultiChannelBus<routing_translator>
     {
-        using sim::routing::MultiChannelBus<routing_type>::id_type;
-        
         routing_type(size_t n);
     };
 

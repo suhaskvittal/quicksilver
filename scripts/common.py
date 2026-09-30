@@ -4,19 +4,19 @@ import os
 from sys import argv
 
 WORKLOADS = [
-    'benchmarks/bin/BQ_chromium_q_sel.xz',
     'benchmarks/bin/BQ_chromium_q_prep.xz',
+#   'benchmarks/bin/BQ_chromium_q_sel.xz',
     'benchmarks/bin/BQ_chromium_t.xz',
     'benchmarks/bin/BQ_bose_hubbard_q.xz',
     'benchmarks/bin/BQ_bose_hubbard_t.xz',
-    'benchmarks/bin/BQ_c2h4o_ethylene_oxide_q_sel.xz',
     'benchmarks/bin/BQ_c2h4o_ethylene_oxide_q_prep.xz',
+#   'benchmarks/bin/BQ_c2h4o_ethylene_oxide_q_sel.xz',
     'benchmarks/bin/BQ_c2h4o_ethylene_oxide_t.xz',
-    'benchmarks/bin/BQ_hc3h2cn_q_sel.xz',
     'benchmarks/bin/BQ_hc3h2cn_q_prep.xz',
+#   'benchmarks/bin/BQ_hc3h2cn_q_sel.xz',
     'benchmarks/bin/BQ_hc3h2cn_t.xz',
-    'benchmarks/bin/BQ_manganese_nitride_q_sel.xz',
     'benchmarks/bin/BQ_manganese_nitride_q_prep.xz',
+#   'benchmarks/bin/BQ_manganese_nitride_q_sel.xz',
     'benchmarks/bin/BQ_manganese_nitride_t.xz',
     'benchmarks/bin/BQ_grover_3sat_schoning_1710.xz',
     'benchmarks/bin/BQ_qaoa_random.xz',

@@ -31,7 +31,7 @@ if experiment == 'sim_baseline':
     for w in workload_list():
         for f in range(30000, 80000, 5000):
             _f = f//1000
-            run_quicksilver(w, PROJECT, f'baseline_f{_f}k', 'eif_a{DEFAULT_CAPACITY}',
+            run_quicksilver(w, PROJECT, f'baseline_f{_f}k', f'eif_a{DEFAULT_CAPACITY}',
                             inst_limit=SIM_INST_COUNT,
                             active_set_capacity=DEFAULT_CAPACITY,
                             total_program_inst=get_total_inst_count_for_workload(w),

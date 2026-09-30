@@ -91,6 +91,8 @@ Driver::Driver(std::vector<std::string> client_trace_files,
 
     if (GL_RDR_ENABLED)
         rdr_ = new driver::RotationDirectedRunahead(compute_subsystem_);
+    if (GL_TOPOLS_RZ && !GL_RDR_ENABLED)
+        topols_rz_ = new driver::TopolsRz(compute_subsystem_);
 }
 
 Driver::~Driver()
@@ -99,6 +101,7 @@ Driver::~Driver()
         delete c;
     if (GL_RDR_ENABLED)
         delete rdr_;
+    delete topols_rz_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -356,6 +359,8 @@ Driver::operate()
         if (magic_states_avail > 1)
             progress += rdr_->operate();
     }
+    if (topols_rz_ != nullptr)
+        progress += topols_rz_->operate();
 
     if (progress == 0)
         cycles_without_progress++;
@@ -464,6 +469,17 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
     c->for_each_instruction_in_front_layer(
             [&, this] (auto* inst)
             {
+                if (topols_rz_ != nullptr && topols_rz_->contains(inst))
+                {
+                    if (topols_rz_->is_done(inst))
+                    {
+                        topols_rz_->retire(inst);
+                        retired_inst.push_back(retired_inst_type{inst, 0});
+                        success_count++;
+                    }
+                    return;
+                }
+
                 if (GL_ELIDE_CLIFFORDS
                         && !is_rotation_instruction(inst->type) 
                         && !is_t_like_instruction(inst->type) 
@@ -506,6 +522,13 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                     return;
                 }
 
+                if (topols_rz_ != nullptr && is_rotation_instruction(inst->type))
+                {
+                    if (topols_rz_->start(inst, operands[0]))
+                        success_count++;
+                    return;
+                }
+
                 /* RDR logic: first check if the rotation's magic state is already available    *
                  * if so, then try and apply the magic state                                    */
                 if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
@@ -522,6 +545,13 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                         return;
                     }
                     inst->rdr.visited = true;
+                    executed_inst = inst->current_uop();  // urotseq may have changed if correction needed
+                    update_instruction_stats_on_fetch(executed_inst, operands);
+
+                    // Applying a prepared magic state occupies the target through
+                    // its measurement and feedforward. Start the correction later.
+                    if (operands[0]->cycle_available > current_cycle())
+                        return;
                 }
 
                 if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
@@ -662,9 +692,9 @@ Driver::rdr_handle_instruction(Client* c, inst_ptr inst, Qubit* q)
         }
         else if (outcome == outcome_type::NEEDS_CORRECTION)
         {
-            inst->reset_uops();
-            inst->urotseq = inst->corr_urotseq_array.front();
+            inst->urotseq = std::move(inst->corr_urotseq_array.front());
             inst->corr_urotseq_array.pop_front();
+            inst->reset_uops();
             rdr_->do_runahead(c, inst);
             return RDRHandleOutcome::EXECUTE;
         }

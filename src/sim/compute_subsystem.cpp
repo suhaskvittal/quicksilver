@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
+ *  contributor: OpenAI Codex (routing pointer and EDPC integration, 30 September 2026)
  * */
 
 #include "sim/client.h"
@@ -20,15 +21,31 @@ namespace
 {
 
 using execute_result_type = ComputeSubsystem::execute_result_type;
-using routing_type = ComputeSubsystem::routing_type;
-using r_id_type = routing_type::id_type;
+using routing_xtor = ComputeSubsystem::routing_translator;
+using routing_ptr = ComputeSubsystem::routing_ptr;
+using mcb_type = routing::MultiChannelBus<routing_xtor>;
+using edpc_type = routing::EDPCLayout<routing_xtor>;
 
-constexpr size_t MAX_QUBITS_PER_CHANNEL{8};
 
 size_t _dedicated_ancilla_count();
-size_t _num_routing_channels(ComputeSubsystem*);
-size_t _channel_width(ComputeSubsystem*);
 
+/*
+ * Routing space initializers. These functions should map all dedicated ancilla and program
+ * qubits into the routing space. They should return a raw pointer allocated on the heap.
+ * The caller should manage this pointer however they want (i.e., wrap it in a `std::unique_ptr`).
+ * */
+mcb_type* _build_multi_channel_bus(ComputeSubsystem*);
+edpc_type* _build_edpc_layout(ComputeSubsystem*);
+
+/*
+ * `_read_address_and_shift` does `x % resource_size` and then modifies `x`: `x /= resource_size`.
+ * This is useful for mapping qubits into the routing space.
+ * */
+int _read_address_and_shift(int&, size_t resource_size);
+
+/*
+ * Does what it says on the box.
+ * */
 size_t _get_idx_in_array(Qubit*, const std::vector<Qubit*>&);
 
 /*
@@ -37,7 +54,7 @@ size_t _get_idx_in_array(Qubit*, const std::vector<Qubit*>&);
  * Return std::nullopt if neither are available.
  * */
 template <class Src>
-std::optional<r_id_type> _test_endpoints_and_return_first_lockable(routing_type&,
+std::optional<routing::id_type> _test_endpoints_and_return_first_lockable(routing_ptr&,
                                                                     Src src,
                                                                     cycle_type from,
                                                                     cycle_type to);
@@ -58,14 +75,14 @@ std::optional<cycle_type> _test_multiple_time_intervals(cycle_type start,
                                                         const LockPred&);
 
 template <class Src, class Dst>
-cycle_type _get_earliest_lockable_time_between(routing_type&, 
+cycle_type _get_earliest_lockable_time_between(ComputeSubsystem*,
                                                 Src, 
                                                 Dst, 
                                                 cycle_type current_cycle, 
                                                 cycle_type lock_duration);
 
 template <class Src>
-cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&, 
+cycle_type _get_earliest_lockable_time_for_endpoints(ComputeSubsystem*,
                                                         Src, 
                                                         cycle_type current_cycle, 
                                                         cycle_type lock_duration);
@@ -75,16 +92,15 @@ cycle_type _get_earliest_lockable_time_for_endpoints(routing_type&,
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-ComputeSubsystem::routing_type::routing_type(ComputeSubsystem* _c)
-    :MultiChannelBus(_num_routing_channels(_c), _channel_width(_c)),
-    c(_c)
+ComputeSubsystem::routing_translator::routing_translator(ComputeSubsystem* _c)
+    :c(_c)
 {}
 
-ComputeSubsystem::routing_type::id_type
-ComputeSubsystem::routing_type::translate(Qubit* q) const
+routing::id_type
+ComputeSubsystem::routing_translator::translate(Qubit* q) const
 {
-    // we translate the storage so that the dedicated ancilla
-    // have priority access to magic state production (closer to 0).
+    // Both layouts use the same IDs: dedicated ancilla first, then program
+    // qubits. Each layout maps those IDs to its own physical coordinates.
     if (q->client_id == RDR_CLIENT_ID)
         return _get_idx_in_array(q, c->dedicated_ancilla());
     else
@@ -98,33 +114,25 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
                                       size_t _code_distance,
                                       size_t _local_memory_capacity,
                                       BulkProducer* t_producer,
-                                      memory_subsystem_type memory_subsystem)
+                                      memory_subsystem_type memory_subsystem,
+                                      RoutingLayout _routing_layout)
     :Operable("compute_subsystem", freq_khz),
     code_distance(_code_distance),
     local_memory_capacity(_local_memory_capacity),
     dedicated_ancilla_count(_dedicated_ancilla_count()),
+    routing_layout(_routing_layout),
     local_memory_(local_memory_capacity),
     t_producer_(t_producer),
     memory_subsystem_(memory_subsystem),
-    routing_(this),
     dedicated_ancilla_(dedicated_ancilla_count)
 {
-    // define routing space
-    for (size_t i = 0; i < local_memory_capacity + dedicated_ancilla_count; i++)
-    {
-        size_t ii{i};
-        const int ch = ii % routing_.num_channels;
-        ii /= routing_.num_channels;
-        const int ro = ii & 1;
-        ii >>= 1;
-        const int co = ii;
-        assert(co < routing_.channel_width);
-
-        routing_.set_location(i, ch, ro, co);
-    }
+    if (routing_layout == RoutingLayout::BUS)
+        routing_ = routing_ptr{ _build_multi_channel_bus(this) };
+    else
+        routing_ = routing_ptr{ _build_edpc_layout(this) };
 
     // we can initialize the dedicated qubits now:
-    if (GL_RDR_ENABLED)
+    if (GL_RDR_ENABLED || GL_TOPOLS_RZ)
     {
         assert(dedicated_ancilla_count == GL_RDR_CAPACITY);
         for (int i = 0; i < GL_RDR_CAPACITY; i++)
@@ -143,6 +151,13 @@ ComputeSubsystem::~ComputeSubsystem()
 {
     for (auto* q : dedicated_ancilla_)
         delete q;
+}
+
+size_t
+ComputeSubsystem::edpc_patch_count() const
+{
+    assert(routing_layout == RoutingLayout::EDPC);
+    return static_cast<const edpc_type*>(routing_.get())->patch_count();
 }
 
 ////////////////////////////////////////////////////////////
@@ -269,7 +284,7 @@ ComputeSubsystem::do_rotation_via_rltp(inst_ptr inst, Qubit* q, size_t remaining
     auto channel_out = _test_endpoints_and_return_first_lockable(routing_, q, tp_start, tp_end);
     if (!channel_out.has_value())
         return result;
-    routing_.lock_resources_between(q, *channel_out, tp_start, tp_end);
+    routing_->lock_resources_between(q, *channel_out, tp_start, tp_end);
 
     // update the result latency which is incorrect
     result.latency = 3*code_distance + GL_REACTION_TIME;  // ZZ with |T> + teleporting XX and ZZ + feedforward
@@ -326,12 +341,12 @@ bool
 ComputeSubsystem::rdr_simulate_store(Qubit* q)
 {
     const size_t d = code_distance;
-    const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
+    const cycle_type c = _get_earliest_lockable_time_for_endpoints(this, q, current_cycle(), d);
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
-    routing_.lock_resources_between(q, *dst, c, c+d);
+    routing_->lock_resources_between(q, *dst, c, c+d);
     q->cycle_available = c+d+1;  // +1 due to destruction by X measurement
     return true;
 }
@@ -340,10 +355,10 @@ bool
 ComputeSubsystem::rdr_apply_rotation_magic_state_from_surface_code(Qubit* q, Qubit* m)
 {
     const size_t d = code_distance;
-    const cycle_type c = _get_earliest_lockable_time_between(routing_, q, m, current_cycle(), d);
-    if (!routing_.test_resources_between(q, m, c, c+d))
+    const cycle_type c = _get_earliest_lockable_time_between(this, q, m, current_cycle(), d);
+    if (!routing_->test_resources_between(q, m, c, c+d))
         return false;
-    routing_.lock_resources_between(q, m, c, c+d);
+    routing_->lock_resources_between(q, m, c, c+d);
     q->cycle_available = c + d + GL_REACTION_TIME;
     m->cycle_available = c + d + 1;
     return true;
@@ -353,13 +368,25 @@ bool
 ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
 {
     const size_t d = code_distance;
-    const cycle_type c = _get_earliest_lockable_time_for_endpoints(routing_, q, current_cycle(), d);
+    const cycle_type c = _get_earliest_lockable_time_for_endpoints(this, q, current_cycle(), d);
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, c, c+d);
     if (!dst.has_value())
         return false;
     // lock routing space and return true:
-    routing_.lock_resources_between(q, *dst, c, c+d);
+    routing_->lock_resources_between(q, *dst, c, c+d);
     q->cycle_available = c + d + GL_REACTION_TIME;
+    return true;
+}
+
+bool
+ComputeSubsystem::topols_begin_rotation(Qubit* target, Qubit* ancilla)
+{
+    const cycle_type end = current_cycle() + code_distance;
+    if (!routing_->test_resources_between(target, ancilla, current_cycle(), end))
+        return false;
+    routing_->lock_resources_between(target, ancilla, current_cycle(), end);
+    target->cycle_available = end;
+    ancilla->cycle_available = end;
     return true;
 }
 
@@ -416,9 +443,9 @@ ComputeSubsystem::do_h_gate(inst_ptr inst, Qubit* q)
 execute_result_type
 ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
 {
-    if (routing_.test_local_resource(q, current_cycle(), current_cycle()+code_distance))
+    if (routing_->test_local_resource(q, current_cycle(), current_cycle()+code_distance))
     {
-        routing_.lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
+        routing_->lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
         return execute_result_type{.progress=1, .latency=code_distance};
     }
     return execute_result_type{};
@@ -427,9 +454,9 @@ ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
 execute_result_type
 ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 {
-    if (routing_.test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
+    if (routing_->test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
     {
-        routing_.lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
+        routing_->lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
         return execute_result_type{.progress=1, .latency=2*code_distance};
     }
     return execute_result_type{};
@@ -454,7 +481,7 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
     if (!dst.has_value())
         return execute_result_type{};
-    routing_.lock_resources_between(q, *dst, t_start, t_end);
+    routing_->lock_resources_between(q, *dst, t_start, t_end);
 
     // estimate decoding latency:
     const cycle_type total_latency = code_distance + GL_REACTION_TIME;
@@ -494,7 +521,7 @@ ComputeSubsystem::do_memory_access(inst_ptr inst, const std::vector<Qubit*>& arg
         return execute_result_type{};
 
     // update data structures
-    routing_.lock_resources_between(st, *dst, mv_start, mv_end);
+    routing_->lock_resources_between(st, *dst, mv_start, mv_end);
     memory_level_map_[st] = memory_level_map_[ld];
     memory_level_map_[ld] = -1;
     
@@ -516,30 +543,67 @@ namespace
 ////////////////////////////////////////////////////////////
 
 size_t
-_num_routing_channels(ComputeSubsystem* c)
-{
-    const size_t total_capacity = c->local_memory_capacity + c->dedicated_ancilla_count;
-    return (total_capacity + MAX_QUBITS_PER_CHANNEL - 1) / MAX_QUBITS_PER_CHANNEL;
-}
-
-size_t
-_channel_width(ComputeSubsystem* c)
-{
-    size_t q_count = c->dedicated_ancilla_count + c->local_memory_capacity;
-    if (q_count & 1)
-        q_count++;
-    q_count = std::min(MAX_QUBITS_PER_CHANNEL, q_count);
-    size_t w = q_count >> 1;
-    return w;
-}
-
-size_t
 _dedicated_ancilla_count()
 {
-    if (GL_RDR_ENABLED)
+    if (GL_RDR_ENABLED || GL_TOPOLS_RZ)
         return GL_RDR_CAPACITY;
     else
         return 0;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+mcb_type*
+_build_multi_channel_bus(ComputeSubsystem* c)
+{
+    constexpr size_t CHANNEL_CAP{8};
+
+    size_t num_channels,
+           channel_width;
+    const size_t n_prog = c->local_memory_capacity;
+    const size_t n_tot = n_prog + c->dedicated_ancilla_count;
+    num_channels = (n_tot + CHANNEL_CAP - 1) / CHANNEL_CAP;
+    channel_width = std::min(CHANNEL_CAP, n_tot+1) >> 1;
+
+    // initialize contents of `r`
+    auto* r = new mcb_type(num_channels, channel_width, routing_xtor{c});
+    for (size_t i = 0; i < n_tot; i++)
+    {
+        int ii = static_cast<int>(i);
+        int ch = _read_address_and_shift(ii, num_channels);
+        int ro = _read_address_and_shift(ii, 2);
+        // only thing remaining should be column address: assert that it is bounded by `channel_width`
+        if (ii >= channel_width)
+        {
+            std::cerr << "_build_multi_channel_bus: invalid column address when mapping data, qubit id = "
+                        << i << ", co = " << ii << ", channel width = " << channel_width << _die{};
+        }
+        int co = ii;
+        r->set_location(i, ch, ro, co);
+    }
+    return r;
+}
+
+edpc_type*
+_build_edpc_layout(ComputeSubsystem* c)
+{
+    const size_t patch_count = c->local_memory_capacity + c->dedicated_ancilla_count;
+    auto* layout = new edpc_type(patch_count, routing_xtor{c});
+    for (size_t i = 0; i < patch_count; i++)
+        layout->set_location(i, i);
+    return layout;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+int
+_read_address_and_shift(int& x, size_t n)
+{
+    int y = x % static_cast<int>(n);
+    x /= static_cast<int>(n);
+    return y;
 }
 
 size_t
@@ -553,17 +617,14 @@ _get_idx_in_array(Qubit* q, const std::vector<Qubit*>& arr)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-template <class T> std::optional<r_id_type>
-_test_endpoints_and_return_first_lockable(routing_type& r, T src, cycle_type from, cycle_type to)
+template <class T> std::optional<routing::id_type>
+_test_endpoints_and_return_first_lockable(routing_ptr& r, T src, cycle_type from, cycle_type to)
 {
-    for (r_id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
-        if (r.test_resources_between(src, dst, from, to))
+    for (routing::id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
+        if (r->test_resources_between(src, dst, from, to))
             return std::make_optional(dst);
     return std::nullopt;
 }
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 template <class LockPred> std::optional<cycle_type>
 _test_multiple_time_intervals(cycle_type start, cycle_type delta, cycle_type start_max, const LockPred& pred)
@@ -578,14 +639,11 @@ _test_multiple_time_intervals(cycle_type start, cycle_type delta, cycle_type sta
     return std::nullopt;
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 template <class T, class U> cycle_type
-_get_earliest_lockable_time_between(routing_type& r, T src, U dst, cycle_type c, cycle_type d)
+_get_earliest_lockable_time_between(ComputeSubsystem* compute, T src, U dst, cycle_type c, cycle_type d)
 {
     cycle_type out{0};
-    r.for_each_resource_between(src, dst,
+    compute->for_each_resource_between(src, dst, c, c+d,
             [&out, c, d] (const auto& res)
             {
                 out = std::max(out, res.next_ready_cycle(c, d));
@@ -594,11 +652,11 @@ _get_earliest_lockable_time_between(routing_type& r, T src, U dst, cycle_type c,
 }
 
 template <class T> cycle_type
-_get_earliest_lockable_time_for_endpoints(routing_type& r, T src, cycle_type c, cycle_type d)
+_get_earliest_lockable_time_for_endpoints(ComputeSubsystem* compute, T src, cycle_type c, cycle_type d)
 {
     cycle_type earliest{std::numeric_limits<cycle_type>::max()};
-    for (r_id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
-        earliest = std::min(earliest, _get_earliest_lockable_time_between(r, src, dst, c, d));
+    for (routing::id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
+        earliest = std::min(earliest, _get_earliest_lockable_time_between(compute, src, dst, c, d));
     return earliest;
 }
 
