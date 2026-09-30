@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   12 March 2026
+ *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
  * */
 
 #include "sim/configuration/resource_estimation.h"
@@ -91,8 +92,6 @@ Driver::Driver(std::vector<std::string> client_trace_files,
 
     if (GL_RDR_ENABLED)
         rdr_ = new driver::RotationDirectedRunahead(compute_subsystem_);
-    if (GL_TOPOLS_RZ && !GL_RDR_ENABLED)
-        topols_rz_ = new driver::TopolsRz(compute_subsystem_);
 }
 
 Driver::~Driver()
@@ -101,7 +100,6 @@ Driver::~Driver()
         delete c;
     if (GL_RDR_ENABLED)
         delete rdr_;
-    delete topols_rz_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -359,8 +357,6 @@ Driver::operate()
         if (magic_states_avail > 1)
             progress += rdr_->operate();
     }
-    if (topols_rz_ != nullptr)
-        progress += topols_rz_->operate();
 
     if (progress == 0)
         cycles_without_progress++;
@@ -469,17 +465,6 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
     c->for_each_instruction_in_front_layer(
             [&, this] (auto* inst)
             {
-                if (topols_rz_ != nullptr && topols_rz_->contains(inst))
-                {
-                    if (topols_rz_->is_done(inst))
-                    {
-                        topols_rz_->retire(inst);
-                        retired_inst.push_back(retired_inst_type{inst, 0});
-                        success_count++;
-                    }
-                    return;
-                }
-
                 if (GL_ELIDE_CLIFFORDS
                         && !is_rotation_instruction(inst->type) 
                         && !is_t_like_instruction(inst->type) 
@@ -519,13 +504,6 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                         skip_cycle_target_ = std::min(s, *skip_cycle_target_);
                     else
                         skip_cycle_target_ = s;
-                    return;
-                }
-
-                if (topols_rz_ != nullptr && is_rotation_instruction(inst->type))
-                {
-                    if (topols_rz_->start(inst, operands[0]))
-                        success_count++;
                     return;
                 }
 

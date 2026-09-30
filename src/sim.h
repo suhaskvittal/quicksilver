@@ -1,6 +1,7 @@
 /*
     author: Suhas Vittal
     date:   2025 August 18
+    contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
 
     The only functions are utility functions for printing stats.
 */
@@ -81,8 +82,6 @@ extern int64_t GL_RDR_COMPLETION_BUFFER_CAPACITY;
 extern bool GL_RDR_FIXED_LOOKAHEAD;
 extern double GL_RDR_COST_SCALE;
 extern double GL_RDR_INV_THRESHOLD;
-/* Approximate TopoLS external-ancilla Rz construction. */
-extern bool GL_TOPOLS_RZ;
 
 constexpr client_id_type RDR_CLIENT_ID{-47};
 

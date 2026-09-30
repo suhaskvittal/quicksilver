@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   16 January 2026
+ *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
  * */
 
 #include "sim.h"
@@ -71,7 +72,6 @@ main(int argc, char* argv[])
     int64_t skip_threshold;
     bool    skip_verbose;
     bool    jit;
-    bool    topols_rz_standalone;
     std::string regime;
     int64_t total_inst;
 
@@ -124,8 +124,6 @@ main(int argc, char* argv[])
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
 
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
-        .optional("", "--topols-rz", "Use TopoLS external-ancilla Rz timing model (RDR preparation takes precedence when -rdr is enabled)", sim::GL_TOPOLS_RZ, false)
-        .optional("", "--topols-rz-standalone", "Run TopoLS ancilla-side preparation even when -rdr selects a corrective-sequence ISA", topols_rz_standalone, false)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
         .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
         .optional("", "--rdr-lookahead-depth", "Number of DAG layers to search", sim::GL_RDR_LOOKAHEAD_DEPTH, 16)
@@ -172,8 +170,7 @@ main(int argc, char* argv[])
 
         .parse(argc, argv);
 
-    sim::GL_TOPOLS_RZ |= topols_rz_standalone;
-    sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0 && !topols_rz_standalone);
+    sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
     if (routing_layout != "bus" && routing_layout != "edpc")
         std::cerr << "Unknown routing layout: " << routing_layout << _die{};
     const auto compute_routing_layout = routing_layout == "edpc"
@@ -390,7 +387,7 @@ main(int argc, char* argv[])
                               ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2)
                                     * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
                               : 0;
-    rdr_footprint = (sim::GL_RDR_ENABLED || sim::GL_TOPOLS_RZ)
+    rdr_footprint = sim::GL_RDR_ENABLED
                         ? ((compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC
                                 ? 4 * sim::GL_RDR_CAPACITY * sc_footprint
                                 : 1.5 * sim::GL_RDR_CAPACITY * sc_footprint) + rdr_storage_overhead)

@@ -34,3 +34,5 @@ plots/
 __pycache__
 
 .TODO.txt
+*.swp
+*.swo

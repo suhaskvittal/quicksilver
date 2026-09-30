@@ -1,7 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
- *  contributor: OpenAI Codex (routing pointer and EDPC integration, 30 September 2026)
+ *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
  * */
 
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
@@ -142,9 +142,6 @@ public:
     bool rdr_simulate_store(Qubit*);
     bool rdr_apply_rotation_magic_state_from_surface_code(Qubit* target, Qubit* magic_state);
     bool rdr_apply_rotation_magic_state_from_memory(Qubit*);
-
-    /* Reserve the joint ZZ measurement that begins the TopoLS Rz construction. */
-    bool topols_begin_rotation(Qubit* target, Qubit* ancilla);
 
     template <class T, class U, class Callback>
     void for_each_resource_between(T, U, cycle_type from, cycle_type to,

@@ -1,6 +1,7 @@
 /*
     author: Suhas Vittal
     date:   8 September 2025
+    contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
 */
 
 #include "sim.h"
@@ -46,7 +47,6 @@ int64_t GL_RDR_COMPLETION_BUFFER_CAPACITY{0};
 bool GL_RDR_FIXED_LOOKAHEAD{false};
 double GL_RDR_COST_SCALE{2.0};
 double GL_RDR_INV_THRESHOLD{0.33};
-bool GL_TOPOLS_RZ{false};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};

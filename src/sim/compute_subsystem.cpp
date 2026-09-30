@@ -1,7 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
- *  contributor: OpenAI Codex (routing pointer and EDPC integration, 30 September 2026)
+ *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
  * */
 
 #include "sim/client.h"
@@ -132,7 +132,7 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
         routing_ = routing_ptr{ _build_edpc_layout(this) };
 
     // we can initialize the dedicated qubits now:
-    if (GL_RDR_ENABLED || GL_TOPOLS_RZ)
+    if (GL_RDR_ENABLED)
     {
         assert(dedicated_ancilla_count == GL_RDR_CAPACITY);
         for (int i = 0; i < GL_RDR_CAPACITY; i++)
@@ -378,21 +378,6 @@ ComputeSubsystem::rdr_apply_rotation_magic_state_from_memory(Qubit* q)
     return true;
 }
 
-bool
-ComputeSubsystem::topols_begin_rotation(Qubit* target, Qubit* ancilla)
-{
-    const cycle_type end = current_cycle() + code_distance;
-    if (!routing_->test_resources_between(target, ancilla, current_cycle(), end))
-        return false;
-    routing_->lock_resources_between(target, ancilla, current_cycle(), end);
-    target->cycle_available = end;
-    ancilla->cycle_available = end;
-    return true;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 double
 ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, double p) const
 {
@@ -545,7 +530,7 @@ namespace
 size_t
 _dedicated_ancilla_count()
 {
-    if (GL_RDR_ENABLED || GL_TOPOLS_RZ)
+    if (GL_RDR_ENABLED)
         return GL_RDR_CAPACITY;
     else
         return 0;
