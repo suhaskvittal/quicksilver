@@ -256,7 +256,7 @@ retry_adjusted_latency(cycle_type c, size_t n, double e)
 {
     const double p_succ = std::pow(1-e,n); 
     const double tr = 1.0/p_succ;
-    return static_cast<cycle_type>( std::ceil((c*0.5)*(tr-1) + c) );
+    return static_cast<cycle_type>( std::round((c*0.5)*(tr-1) + c) );
 }
 
 #include "production/t_quantum.inl"

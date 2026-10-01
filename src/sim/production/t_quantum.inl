@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   7 September 2026
+ *  contributor: OpenAI Codex (compact 15-to-1 factory variant, 1 October 2026)
  * */
 
 ProducerQuantum
@@ -33,7 +34,7 @@ t_cc_cultivation(size_t d)
     // estimate time to succesful cultivation. notes:
     //  1. Assume error hapeens in the middle of `escape_cycles`
     size_t tries_until_success = 1.0/prob_success;
-    cycle_type t = ((escape_cycles/2) * (tries_until_success-1)) + escape_cycles; // + GL_REACTION_TIME;
+    cycle_type t = ((escape_cycles/2) * (tries_until_success-1)) + escape_cycles + GL_REACTION_TIME;
 
     return ProducerQuantum
             {
@@ -51,7 +52,6 @@ t_15to1_distillation(size_t dx, size_t dz, size_t dm, double e)
 {
     size_t physical_qubit_count = 2*(dx + 4*dz)*3*dx + 4*dm;
     double memory_error_per_cycle = configuration::surface_code_logical_error_rate(dx, GL_PHYSICAL_ERROR_RATE);
-    // add memory errors atop errors due to T infidelity
     double infidelity = 35*e*e*e + 5*6*dm*memory_error_per_cycle;
 
     return ProducerQuantum
@@ -64,4 +64,24 @@ t_15to1_distillation(size_t dx, size_t dz, size_t dm, double e)
                 .physical_qubit_count = physical_qubit_count,
                 .cycles_per_production = retry_adjusted_latency(6*dm, 15, e)
             };
+}
+
+ProducerQuantum
+t_15to1_distillation_compact(size_t dx, size_t dz, size_t dm, double e)
+{
+    size_t physical_qubit_count = 4*dx*(dx+3*dz);
+    cycle_type latency = 11*dm;
+    double memory_error_per_cycle = configuration::surface_code_logical_error_rate(dx, GL_PHYSICAL_ERROR_RATE);
+    double infidelity = 35*e*e*e + 5*latency*memory_error_per_cycle;
+
+    return ProducerQuantum
+                {
+                    .resource = ResourceType::T,
+                    .is_distiller = true,
+                    .d_input_states = 15,
+                    .d_output_states = 1,
+                    .infidelity = infidelity,
+                    .physical_qubit_count = physical_qubit_count,
+                    .cycles_per_production = retry_adjusted_latency(latency, 15, e)
+                };
 }
