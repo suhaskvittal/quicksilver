@@ -9,3 +9,4 @@ Since initial MICRO submission:
 Since HPCA submission:
 - changes to compact 15:1 distillation (`t_quantum.inl`)
 - 10x LER multiplier to buffer size infidelity in distance calculation (`allocator.cpp`)
+- changed to compact layout in main simulator file (`quicksilver.cpp`)

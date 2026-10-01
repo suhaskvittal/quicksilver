@@ -595,7 +595,7 @@ get_default_factory_specifications(std::string_view regime,
         return { sim::t_cc_cultivation(5) };
 
     sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);              // d = 3 color code cultivation
-    sim::ProducerQuantum l2 = sim::t_15to1_distillation(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
+    sim::ProducerQuantum l2 = sim::t_15to1_distillation_compact(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
     l2.buffer_size = ll_buffer_capacity;
 
     return {l1, l2};
