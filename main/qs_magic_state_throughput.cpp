@@ -38,8 +38,16 @@ main(int argc, char* argv[])
         sim::ProducerQuantum l2 = test_compact 
                                     ? sim::t_15to1_distillation_compact(25, 11, 11, l1.infidelity)
                                     : sim::t_15to1_distillation(25, 11, 11, l1.infidelity);
+        l2.buffer_size = 2;
         quanta.push_back(l1);
         quanta.push_back(l2);
+    }
+
+    for (size_t i = 0; i < quanta.size(); i++)
+    {
+        std::cout << "L" << (i+1) << "\n";
+        print_stat_line(std::cout, "    LATENCY", quanta[i].cycles_per_production);
+        print_stat_line(std::cout, "    INFIDELITY", quanta[i].infidelity);
     }
 
     const double freq_khz = sim::compute_freq_khz(cycle_time_ns);

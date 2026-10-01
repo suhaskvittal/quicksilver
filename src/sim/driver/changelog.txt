@@ -7,5 +7,5 @@ Since initial MICRO submission:
 6. RDR degree is 1 instead of 4
 
 Since HPCA submission:
-1. removed GL_REACTION_TIME from cultivation equation
-2. shifted factory costs by 5k.
+- changes to compact 15:1 distillation (`t_quantum.inl`)
+- 10x LER multiplier to buffer size infidelity in distance calculation (`allocator.cpp`)
