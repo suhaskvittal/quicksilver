@@ -389,22 +389,6 @@ RotationDirectedRunahead::interrupt_and_invalidate_if_necessary(inst_ptr inst)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-double
-RotationDirectedRunahead::coverage() const
-{
-    return fpdiv(s_requests_started, s_requests_submitted);
-}
-
-double
-RotationDirectedRunahead::timeliness() const
-{
-//  return fpdiv(s_requests_completed, s_requests_started);
-    return fpdiv(s_requests_completed - s_requests_interrupted, s_requests_completed);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 void
 RotationDirectedRunahead::retire_request(request_type& r)
 {
@@ -449,15 +433,6 @@ RotationDirectedRunahead::enqueue_request(request_type&& r)
     request_queue_.push_back(r);
     r.inst->rdr.pending = true;
     s_requests_submitted++;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-cycle_type
-RotationDirectedRunahead::current_cycle() const
-{
-    return compute_subsystem_->current_cycle();
 }
 
 ////////////////////////////////////////////////////////////

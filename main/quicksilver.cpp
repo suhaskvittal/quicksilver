@@ -97,7 +97,7 @@ main(int argc, char* argv[])
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
-        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
+        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 0)
         .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
         .optional("", "--max-cycles-no-progress",
                     "Maximum consecutive cycles any single component may spend with no progress before the "

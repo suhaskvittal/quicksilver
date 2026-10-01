@@ -128,28 +128,13 @@ public:
     bool interrupt_and_invalidate_if_necessary(inst_ptr);
 
     ssize_t lookahead_depth() const { return lookahead_depth_; }
-    double coverage() const;
-    double timeliness() const;
+    cycle_type current_cycle() const { return compute_subsystem_->current_cycle(); }
+    double coverage() const { return fpdiv(s_requests_started, s_requests_submitted); }
+    double timeliness() const { return fpdiv(s_requests_completed, s_requests_started); }
 private:
-    /*
-     * Retires the request, and if possible, places it into the `completion_buffer_`.
-     * */
     void retire_request(request_type&);
-
-    /*
-     * Pins the given qubit to a request in `request_queue_`
-     * */
     void allocate_free_qubit(Qubit*);
-
-    /*
-     * Adds a request to the `request_queue_`.
-     * */
     void enqueue_request(request_type&&);
-
-    /*
-     * This just calls `ComputeSubsystem::current_cycle()`
-     * */
-    cycle_type current_cycle() const;
 
     void update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time);
 };

@@ -17,6 +17,10 @@ DEFAULT_RDR_DEGREE = 1
 DEFAULT_RDR_LOOKAHEAD_DEPTH = 256
 DEFAULT_RDR_COST_SCALE = 4.0
 
+F_MIN = 35000
+F_MAX = 85000
+F_STEP = 5000
+
 ##############################################
 ##############################################
 
@@ -29,7 +33,7 @@ if experiment == 'compile_eif':
 
 if experiment == 'sim_baseline':
     for w in workload_list():
-        for f in range(30000, 80000, 5000):
+        for f in range(F_MIN, F_MAX, F_STEP):
             _f = f//1000
             run_quicksilver(w, PROJECT, f'baseline_f{_f}k', f'eif_a{DEFAULT_CAPACITY}',
                             inst_limit=SIM_INST_COUNT,
@@ -40,7 +44,7 @@ if experiment == 'sim_baseline':
 
 if experiment == 'sim_rdr':
     for w in workload_list():
-        for f in range(30000, 80000, 5000):
+        for f in range(F_MIN, F_MAX, F_STEP):
             _f = f//1000
             run_quicksilver(w, PROJECT, f'rdr_f{_f}k', f'eif_a{DEFAULT_CAPACITY}_rdr',
                             inst_limit=SIM_INST_COUNT,
@@ -61,7 +65,7 @@ if experiment == 'sim_rdr':
 
 if experiment == 'sim_rltp':
     for w in workload_list():
-        for f in range(30000, 80000, 5000):
+        for f in range(F_MIN, F_MAX, F_STEP):
             for rltp in [4,6]:
                 _f = f//1000
                 run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k', f'eif_a{DEFAULT_CAPACITY}',
@@ -77,7 +81,7 @@ if experiment == 'sim_rltp':
 if experiment == 'sim_baseline_tr_sens':
     for w in workload_list():
         for tr in [1,23]:
-            for f in range(30000, 80000, 5000):
+            for f in range(F_MIN, F_MAX, F_STEP):
                 _f = f//1000
                 run_quicksilver(w, PROJECT, f'baseline_f{_f}k_tr{tr}', f'eif_a{DEFAULT_CAPACITY}',
                                 inst_limit=SIM_INST_COUNT,
@@ -91,7 +95,7 @@ if experiment == 'sim_rltp_tr_sens':
     for w in workload_list():
         for rltp in [4, 6]:
             for tr in [1, 23]:
-                for f in range(30000, 80000, 5000):
+                for f in range(F_MIN, F_MAX, F_STEP):
                     _f = f//1000
                     run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k_tr{tr}', f'eif_a{DEFAULT_CAPACITY}',
                                     inst_limit=SIM_INST_COUNT,
@@ -107,7 +111,7 @@ if experiment == 'sim_rltp_tr_sens':
 if experiment == 'sim_rdr_tr_sens':
     for w in workload_list():
         for tr in [1, 23]:
-            for f in range(30000, 80000, 5000):
+            for f in range(F_MIN, F_MAX, F_STEP):
                 _f = f//1000
                 run_quicksilver(w, PROJECT, f'rdr_f{_f}k_tr{tr}', f'eif_a{DEFAULT_CAPACITY}_rdr',
                                 inst_limit=SIM_INST_COUNT,
