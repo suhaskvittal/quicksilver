@@ -1,0 +1,77 @@
+//! Inline double-double primitives (~106 bits, ~32 decimal digits).
+//!
+//! add/sub/mul are the exact two-sum/two-prod forms; recip/div/sqrt refine an
+//! f64 seed with one Newton/Heron step, so they reach ~106 bits but not a
+//! correctly-rounded last bit — fine for the prune-verify they back. Used by
+//! `se::verify_partial_dd_exceeds` — ~10× cheaper than rug-128 in the hot loop
+//! (no heap allocation, no mpfr_t init/clear per op). Values are bare
+//! `(f64, f64)` hi/lo pairs (no wrapper struct) so they stay in registers.
+//! `dd_add` of cancelling operands keeps ~106-bit *relative* accuracy but its
+//! absolute floor is set by the larger operand — which is why `se` seeds the
+//! walk center-relative.
+
+#[inline]
+fn dd_quick_two_sum(a: f64, b: f64) -> (f64, f64) {
+    let s = a + b;
+    let err = b - (s - a);
+    (s, err)
+}
+
+#[inline]
+fn dd_two_sum(a: f64, b: f64) -> (f64, f64) {
+    let s = a + b;
+    let bb = s - a;
+    let err = (a - (s - bb)) + (b - bb);
+    (s, err)
+}
+
+#[inline]
+fn dd_two_prod(a: f64, b: f64) -> (f64, f64) {
+    let p = a * b;
+    let err = a.mul_add(b, -p);
+    (p, err)
+}
+
+/// Robust ("ieee") dd_add: separately captures lo-part sum via two_sum.
+/// Handles cancellation in a.0 + b.0 correctly.
+#[inline]
+pub(crate) fn dd_add(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    let (s1, e1) = dd_two_sum(a.0, b.0);
+    let (s2, e2) = dd_two_sum(a.1, b.1);
+    let e1 = e1 + s2;
+    let (s, e1) = dd_quick_two_sum(s1, e1);
+    let e1 = e1 + e2;
+    dd_quick_two_sum(s, e1)
+}
+
+#[inline]
+pub(crate) fn dd_sub(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    dd_add(a, (-b.0, -b.1))
+}
+
+#[inline]
+pub(crate) fn dd_mul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    let (p, e) = dd_two_prod(a.0, b.0);
+    let e = e + a.0 * b.1 + a.1 * b.0;
+    dd_quick_two_sum(p, e)
+}
+
+/// Convert i64 → dd. Exact for any i64 (since |z| ≤ 2^63 fits in dd's
+/// 2^106 range; two-piece split if |z| > 2^53).
+#[inline]
+// Guarded: the fast arm requires |z| ≤ 2^53 (exact); split limbs are < 2^32; 2^32 is f64-exact.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn dd_from_i64(z: i64) -> (f64, f64) {
+    if z.unsigned_abs() <= (1u64 << 53) {
+        (z as f64, 0.0)
+    } else {
+        let neg = z < 0;
+        let abs = z.unsigned_abs();
+        let hi = f64::from((abs >> 32) as u32);
+        let lo = f64::from((abs & 0xFFFFFFFF) as u32);
+        let two32 = (1u64 << 32) as f64;
+        let p = dd_mul((hi, 0.0), (two32, 0.0));
+        let r = dd_add(p, (lo, 0.0));
+        if neg { (-r.0, -r.1) } else { r }
+    }
+}

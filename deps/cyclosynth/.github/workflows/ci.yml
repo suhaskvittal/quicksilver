@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # gmp-mpfr-sys compiles GMP/MPFR/MPC from source; needs m4 + a C toolchain.
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y m4
+      - uses: Swatinem/rust-cache@v2
+      # Compile every target (lib + bins + tests) so the bins stay
+      # cross-platform-buildable even though they're run on macOS.
+      - name: Build
+        run: cargo build --release --all-targets
+      # The telemetry path (probe bins, diag counters) only compiles
+      # meaningfully under `trace`; build it so it can't bit-rot.
+      - name: Build (trace feature)
+        run: cargo build --release --all-targets --features trace
+      - name: Test
+        run: cargo test --release --lib
+      # Several diag-counter tests only do anything under `trace`.
+      - name: Test (trace feature)
+        run: cargo test --release --lib --features trace
+      # The pyo3 module is the product surface but is never linked in CI
+      # (that's maturin's job); at least type-check it so a lint or refactor
+      # can't silently break `--features python` (it happened: 039055c).
+      - name: Check (python feature)
+        run: cargo check --release --features "python trace"
+      # Deep-ε canary (#[ignore]d out of the default suite). Guards against
+      # silent deep-ε misses — a mis-prune at ε=1e-10 that shallow-ε tests
+      # can't see. Machine-independent invariant (find-lde), just slower on
+      # weaker runners; bounded by the test's own max_lde(99).
+      - name: Deep-ε canary
+        run: cargo test --release --lib -- --ignored deep_eps_canary
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y m4
+      - uses: Swatinem/rust-cache@v2
+      # Lint every target (lib + 10 bins + integration tests), default and
+      # trace, so warnings can't accrue off the library path.
+      - name: Clippy
+        run: cargo clippy --release --all-targets -- -D warnings
+      - name: Clippy (trace feature)
+        run: cargo clippy --release --all-targets --features trace -- -D warnings

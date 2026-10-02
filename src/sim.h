@@ -1,4 +1,5 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
     author: Suhas Vittal
     date:   2025 August 18
     contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
@@ -82,8 +83,14 @@ extern int64_t GL_RDR_COMPLETION_BUFFER_CAPACITY;
 extern bool GL_RDR_FIXED_LOOKAHEAD;
 extern double GL_RDR_COST_SCALE;
 extern double GL_RDR_INV_THRESHOLD;
-
 constexpr client_id_type RDR_CLIENT_ID{-47};
+
+/*
+ * TopoLS parameters:
+ * */
+extern bool GL_TOPOLS_ENABLED;
+extern int64_t GL_TOPOLS_ANCILLA;
+constexpr client_id_type TOPOLS_CLIENT_ID{-48};
 
 /*
  * These variables are just for debugging/speed-of-light analysis:
@@ -121,7 +128,6 @@ double walltime_s();
 /*
  * Stat printing utilities:
  * */
-
 void print_sim_stats(std::ostream&, Driver*);
 void print_stats_for_factories(std::ostream&, std::string_view header, const BulkProducer*);
 

@@ -1,0 +1,42 @@
+//! Native 16D Lenstra-style search for Clifford+√T (Z[ζ]) synthesis.
+//!
+//! This module is the Z[ζ] analog of `clifford_t::lattice` (which
+//! targets Z[ω] / Clifford+T). The two are deliberately kept separate to
+//! isolate the precision and integer-width choices: f64 Gram-Schmidt is
+//! provably sufficient at d=8 (Theorem 2 of Nguyen-Stehlé 2009) but not at
+//! d=16, so the 16D GS runs in MPFR throughout.
+//!
+//! Pipeline and module layout mirror `clifford_t::lattice`; see
+//! [`integer`] for the per-call stage breakdown. Brute force and
+//! y-helpers live in [`brute`]; U2Q reconstruction in
+//! [`crate::synthesis::clifford_sqrt_t`].
+//!
+//! ## Solution layout
+//!
+//!   `sol = [u_1.a, u_1.b, …, u_1.h, u_2.a, …, u_2.h]`
+//!     i.e. `sol[0..8]` = u_1's ζ-basis coefficients,
+//!          `sol[8..16]` = u_2's ζ-basis coefficients.
+//!
+//! Reconstruction follows the SU(2) convention used by Z[ω]'s
+//! `solution_to_u2t`:
+//!
+//!   `U = [[u_1, −u_2*], [u_2, u_1*]] / √(2^k)`
+
+pub mod brute;
+pub(crate) mod bkz;
+pub(crate) mod cholesky_lu;
+pub(crate) mod dd;
+pub(crate) mod integer;
+pub(crate) mod lll;
+pub(crate) mod q_metric;
+pub(crate) mod scratch;
+pub(crate) mod se;
+
+pub use integer::find_aligned_lattice_points_with_stop;
+pub(crate) use integer::find_aligned_lattice_points_mpfr;
+pub use scratch::IntScratch16;
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests;

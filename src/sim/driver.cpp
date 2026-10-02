@@ -1,4 +1,5 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  *  author: Suhas Vittal
  *  date:   12 March 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
@@ -92,6 +93,8 @@ Driver::Driver(std::vector<std::string> client_trace_files,
 
     if (GL_RDR_ENABLED)
         rdr_ = new driver::RotationDirectedRunahead(compute_subsystem_);
+    if (GL_TOPOLS_ENABLED)
+        topols_ = new driver::TopoLS(compute_subsystem_);
 }
 
 Driver::~Driver()
@@ -100,6 +103,8 @@ Driver::~Driver()
         delete c;
     if (GL_RDR_ENABLED)
         delete rdr_;
+    if (GL_TOPOLS_ENABLED)
+        delete topols_;
 }
 
 ////////////////////////////////////////////////////////////
@@ -219,7 +224,7 @@ std::optional<cycle_type>
 Driver::skip_to_cycle() const
 {
     // check that production cannot do anything (top-level buffer is full)
-    const bool ok_to_skip = !GL_RDR_ENABLED;
+    const bool ok_to_skip = !GL_RDR_ENABLED && !GL_TOPOLS_ENABLED;
     if (ok_to_skip && skip_cycle_target_.has_value())
     {
         auto s = *skip_cycle_target_;
@@ -329,6 +334,11 @@ Driver::operate()
     }
 
     /* 3. Handle pending instructions for any active clients */
+    
+    // 3.1 execute TopoLS rotations (give priority)
+    if (GL_TOPOLS_ENABLED)
+        progress += topols_->operate();
+
     //
     // `active_clients_.size()` is normally `concurrent_clients`, but can be smaller near the
     // end of a run: `handle_completed_clients()` (above) erases a finished client outright
@@ -454,6 +464,8 @@ long
 Driver::fetch_and_execute_instructions_from_client(Client* c)
 {
     skip_cycle_target_.reset();
+    if (_client_is_done(c, simulation_instructions))
+        return 0;
 
     std::vector<Qubit*> operands;
     operands.reserve(3);
@@ -463,95 +475,114 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
     std::vector<retired_inst_type> retired_inst;
     retired_inst.reserve(c->dag()->front_layer_size());
     c->for_each_instruction_in_front_layer(
-            [&, this] (auto* inst)
+        [&, this] (auto* inst)
+        {
+            if (GL_ELIDE_CLIFFORDS
+                    && !is_rotation_instruction(inst->type) 
+                    && !is_t_like_instruction(inst->type) 
+                    && !is_memory_access(inst->type))
             {
-                if (GL_ELIDE_CLIFFORDS
-                        && !is_rotation_instruction(inst->type) 
-                        && !is_t_like_instruction(inst->type) 
-                        && !is_memory_access(inst->type))
+                std::cerr << "Driver::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
+            }
+
+            // translate the operands of the instruction into the actual program qubits
+            operands.clear();
+            auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
+            std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
+                    [&c] (auto q_id) { return c->qubits()[q_id]; });
+
+            // TopoLS: do not proceed with any instructions that are dependent on an ongoing rotation
+            if (GL_TOPOLS_ENABLED && topols_->is_instruction_blocked(c, inst))
+                return;
+
+            // check if the operands are ready:
+            if (!is_instruction_ready(executed_inst, operands))
+                return;
+
+            // update stats:
+            inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
+            update_instruction_stats_on_fetch(executed_inst, operands);
+
+            bool are_operands_ready{true};
+            cycle_type s{};
+            for (auto* q : operands)
+            {
+                if (current_cycle() < q->cycle_available)
                 {
-                    std::cerr << "Driver::fetch_and_execute_instruction: unexpected clifford: " << *inst << _die{};
+                    are_operands_ready = false;
+                    s = std::max(q->cycle_available, s);
                 }
+            }
 
-                // translate the operands of the instruction into the actual program qubits
-                operands.clear();
-                auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
-                std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
-                        [&c] (auto q_id) { return c->qubits()[q_id]; });
+            if (!are_operands_ready)
+            {
+                if (skip_cycle_target_.has_value())
+                    skip_cycle_target_ = std::min(s, *skip_cycle_target_);
+                else
+                    skip_cycle_target_ = s;
+                return;
+            }
 
-                // check if the operands are ready:
-                if (!is_instruction_ready(executed_inst, operands))
+            /* RDR logic: first check if the rotation's magic state is already available    *
+             * if so, then try and apply the magic state                                    */
+            if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
+            {
+                auto outcome = rdr_handle_instruction(c, inst, operands[0]);
+                if (outcome == RDRHandleOutcome::RETIRE)
+                {
+                    cycle_type latency = operands[0]->cycle_available - current_cycle();
+                    retired_inst.push_back(retired_inst_type{inst, latency});
                     return;
-
-                // update stats:
-                inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
+                }
+                else if (outcome == RDRHandleOutcome::RETRY)
+                {
+                    return;
+                }
+                inst->rdr.visited = true;
+                executed_inst = inst->current_uop();  // urotseq may have changed if correction needed
                 update_instruction_stats_on_fetch(executed_inst, operands);
 
-                bool are_operands_ready{true};
-                cycle_type s{};
-                for (auto* q : operands)
-                {
-                    if (current_cycle() < q->cycle_available)
-                    {
-                        are_operands_ready = false;
-                        s = std::max(q->cycle_available, s);
-                    }
-                }
-
-                if (!are_operands_ready)
-                {
-                    if (skip_cycle_target_.has_value())
-                        skip_cycle_target_ = std::min(s, *skip_cycle_target_);
-                    else
-                        skip_cycle_target_ = s;
+                // Applying a prepared magic state occupies the target through
+                // its measurement and feedforward. Start the correction later.
+                if (operands[0]->cycle_available > current_cycle())
                     return;
-                }
+            }
 
-                /* RDR logic: first check if the rotation's magic state is already available    *
-                 * if so, then try and apply the magic state                                    */
-                if (GL_RDR_ENABLED && is_rotation_instruction(inst->type))
-                {
-                    auto outcome = rdr_handle_instruction(c, inst, operands[0]);
-                    if (outcome == RDRHandleOutcome::RETIRE)
-                    {
-                        cycle_type latency = operands[0]->cycle_available - current_cycle();
-                        retired_inst.push_back(retired_inst_type{inst, latency});
-                        return;
-                    }
-                    else if (outcome == RDRHandleOutcome::RETRY)
-                    {
-                        return;
-                    }
-                    inst->rdr.visited = true;
-                    executed_inst = inst->current_uop();  // urotseq may have changed if correction needed
-                    update_instruction_stats_on_fetch(executed_inst, operands);
+            // TopoLS: attempt to pin a rotation instruction to an ancilla qubit if there is space available.
+            if (GL_TOPOLS_ENABLED && is_rotation_instruction(inst->type) && topols_->has_free_ancilla())
+            {
+                topols_->allocate(c, inst);
+                retired_inst.push_back({inst, compute_subsystem_->code_distance});
+                success_count++;
+                return;
+            }
 
-                    // Applying a prepared magic state occupies the target through
-                    // its measurement and feedforward. Start the correction later.
-                    if (operands[0]->cycle_available > current_cycle())
-                        return;
-                }
-
-                if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
+            // Finally: handle execution of instruction or instruction's uop.
+            if (GL_RLTP_DEGREE > 0 && is_rotation_instruction(inst->type))
+            {
+                // reaction-limited T teleportation:
+                auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
+                if (result.progress)
+                    if (inst->uops_retired() == inst->uop_count())
+                        retired_inst.push_back(retired_inst_type{inst, result.latency});
+            }
+            else
+            {
+                auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
+                success_count += result.progress;
+                if (result.progress)
                 {
-                    // reaction-limited T teleportation:
-                    auto result = compute_subsystem_->do_rotation_via_rltp(inst, operands[0], GL_RLTP_DEGREE);
-                    if (result.progress)
-                        if (inst->uops_retired() == inst->uop_count())
-                            retired_inst.push_back(retired_inst_type{inst, result.latency});
-                }
-                else
-                {
-                    auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
-                    success_count += result.progress;
-                    if (result.progress)
+                    update_instruction_stats_before_retire(executed_inst);
+                    if (inst->uop_count() == 0 || inst->retire_current_uop())
                     {
-                        update_instruction_stats_before_retire(executed_inst);
-                        if (inst->uop_count() == 0 || inst->retire_current_uop())
-                            retired_inst.push_back(retired_inst_type{inst, result.latency});
+                        retired_inst.push_back(retired_inst_type{inst, result.latency});
+                        // TopoLS: update dependency tracking upon retirement.
+                        if (GL_TOPOLS_ENABLED)
+                            topols_->update_on_instruction_issue(c, inst);
                     }
                 }
-            });
+            }
+        });
 
     // retire all completed inst
     for (const auto& r : retired_inst)

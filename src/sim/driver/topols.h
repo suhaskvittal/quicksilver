@@ -44,9 +44,10 @@ public:
         Qubit* pinned_qubit;
 
         std::unordered_set<Qubit*> dependent_qubits;
-        std::vector<inst_ptr> blocked_inst;
+        std::unordered_set<inst_ptr> blocked_insts;
 
         bool done{false};
+        bool retired{false};
         uint64_t gates_hidden{0};
 
         /*
@@ -58,6 +59,10 @@ public:
                    block_start_cycle =std::numeric_limits<cycle_type>::max();
     };
 
+    /*
+     * Stats
+     * */
+    uint64_t s_requests_completed{0};
     uint64_t s_requests_allocated{0};
     uint64_t s_requests_full_latency_hidden{0};
 
@@ -73,11 +78,10 @@ private:
     std::vector<Qubit*> free_qubits_;
     std::vector<request_type> active_requests_;
 
-    bool request_recently_retired_{false};
-
     ComputeSubsystem* compute_subsystem_;
 public:
     TopoLS(ComputeSubsystem*);
+    ~TopoLS();
 
     long operate();
 
@@ -92,10 +96,11 @@ public:
     bool is_instruction_blocked(Client*, inst_ptr);
 
     cycle_type current_cycle() const { return compute_subsystem_->current_cycle(); }
-    size_t capacity() const { return qubits_.size(); }
+    size_t capacity() const { return compute_subsystem_->dedicated_ancilla().size(); }
     bool has_free_ancilla() const { return free_qubits_.size() > 0; }
+    bool has_pending_requests() const { return !active_requests_.empty(); }
 private:
-    void retire_request(const request_type&);
+    void retire_request(request_type&);
 };
 
 ////////////////////////////////////////////////////////////

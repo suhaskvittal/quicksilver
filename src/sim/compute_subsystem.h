@@ -181,9 +181,11 @@ private:
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-/* Definition of ComputeSubsystem's templated routing traversal. */
-template <class T, class U, class Callback>
-void
+/*
+ * Implementation of `ComputeSubysstem::for_each_resource_between()`
+ * */
+
+template <class T, class U, class Callback> void
 ComputeSubsystem::for_each_resource_between(T src, U dst, cycle_type from, cycle_type to,
                                             const Callback& callback) const
 {
@@ -198,6 +200,9 @@ ComputeSubsystem::for_each_resource_between(T src, U dst, cycle_type from, cycle
         edpc->for_each_resource_between(src, dst, from, to, callback);
     }
 }
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 } // namespace sim
 

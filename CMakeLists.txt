@@ -117,6 +117,7 @@ set(SIM_FILES
     src/sim/client.cpp
     src/sim/compute_subsystem.cpp
     src/sim/driver.cpp
+    src/sim/driver/topols.cpp
     src/sim/driver/rdr.cpp
     src/sim/memory/bivariate_bicycle.cpp
     src/sim/memory_level.cpp
@@ -171,6 +172,17 @@ target_link_libraries(qs_gen_binary PRIVATE qs_common
 ###################################################
 
 # Rotation LUT constructor (qs_build_lut)
+
+# Contributor: Codex (GPT-6 Sol), 2 October 2026.
+# Build the native cyclosynth bridge separately with Cargo (see Cyclosynth.txt).
+option(COMPILE_V_LUT_BUILDER "Build the standalone Clifford+V LUT constructor" OFF)
+if (COMPILE_LUT_BUILDER OR COMPILE_V_LUT_BUILDER)
+set(CYCLOSYNTH_BRIDGE "${CMAKE_CURRENT_SOURCE_DIR}/deps/cyclosynth/target/release/examples/qs_rz_bridge"
+    CACHE FILEPATH "Native cyclosynth Rz synthesis bridge")
+add_executable(qs_build_lut_v main/qs_build_lut_v.cpp)
+target_compile_definitions(qs_build_lut_v PRIVATE QS_CYCLOSYNTH_BRIDGE="${CYCLOSYNTH_BRIDGE}")
+target_compile_options(qs_build_lut_v PRIVATE ${COMPILE_OPTIONS})
+endif()
 
 if (COMPILE_LUT_BUILDER)
 

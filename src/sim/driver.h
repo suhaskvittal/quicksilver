@@ -2,6 +2,7 @@
  *  author: Suhas Vittal
  *  date:   12 March 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  * */
 
 #ifndef SIM_DRIVER_h
@@ -11,6 +12,7 @@
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
 #include "sim/driver/rdr.h"
+#include "sim/driver/topols.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 #include "sim/stall_monitor.h"
@@ -108,6 +110,7 @@ private:
      * Rotation directed runahead logic (RDR):
      * */
     driver::RotationDirectedRunahead* rdr_{nullptr};
+    driver::TopoLS* topols_{nullptr};
 
     /*
      * `stall_monitor_` manages statistics related to stalls
@@ -159,6 +162,7 @@ public:
 
     ComputeSubsystem* compute_subsystem() const { return compute_subsystem_; }
     driver::RotationDirectedRunahead* rdr() const { return rdr_; }
+    driver::TopoLS* topols() const { return topols_; }
 
     const std::vector<Client*>& clients() const { return clients_; }
     const stall_monitor_type& stall_monitor() const { return stall_monitor_; }

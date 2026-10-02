@@ -1,4 +1,5 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  *  author: Suhas Vittal
  *  date:   11 March 2026
  *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
@@ -26,8 +27,10 @@ using routing_ptr = ComputeSubsystem::routing_ptr;
 using mcb_type = routing::MultiChannelBus<routing_xtor>;
 using edpc_type = routing::EDPCLayout<routing_xtor>;
 
-
 size_t _dedicated_ancilla_count();
+
+template <class ArrayLike> 
+void _fill_dedicated_ancilla(ArrayLike&, size_t&, size_t, client_id_type);
 
 /*
  * Routing space initializers. These functions should map all dedicated ancilla and program
@@ -42,11 +45,6 @@ edpc_type* _build_edpc_layout(ComputeSubsystem*);
  * This is useful for mapping qubits into the routing space.
  * */
 int _read_address_and_shift(int&, size_t resource_size);
-
-/*
- * Does what it says on the box.
- * */
-size_t _get_idx_in_array(Qubit*, const std::vector<Qubit*>&);
 
 /*
  * Calls `test_resources_between()` for both of `routing::MCB_LEFT_ENTRY` and
@@ -87,6 +85,11 @@ cycle_type _get_earliest_lockable_time_for_endpoints(ComputeSubsystem*,
                                                         cycle_type current_cycle, 
                                                         cycle_type lock_duration);
 
+/*
+ * Other functions:
+ * */
+size_t _get_idx_in_array(Qubit*, const std::vector<Qubit*>&);
+
 } // anon
 
 ////////////////////////////////////////////////////////////
@@ -101,7 +104,7 @@ ComputeSubsystem::routing_translator::translate(Qubit* q) const
 {
     // Both layouts use the same IDs: dedicated ancilla first, then program
     // qubits. Each layout maps those IDs to its own physical coordinates.
-    if (q->client_id == RDR_CLIENT_ID)
+    if (q->client_id == RDR_CLIENT_ID || q->client_id == TOPOLS_CLIENT_ID)
         return _get_idx_in_array(q, c->dedicated_ancilla());
     else
         return c->dedicated_ancilla_count + _get_idx_in_array(q, c->local_memory());
@@ -132,18 +135,16 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
         routing_ = routing_ptr{ _build_edpc_layout(this) };
 
     // we can initialize the dedicated qubits now:
-    if (GL_RDR_ENABLED)
+    if (dedicated_ancilla_count > 0)
     {
-        assert(dedicated_ancilla_count == GL_RDR_CAPACITY);
-        for (int i = 0; i < GL_RDR_CAPACITY; i++)
-        {
-            Qubit* q = new Qubit{.qubit_id=i, .client_id=RDR_CLIENT_ID};
-            dedicated_ancilla_[i] = q;
-        }
-    }
-    else
-    {
-        assert(dedicated_ancilla_count == 0);
+        // first handle RDR handle ancilla (if enabled)
+        size_t idx{0};
+        if (GL_RDR_ENABLED)
+            _fill_dedicated_ancilla(dedicated_ancilla_, idx, GL_RDR_CAPACITY, RDR_CLIENT_ID);
+        if (GL_TOPOLS_ENABLED)
+            _fill_dedicated_ancilla(dedicated_ancilla_, idx, GL_TOPOLS_ANCILLA, TOPOLS_CLIENT_ID);
+        if (idx < dedicated_ancilla_count)
+            std::cerr << "ComputeSubsystem::ctor(): did not fill up all requested dedicated ancilla" << _die{};
     }
 }
 
@@ -387,7 +388,7 @@ ComputeSubsystem::log_fidelity(Client* c, double scale, double d_freq_khz, doubl
     const double t_infidelity = t_producer_->top_level_infidelity();
 
     // memory (idle) fidelity
-    const double log_f_mem = local_memory_capacity * cycles * std::log(1 - ler_per_cycle);
+    const double log_f_mem = (local_memory_capacity + (GL_TOPOLS_ENABLED ? dedicated_ancilla_count : 0)) * cycles * std::log(1 - ler_per_cycle);
     // T gate fidelity
     const double log_f_t = t_gates * std::log(1.0 - t_infidelity);
     // total fidelity:
@@ -530,10 +531,19 @@ namespace
 size_t
 _dedicated_ancilla_count()
 {
+    size_t n{0};
+    if (GL_TOPOLS_ENABLED)
+        n += GL_TOPOLS_ANCILLA;
     if (GL_RDR_ENABLED)
-        return GL_RDR_CAPACITY;
-    else
-        return 0;
+        n += GL_RDR_CAPACITY;
+    return n;
+}
+
+template <class ArrayLike> void
+_fill_dedicated_ancilla(ArrayLike& a, size_t& idx, size_t n, client_id_type c)
+{
+    for (size_t i = 0; i < n; i++)
+        a[idx++] = new Qubit{ .qubit_id=static_cast<qubit_type>(idx), .client_id=c };
 }
 
 ////////////////////////////////////////////////////////////
@@ -591,14 +601,6 @@ _read_address_and_shift(int& x, size_t n)
     return y;
 }
 
-size_t
-_get_idx_in_array(Qubit* q, const std::vector<Qubit*>& arr)
-{
-    auto it = std::find(arr.begin(), arr.end(), q);
-    assert(it != arr.end());
-    return std::distance(arr.begin(), it);
-}
-
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
@@ -643,6 +645,17 @@ _get_earliest_lockable_time_for_endpoints(ComputeSubsystem* compute, T src, cycl
     for (routing::id_type dst : {routing::MCB_LEFT_ENTRY, routing::MCB_RIGHT_ENTRY})
         earliest = std::min(earliest, _get_earliest_lockable_time_between(compute, src, dst, c, d));
     return earliest;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+size_t
+_get_idx_in_array(Qubit* q, const std::vector<Qubit*>& arr)
+{
+    auto it = std::find(arr.begin(), arr.end(), q);
+    assert(it != arr.end());
+    return std::distance(arr.begin(), it);
 }
 
 ////////////////////////////////////////////////////////////

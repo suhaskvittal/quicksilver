@@ -1,4 +1,5 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  *  author: Suhas Vittal
  *  date:   16 January 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
@@ -123,6 +124,9 @@ main(int argc, char* argv[])
         .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
 
+        .optional("-topols", "", "Enable TopoLS rotation latency hiding", sim::GL_TOPOLS_ENABLED, false)
+        .optional("", "--topols-ancilla", "Dedicated TopoLS ancilla", sim::GL_TOPOLS_ANCILLA, 4)
+
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
         .optional("", "--rdr-start-layer", "DAG layer to start runahead", sim::GL_RDR_START_LAYER, 2)
@@ -171,6 +175,8 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+    if (sim::GL_TOPOLS_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_RLTP_DEGREE > 0 || sim::GL_TOPOLS_ANCILLA <= 0))
+        std::cerr << "TopoLS requires positive ancilla capacity and exclusive use of rotation acceleration" << _die{};
     if (routing_layout != "bus" && routing_layout != "edpc")
         std::cerr << "Unknown routing layout: " << routing_layout << _die{};
     const auto compute_routing_layout = routing_layout == "edpc"
@@ -392,12 +398,17 @@ main(int argc, char* argv[])
                                 ? 4 * sim::GL_RDR_CAPACITY * sc_footprint
                                 : 1.5 * sim::GL_RDR_CAPACITY * sc_footprint) + rdr_storage_overhead)
                         : 0;
-    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
+    const size_t topols_footprint = sim::GL_TOPOLS_ENABLED
+        ? (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC ? 4 : 1.5)
+            * sim::GL_TOPOLS_ANCILLA * sc_footprint
+        : 0;
+    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint + topols_footprint;
 
     std::cout << "COMPUTE_FOOTPRINT\n";
     print_stat_line(std::cout, "    PROGRAM_MEMORY", program_active_memory_footprint);
     print_stat_line(std::cout, "    RLTP_WORKSPACE", rltp_footprint);
     print_stat_line(std::cout, "    RDR_WORKSPACE", rdr_footprint);
+    print_stat_line(std::cout, "    TOPOLS_WORKSPACE", topols_footprint);
     print_stat_line(std::cout, "    TOTAL", total_compute_footprint);
 
     /*

@@ -22,7 +22,7 @@ using request_type = TopoLS::request_type;
  * Looks through the given request range and checks if any requests collide with the
  * given qubit range. If so, a callback is called. Returns true if there was any collision.
  * */
-template <class REQ_ITER, class Q_ITER class CALLBACK>
+template <class REQ_ITER, class Q_ITER, class CALLBACK>
 bool _traverse_and_callback_on_collision(REQ_ITER, REQ_ITER, Q_ITER, Q_ITER, const CALLBACK&);
 
 } // anon
@@ -30,10 +30,47 @@ bool _traverse_and_callback_on_collision(REQ_ITER, REQ_ITER, Q_ITER, Q_ITER, con
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TopoLS::TopoLS(ComputeSubsystem* compute)
+    :free_qubits_(compute->dedicated_ancilla()), compute_subsystem_(compute)
+{}
+
+TopoLS::~TopoLS()
+{
+    for (const auto& r : active_requests_)
+        delete r.inst;
+}
+
 long
 TopoLS::operate()
 {
+    long progress{0};
+    for (auto it = active_requests_.begin(); it != active_requests_.end(); it++)
+    {
+        auto& r = *it;
+        if (r.pinned_qubit->cycle_available > current_cycle())
+            continue;
 
+        if (r.done)
+        {
+            for (auto* q : r.dependent_qubits)
+                q->cycle_available = std::max(q->cycle_available, current_cycle()+GL_REACTION_TIME+1);
+            retire_request(r);
+            progress++;
+        } 
+        else
+        {
+            // execute gate on qubit:
+            auto result = compute_subsystem_->execute_instruction(r.inst->current_uop(), {r.pinned_qubit});
+            progress += result.progress;
+            if (result.progress)
+                r.done = r.inst->retire_current_uop();
+        }
+    }
+
+    auto it = std::remove_if(active_requests_.begin(), active_requests_.end(), 
+                            [] (const auto& r) { return r.retired; });
+    active_requests_.erase(it, active_requests_.end());
+    return progress;
 }
 
 ////////////////////////////////////////////////////////////
@@ -51,21 +88,24 @@ TopoLS::allocate(Client* c, inst_ptr inst)
     Qubit* q = c->qubits()[inst->qubits[0]];
     if (q->cycle_available > current_cycle())
         std::cerr << "TopoLS::allocate(): qubit " << *q << " is not free for initial PPM" << _die{};
-    Qubit* p = free_qubits_.back();
+    auto available = std::find_if(free_qubits_.begin(), free_qubits_.end(),
+        [this](auto* q) { return q->cycle_available <= current_cycle(); });
+    Qubit* p = *available;
 
     // simple simulation of ZZ: just set availability to current cycle + d rounds
     const cycle_type zz_end = current_cycle() + compute_subsystem_->code_distance;
     q->cycle_available = zz_end;
     p->cycle_available = zz_end;
 
-    free_qubits_.pop_back();
+    free_qubits_.erase(available);
     request_type r{
         .client = c,
-        .inst = inst,
+        .inst = new Instruction(*inst),
         .pinned_qubit = p,
         .dependent_qubits = {q},
-        .request_start_cycle = current_cycle()
+        .start_cycle = current_cycle()
     };
+    r.done = r.inst->uop_count() == 0;
     active_requests_.push_back(r);
     s_requests_allocated++;
 }
@@ -100,7 +140,7 @@ TopoLS::update_on_instruction_issue(Client* c, inst_ptr inst)
 ////////////////////////////////////////////////////////////
 
 bool
-TopoLS::is_instruction_blocked(Client* c, inst_ptr inst) const
+TopoLS::is_instruction_blocked(Client* c, inst_ptr inst)
 {
     if (is_clifford_instruction(inst->type))
         return false;
@@ -113,8 +153,9 @@ TopoLS::is_instruction_blocked(Client* c, inst_ptr inst) const
                                                         qubits.begin(), qubits.end(),
                                                         [&] (auto& r) 
                                                         {
-                                                            r.block_start_cycle = current_cycle();
-                                                            r.blocked_inst.push_back(inst);
+                                                            r.block_start_cycle = std::min(r.block_start_cycle, 
+                                                                                            current_cycle());
+                                                            r.blocked_insts.insert(inst);
                                                         });
     inst->topols.blocked = blocked;
     return blocked;
@@ -124,15 +165,23 @@ TopoLS::is_instruction_blocked(Client* c, inst_ptr inst) const
 ////////////////////////////////////////////////////////////
 
 void
-TopoLS::retire_request(const request_type& r)
+TopoLS::retire_request(request_type& r)
 {
+    if (r.retired)
+        std::cerr << "TopoLS::retire_request(): attempted to retire already retired request" << _die{};
+
     // place pinned qubit back:
     free_qubits_.push_back(r.pinned_qubit);
+    s_requests_completed++;
+    delete r.inst;
+
+    // unblock everything in `blocked_insts` so they can retry.
+    for (auto* inst : r.blocked_insts)
+        inst->topols.blocked = false;
 
     // update stats:
     cycle_type end_cycle = current_cycle(),
                last_noncritical_cycle = std::min(current_cycle(), r.block_start_cycle);
-
     cycle_type lat = end_cycle - r.start_cycle,
                hidden_lat = last_noncritical_cycle - r.start_cycle;
     double hidden_fr = fpdiv(hidden_lat, lat);
@@ -144,6 +193,8 @@ TopoLS::retire_request(const request_type& r)
 
     if (hidden_lat == lat)
         s_requests_full_latency_hidden++;
+
+    r.retired = true;
 }
 
 ////////////////////////////////////////////////////////////
@@ -152,7 +203,7 @@ TopoLS::retire_request(const request_type& r)
 namespace
 {
 
-template <class REQ_IT, class Q_IT class CALLBACK> bool
+template <class REQ_IT, class Q_IT, class CALLBACK> bool
 _traverse_and_callback_on_collision(REQ_IT req_begin, REQ_IT req_end, Q_IT q_begin, Q_IT q_end, const CALLBACK& cb)
 {
     bool any_collision{false};
@@ -160,7 +211,7 @@ _traverse_and_callback_on_collision(REQ_IT req_begin, REQ_IT req_end, Q_IT q_beg
     {
         // check for collision
         bool collision = std::any_of(q_begin, q_end, 
-                                [&] (const auto* q) { return req_it->dependent_qubits.count(q); });
+                                [&] (auto* q) { return req_it->dependent_qubits.count(q); });
         if (collision)
             cb(*req_it);
         any_collision = (any_collision || collision);
