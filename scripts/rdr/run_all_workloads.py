@@ -18,7 +18,7 @@ DEFAULT_RDR_LOOKAHEAD_DEPTH = 256
 DEFAULT_RDR_COST_SCALE = 4.0
 
 F_MIN = 35000
-F_MAX = 85000
+F_MAX = 80000
 F_STEP = 5000
 
 ##############################################
@@ -42,6 +42,18 @@ if experiment == 'sim_baseline':
                             print_progress=PRINT_PROGRESS,
                             factory_budget=f)
 
+if experiment == 'sim_baseline_edpc':
+    for w in workload_list():
+        for f in range(F_MIN, F_MAX, F_STEP):
+            _f = f//1000
+            run_quicksilver(w, PROJECT, f'baseline_f{_f}k_edpc', f'eif_a{DEFAULT_CAPACITY}',
+                            inst_limit=SIM_INST_COUNT,
+                            active_set_capacity=DEFAULT_CAPACITY,
+                            total_program_inst=get_total_inst_count_for_workload(w),
+                            print_progress=PRINT_PROGRESS,
+                            factory_budget=f,
+                            kwargs={'--routing-layout': 'edpc'})
+
 if experiment == 'sim_rdr':
     for w in workload_list():
         for f in range(F_MIN, F_MAX, F_STEP):
@@ -63,6 +75,28 @@ if experiment == 'sim_rdr':
                                 '--rdr-cost-scale': DEFAULT_RDR_COST_SCALE
                             })
 
+if experiment == 'sim_rdr_edpc':
+    for w in workload_list():
+        for f in range(F_MIN, F_MAX, F_STEP):
+            _f = f//1000
+            run_quicksilver(w, PROJECT, f'rdr_f{_f}k_edpc', f'eif_a{DEFAULT_CAPACITY}_rdr',
+                            inst_limit=SIM_INST_COUNT,
+                            active_set_capacity=DEFAULT_CAPACITY,
+                            total_program_inst=get_total_inst_count_for_workload(w),
+                            print_progress=PRINT_PROGRESS,
+                            factory_budget=f,
+                            kwargs={
+                                '-rdr': 1,
+                                '--rdr-capacity': 2,
+                                '--rdr-start-layer': 2,
+                                '--rdr-lookahead-depth': DEFAULT_RDR_LOOKAHEAD_DEPTH,
+                                '--rdr-degree': DEFAULT_RDR_DEGREE,
+                                '--rdr-completion-buffer-capacity': 4,
+                                '--rdr-fixed-lookahead': '',
+                                '--rdr-cost-scale': DEFAULT_RDR_COST_SCALE,
+                                '--routing-layout': 'edpc'
+                            })
+
 if experiment == 'sim_rltp':
     for w in workload_list():
         for f in range(F_MIN, F_MAX, F_STEP):
@@ -76,6 +110,22 @@ if experiment == 'sim_rltp':
                                 factory_budget=f,
                                 kwargs={
                                     '--rltp-degree': rltp,
+                                })
+
+if experiment == 'sim_rltp_edpc':
+    for w in workload_list():
+        for f in range(F_MIN, F_MAX, F_STEP):
+            for rltp in [4,6]:
+                _f = f//1000
+                run_quicksilver(w, PROJECT, f'rltp_{rltp}_f{_f}k_edpc', f'eif_a{DEFAULT_CAPACITY}',
+                                inst_limit=SIM_INST_COUNT,
+                                active_set_capacity=DEFAULT_CAPACITY,
+                                total_program_inst=get_total_inst_count_for_workload(w),
+                                print_progress=PRINT_PROGRESS,
+                                factory_budget=f,
+                                kwargs={
+                                    '--rltp-degree': rltp,
+                                    '--routing-layout': 'edpc'
                                 })
 
 if experiment == 'sim_baseline_tr_sens':

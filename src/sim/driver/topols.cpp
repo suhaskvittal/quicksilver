@@ -1,0 +1,177 @@
+/*
+ *  author: Suhas Vittal
+ *  date:   1 October 2026
+ * */
+
+#include "sim/driver/topols.h"
+
+namespace sim
+{
+namespace driver
+{
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+using request_type = TopoLS::request_type;
+
+/*
+ * Looks through the given request range and checks if any requests collide with the
+ * given qubit range. If so, a callback is called. Returns true if there was any collision.
+ * */
+template <class REQ_ITER, class Q_ITER class CALLBACK>
+bool _traverse_and_callback_on_collision(REQ_ITER, REQ_ITER, Q_ITER, Q_ITER, const CALLBACK&);
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+long
+TopoLS::operate()
+{
+
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+TopoLS::allocate(Client* c, inst_ptr inst)
+{
+    if (!is_rotation_instruction(inst->type))
+        std::cerr << "TopoLS::allocate(): only rotation instructions are supported, got \"" << *inst << "\"" << _die{};
+    if (!has_free_ancilla())
+        std::cerr << "TopoLS::allocate(): attempted to pin request to ancilla, but no ancilla are available" << _die{};
+
+    // Check if qubit is free:
+    Qubit* q = c->qubits()[inst->qubits[0]];
+    if (q->cycle_available > current_cycle())
+        std::cerr << "TopoLS::allocate(): qubit " << *q << " is not free for initial PPM" << _die{};
+    Qubit* p = free_qubits_.back();
+
+    // simple simulation of ZZ: just set availability to current cycle + d rounds
+    const cycle_type zz_end = current_cycle() + compute_subsystem_->code_distance;
+    q->cycle_available = zz_end;
+    p->cycle_available = zz_end;
+
+    free_qubits_.pop_back();
+    request_type r{
+        .client = c,
+        .inst = inst,
+        .pinned_qubit = p,
+        .dependent_qubits = {q},
+        .request_start_cycle = current_cycle()
+    };
+    active_requests_.push_back(r);
+    s_requests_allocated++;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+TopoLS::update_on_instruction_issue(Client* c, inst_ptr inst)
+{
+    std::vector<Qubit*> qubits(inst->qubit_count);
+    std::transform(inst->q_begin(), inst->q_end(), qubits.begin(), [c] (auto id) { return c->qubits()[id]; });
+
+    // check for collision with any requests
+    bool any_collision = _traverse_and_callback_on_collision(active_requests_.begin(), active_requests_.end(),
+                                                            qubits.begin(), qubits.end(),
+                                                            [&] (auto& r)
+                                                            {
+                                                                for (auto* q : qubits)
+                                                                    r.dependent_qubits.insert(q);
+                                                                r.gates_hidden++;
+                                                            });
+
+    if (any_collision && is_nonclifford_instruction(inst->type))
+    {
+        std::cerr << "TopoLS::update_on_instruction_issue(): found collision on non-Clifford (should be blocked): " 
+            << *inst << _die{};
+    }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+bool
+TopoLS::is_instruction_blocked(Client* c, inst_ptr inst) const
+{
+    if (is_clifford_instruction(inst->type))
+        return false;
+    if (inst->topols.blocked)
+        return true;
+    std::vector<Qubit*> qubits(inst->qubit_count);
+    std::transform(inst->q_begin(), inst->q_end(), qubits.begin(), [c] (auto id) { return c->qubits()[id]; });
+
+    bool blocked =  _traverse_and_callback_on_collision(active_requests_.begin(), active_requests_.end(),
+                                                        qubits.begin(), qubits.end(),
+                                                        [&] (auto& r) 
+                                                        {
+                                                            r.block_start_cycle = current_cycle();
+                                                            r.blocked_inst.push_back(inst);
+                                                        });
+    inst->topols.blocked = blocked;
+    return blocked;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+TopoLS::retire_request(const request_type& r)
+{
+    // place pinned qubit back:
+    free_qubits_.push_back(r.pinned_qubit);
+
+    // update stats:
+    cycle_type end_cycle = current_cycle(),
+               last_noncritical_cycle = std::min(current_cycle(), r.block_start_cycle);
+
+    cycle_type lat = end_cycle - r.start_cycle,
+               hidden_lat = last_noncritical_cycle - r.start_cycle;
+    double hidden_fr = fpdiv(hidden_lat, lat);
+
+    s_latency.add(lat);
+    s_hidden_gates.add(r.gates_hidden);
+    s_hidden_latency.add(hidden_lat);
+    s_fraction_hidden_latency.add(hidden_fr);
+
+    if (hidden_lat == lat)
+        s_requests_full_latency_hidden++;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+namespace
+{
+
+template <class REQ_IT, class Q_IT class CALLBACK> bool
+_traverse_and_callback_on_collision(REQ_IT req_begin, REQ_IT req_end, Q_IT q_begin, Q_IT q_end, const CALLBACK& cb)
+{
+    bool any_collision{false};
+    for (auto req_it = req_begin; req_it != req_end; req_it++)
+    {
+        // check for collision
+        bool collision = std::any_of(q_begin, q_end, 
+                                [&] (const auto* q) { return req_it->dependent_qubits.count(q); });
+        if (collision)
+            cb(*req_it);
+        any_collision = (any_collision || collision);
+    }
+    return any_collision;
+}
+
+} // anon
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+} // namespace driver
+} // namespace sim

@@ -123,26 +123,20 @@ RotationDirectedRunahead::operate()
     
     for (auto& r : active_requests_)
     {
-        const size_t magic_states_avail = compute_subsystem_->count_available_magic_states();
-        if (!r.interrupted && magic_states_avail <= 1)
+        if (r.pinned_qubit->cycle_available > current_cycle())
             continue;
         if (r.done)
             continue;
-        if (GL_RLTP_DEGREE == 0 || magic_states_avail < GL_RLTP_DEGREE)
-        {
-            inst_ptr uop = r.inst->current_uop();
-            auto result = compute_subsystem_->execute_instruction(uop, {r.pinned_qubit});
-            progress += result.progress;
-            if (result.progress > 0 && r.inst->retire_current_uop())
-                retire_request(r);
-        }
-        else
-        {
-            auto result = compute_subsystem_->do_rotation_via_rltp(r.inst, r.pinned_qubit, GL_RLTP_DEGREE);
-            progress += result.progress;
-            if (result.progress > 0 && r.inst->uops_retired() == r.inst->uop_count())
-                retire_request(r);
-        }
+
+        const size_t magic_states_avail = compute_subsystem_->count_available_magic_states();
+        if (!r.interrupted && magic_states_avail <= 1)
+            continue;
+
+        inst_ptr uop = r.inst->current_uop();
+        auto result = compute_subsystem_->execute_instruction(uop, {r.pinned_qubit});
+        progress += result.progress;
+        if (result.progress > 0 && r.inst->retire_current_uop())
+            retire_request(r);
     }
 
     /* 4. update cycle-level stats */
