@@ -148,7 +148,7 @@ main(int argc, char* argv[])
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
         .optional("", "--factory-ll-buffer-capacity", "Number of magic states stored in an last-level factory buffer",
-                      factory_ll_buffer_capacity, 1)
+                      factory_ll_buffer_capacity, 2)
 
         /*
          *

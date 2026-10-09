@@ -34,8 +34,8 @@ t_cc_cultivation(size_t d)
     // estimate time to succesful cultivation. notes:
     //  1. Assume error hapeens in the middle of `escape_cycles`
     size_t tries_until_success = static_cast<size_t>(std::round( 1.0/prob_success));
-    cycle_type t = ((escape_cycles + GL_REACTION_TIME)/2) * (tries_until_success-1) 
-                    + escape_cycles + GL_REACTION_TIME;
+    cycle_type t = ((escape_cycles + /*GL_REACTION_TIME*/ 10)/2) * (tries_until_success-1) 
+                    + escape_cycles + /*GL_REACTION_TIME*/ 10;
 
     return ProducerQuantum
             {

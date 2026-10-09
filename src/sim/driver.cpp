@@ -362,11 +362,7 @@ Driver::operate()
     }
 
     if (GL_RDR_ENABLED)
-    {
-        size_t magic_states_avail = t_producer_->top_level_buffer_occupancy();
-        if (magic_states_avail > 1)
-            progress += rdr_->operate();
-    }
+        progress += rdr_->operate();
 
     if (progress == 0)
         cycles_without_progress++;
@@ -451,7 +447,11 @@ void
 Driver::retire_instruction(Client* c, inst_ptr inst, cycle_type inst_latency)
 {
     if (is_rotation_instruction(inst->type))
+    {
         s_rotation_instructions++;
+        if (GL_RDR_ENABLED)
+            rdr_->sig_rotation_retired();
+    }
 
     inst->cycle_done = current_cycle() + inst_latency;
     c->retire_instruction(inst);

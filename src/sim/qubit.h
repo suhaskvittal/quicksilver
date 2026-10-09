@@ -26,7 +26,9 @@ struct Qubit
      * This is the earliest cycle when the qubit is available
      * for some operation.
      * */
-    cycle_type cycle_available{0};
+    cycle_type cycle_available{0},
+               x_fr_available{0},
+               z_fr_available{0};
 
     /*
      * These are used for calculating stats

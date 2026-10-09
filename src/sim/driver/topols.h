@@ -37,6 +37,8 @@ class TopoLS
 public:
     using inst_ptr = Instruction*;
 
+    enum class frame_type {X, Y, Z};
+
     struct request_type
     {
         Client* client;

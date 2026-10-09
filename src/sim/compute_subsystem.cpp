@@ -46,6 +46,8 @@ edpc_type* _build_edpc_layout(ComputeSubsystem*);
  * */
 int _read_address_and_shift(int&, size_t resource_size);
 
+void _frame_update(cycle_type& dst, cycle_type src_fr_avail, cycle_type op_cycle);
+
 /*
  * Calls `test_resources_between()` for both of `routing::MCB_LEFT_ENTRY` and
  * `routing::MCB_RIGHT_ENTRY`, and returns the first one that can be locked. 
@@ -454,25 +456,35 @@ ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 execute_result_type
 ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 {
+    const cycle_type d{code_distance};
+
     // first make sure a magic state is available:
     if (t_producer_->top_level_buffer_occupancy() == 0)
+        return execute_result_type{};
+
+    // check basis of T gate:
+    const bool is_z_basis = (inst->type == Instruction::Type::T || inst->type == Instruction::Type::TDG);
+    // if decoder has not given response yet, then do not execute:
+    if ((is_z_basis && current_cycle()+d < q->x_fr_available) || (!is_z_basis && current_cycle()+d < q->z_fr_available))
         return execute_result_type{};
 
     // Once the X/Y measurement complete, it will take a software decoder about 1us per round to
     // determine a result. So, we assume the reaction time is the code distance (assuming each round/cycle
     // takes 1us)
     const cycle_type t_start = current_cycle(),
-                     t_end = current_cycle() + code_distance;
+                     t_end = current_cycle()+d;
     // get routing space -- on success, we can execute the T gate
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
     if (!dst.has_value())
         return execute_result_type{};
     routing_->lock_resources_between(q, *dst, t_start, t_end);
 
-    // estimate decoding latency:
-    const cycle_type total_latency = code_distance + GL_REACTION_TIME;
+    cycle_type corr_ready_cycle = current_cycle() + d + GL_REACTION_TIME + ((d/2)-1)/2 + GL_REACTION_TIME;
+    if (is_z_basis) q->z_fr_available = corr_ready_cycle;
+    else            q->x_fr_available = corr_ready_cycle;
+
     t_producer_->consume(1);
-    return execute_result_type{.progress=1, .latency=total_latency};
+    return execute_result_type{.progress=1, .latency=d};
 }
 
 ////////////////////////////////////////////////////////////
@@ -599,6 +611,16 @@ _read_address_and_shift(int& x, size_t n)
     int y = x % static_cast<int>(n);
     x /= static_cast<int>(n);
     return y;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+void
+_frame_update(cycle_type& dst, cycle_type& src, cycle_type c)
+{
+    cycle_type st = std::max(src, c) + GL_REACTION_TIME; // earliest we can resolve the measurement outcome
+    dst = std::max(st, dst);
 }
 
 ////////////////////////////////////////////////////////////
