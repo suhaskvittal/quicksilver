@@ -11,6 +11,9 @@ case "$MODE" in
             compile_eif
             compile_eif_la
             compile_hint
+            compile_appendix_eif
+            compile_appendix_eif_la
+            compile_appendix_hint
         )
         ;;
     sim)
@@ -22,10 +25,30 @@ case "$MODE" in
             sim_eif_ed_sensitivity
             sim_eif_la_ed_sensitivity
             sim_hint_ed_sensitivity
+            sim_appendix_eif
+            sim_appendix_eif_la
+            sim_appendix_hint
         )
         ;;
+    appendix_compile)
+        EXPERIMENTS=(
+            compile_appendix_eif
+            compile_appendix_eif_la
+            compile_appendix_hint
+        )
+        ;;
+    appendix_sim)
+        EXPERIMENTS=(
+            sim_appendix_eif
+            sim_appendix_eif_la
+            sim_appendix_hint
+        )
+        ;;
+    appendix_report)
+        exec python3 -m scripts.hint.run_all_workloads report_appendix
+        ;;
     *)
-        echo "usage: $0 {compile|sim}" >&2
+        echo "usage: $0 {compile|sim|appendix_compile|appendix_sim|appendix_report}" >&2
         exit 1
         ;;
 esac
