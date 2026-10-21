@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   18 February 2026
+ *  contributor: OpenAI Codex (compact 15-to-1 factory variant, 1 October 2026)
  * */
 
 #ifndef SIM_PRODUCTION_h
@@ -176,7 +177,40 @@ cycle_type retry_adjusted_latency(cycle_type, size_t n_inputs, double e_input);
  * */
 
 ProducerQuantum t_cc_cultivation(size_t d);
+
+/*
+ * This is Litinski's version of 15:1 distillation. This is spacetime optimal, but it takes
+ * up a lot space. 
+ * */
 ProducerQuantum t_15to1_distillation(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
+
+/*
+ * This is my version. It takes up about half the space but takes more than twice as long to produce
+ * a T gate, which is worthwhile in my opinion. The unused space in the diagram can be filled up by
+ * other factories.
+ *
+ * Layout:
+ *      * 2 3   * 
+ *      1 - - OUT/T
+ *      * 4 5   *
+ *
+ * OUT and 1 is `dx*dx`. 2 thru 5 is `dx*dz`.
+ * T is assumed to be `dm*dm` (but `dm == dz`, so who cares)
+ * Used routing space (dashes) are `dx` tall.
+ *
+ * Total space overhead is thus:
+ *      width = 2*dx + 2*dz
+ *      height = 3*dx
+ *      unused qubits = 8*dx*dx
+ * Total: 
+ *      2*(width)*(height) - unused = 2*(2*dx+2*dz)*(3*dx) - 8*dx*dx = 12*dx*dx + 12*dz*dx - 8*dx*dx = 4*dx*(dx + 3*dz)
+ *
+ * Latency:
+ *  initialization: `dx` cycles
+ *  checks: `dm` cycles * 11 such checks
+ *  output: `dx` cycles
+ * */
+ProducerQuantum t_15to1_distillation_compact(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
 
 
 /*

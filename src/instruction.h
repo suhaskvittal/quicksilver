@@ -180,6 +180,12 @@ public:
         bool visited{false};
     } rdr;
 
+    /* TopoLS state variables */
+    struct
+    {
+        bool blocked{false};
+    } topols;
+
     /* Reaction related state variables */
     struct
     {

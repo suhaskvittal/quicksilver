@@ -9,6 +9,7 @@
 #include "instruction.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -44,6 +45,9 @@ int main(int argc, char* argv[])
     uint64_t t_gates_from_rz{0};
     uint64_t t_gates_from_rz_corr{0};
     uint64_t t_gates_from_ccx{0};
+    uint64_t corr_ratio_count{0};
+    double corr_ratio_mean{0.0};
+    double corr_ratio_m2{0.0};
 
     // Instruction-level parallelism: ASAP-layer the compute DAG. `qubit_next_layer[q]`
     // is the earliest layer a future instruction on qubit `q` can occupy; a layer holds
@@ -133,6 +137,15 @@ int main(int argc, char* argv[])
                 const size_t n_corr = std::count_if(inst->corr_urotseq_array[0].begin(), inst->corr_urotseq_array[0].end(), 
                                                         [] (auto t) { return is_t_like_instruction(t); });
                 t_gates_from_rz_corr += n_corr;
+                // A rotation with no base T gates has no defined correction/base ratio.
+                if (n != 0)
+                {
+                    const double ratio = fpdiv(n_corr, n);
+                    ++corr_ratio_count;
+                    const double delta = ratio - corr_ratio_mean;
+                    corr_ratio_mean += delta / corr_ratio_count;
+                    corr_ratio_m2 += delta * (ratio - corr_ratio_mean);
+                }
             }
 
             theta_min = std::min(theta_min, x);
@@ -175,6 +188,7 @@ int main(int argc, char* argv[])
     double mem_fraction = fpdiv(mem_accesses, unrolled_insts);
     double hs_fraction = fpdiv(hs_gates, unrolled_insts);
     double corr_ratio = fpdiv(t_gates_from_rz_corr, t_gates_from_rz);
+    double corr_ratio_std = std::sqrt(fpdiv(corr_ratio_m2, corr_ratio_count));
 
     print_stat_line(std::cout, "NUM_QUBITS",          num_qubits);
     print_stat_line(std::cout, "T_GATES",             t_gates);
@@ -193,6 +207,8 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "HS_GATE_%",    100*hs_fraction);
 
     print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO", corr_ratio);
+    print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO_COUNT", corr_ratio_count);
+    print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO_STD", corr_ratio_std);
     print_stat_line(std::cout, "THETA_MIN", theta_min);
     print_stat_line(std::cout, "THETA_MAX", theta_max);
 
@@ -201,4 +217,3 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "DAG_LAYERS",         num_layers);
     print_stat_line(std::cout, "MEAN_ILP",           fpdiv(compute_inst_count, num_layers));
 }
-

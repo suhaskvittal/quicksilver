@@ -159,8 +159,11 @@ Instruction::retire_current_uop()
 void
 Instruction::reset_uops()
 {
+    delete current_uop_;
+    current_uop_ = nullptr;
     uops_retired_ = 0;
-    get_next_uop();
+    if (uop_count() > 0)
+        get_next_uop();
 }
 
 ////////////////////////////////////////////////////////////

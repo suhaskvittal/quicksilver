@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
+ *  contributor: OpenAI Codex (routing translator migration, 30 September 2026)
  * */
 
 #ifndef SIM_MEMORY_BIVARIATE_BICYCLE_h
@@ -18,7 +19,6 @@ class BBMemory : public MemoryLevel
 {
 public:
     using typename MemoryLevel::storage_type;
-
 protected:
     /*
      * `adapters_` contains the ready cycle for each BB code adapter.

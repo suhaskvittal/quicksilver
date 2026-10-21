@@ -1,15 +1,16 @@
 /*
  *  author: Suhas Vittal
  *  date:   10 March 2026
+ *  contributor: OpenAI Codex (RoutingBase migration, 30 September 2026)
  * */
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <type_traits>
+#include <utility>
 
-#define TEMPL_PARAMS template <class Impl>
-#define TEMPL_CLASS  MultiChannelBus<Impl>
+#define TEMPL_PARAMS template <class Translator>
+#define TEMPL_CLASS  MultiChannelBus<Translator>
 
 namespace sim
 {
@@ -21,7 +22,13 @@ namespace routing
 
 TEMPL_PARAMS
 TEMPL_CLASS::MultiChannelBus(size_t _num_channels, size_t num_resources_per_channel)
-    :num_channels(_num_channels),
+    :MultiChannelBus(_num_channels, num_resources_per_channel, Translator{})
+{}
+
+TEMPL_PARAMS
+TEMPL_CLASS::MultiChannelBus(size_t _num_channels, size_t num_resources_per_channel, Translator translator)
+    :sim::RoutingBase<Translator>(std::move(translator)),
+    num_channels(_num_channels),
     channel_width(num_resources_per_channel),
     channels_(num_channels, channel_type(channel_width, Resource{}))
 {
@@ -34,7 +41,7 @@ TEMPL_CLASS::MultiChannelBus(size_t _num_channels, size_t num_resources_per_chan
 TEMPL_PARAMS template <class T> void
 TEMPL_CLASS::set_location(T obj, int ch, int ro, int co)
 {
-    id_type x = translate(obj);
+    id_type x = this->translate(obj);
     assert(location_map_.find(x) == location_map_.end());
     location_map_[x] = coord_type{ch,ro,co};
 }
@@ -42,28 +49,28 @@ TEMPL_CLASS::set_location(T obj, int ch, int ro, int co)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-TEMPL_PARAMS template <class T> bool
-TEMPL_CLASS::test_local_resource(T obj, cycle_type a, cycle_type b) const
+TEMPL_PARAMS bool
+TEMPL_CLASS::_test_local_resource(id_type obj, cycle_type a, cycle_type b) const
 {
-    return _get_local_resource_ref(obj).is_lockable(a, b);
+    return get_local_resource_ref(obj).is_lockable(a, b);
 }
 
-TEMPL_PARAMS template <class T, class U> bool
-TEMPL_CLASS::test_resources_between(T src, U dst, cycle_type a, cycle_type b) const
+TEMPL_PARAMS bool
+TEMPL_CLASS::_test_resources_between(id_type src, id_type dst, cycle_type a, cycle_type b) const
 {
     bool can_lock{true};
     _for_each_resource_between(src, dst, [a, b, &can_lock] (const Resource& r) { can_lock &= r.is_lockable(a, b); });
     return can_lock;
 }
 
-TEMPL_PARAMS template <class T> void
-TEMPL_CLASS::lock_local_resource(T obj, cycle_type a, cycle_type b)
+TEMPL_PARAMS void
+TEMPL_CLASS::_lock_local_resource(id_type obj, cycle_type a, cycle_type b)
 {
-    _get_local_resource_ref(obj).lock_for_time_interval(a, b);
+    get_local_resource_ref(obj).lock_for_time_interval(a, b);
 }
 
-TEMPL_PARAMS template <class T, class U> void
-TEMPL_CLASS::lock_resources_between(T src, U dst, cycle_type a, cycle_type b)
+TEMPL_PARAMS void
+TEMPL_CLASS::_lock_resources_between(id_type src, id_type dst, cycle_type a, cycle_type b)
 {
     _for_each_resource_between(src, dst, [a, b] (Resource& r) { r.lock_for_time_interval(a, b); });
 }
@@ -74,8 +81,8 @@ TEMPL_CLASS::lock_resources_between(T src, U dst, cycle_type a, cycle_type b)
 TEMPL_PARAMS template <class T, class U> void
 TEMPL_CLASS::swap_locations_of(T x, U y)
 {
-    auto x_it = location_map_.find(translate(x)),
-         y_it = location_map_.find(translate(y));
+    auto x_it = location_map_.find(this->translate(x)),
+         y_it = location_map_.find(this->translate(y));
     assert(x_it != location_map_.end() && y_it != location_map_.end());
     std::swap(x_it->second, y_it->second);
 }
@@ -83,39 +90,32 @@ TEMPL_CLASS::swap_locations_of(T x, U y)
 TEMPL_PARAMS template <class T, class U> void
 TEMPL_CLASS::replace(T out, U in)
 {
-    auto it = location_map_.find(translate(out));
+    auto it = location_map_.find(this->translate(out));
     assert(it != location_map_.end());
     coord_type c = it->second;
     location_map_.erase(it);
-    location_map_[translate(in)] = c;
+    location_map_[this->translate(in)] = c;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-
-TEMPL_PARAMS template <class T> const Resource&
-TEMPL_CLASS::get_local_resource_ref(T obj) const
-{
-    return _get_local_resource_ref(obj);
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T, class U> size_t
 TEMPL_CLASS::patch_distance(T src, U dst) const
 {
+    const id_type src_id = this->translate(src),
+                  dst_id = this->translate(dst);
     size_t d{0};
-    for_each_resource_between(src, dst, [&d] (const auto&) { d++; return false; });
+    _for_each_resource_between(src_id, dst_id, [&d] (const auto&) { d++; });
     // we also need to handle the case where `src` and `dst` are in different
     // channels:
     //
     // only when dst or src are not one of the channel entries
-    if (src == MCB_LEFT_ENTRY || src == MCB_RIGHT_ENTRY || dst == MCB_LEFT_ENTRY || dst == MCB_RIGHT_ENTRY)
+    if (src_id == MCB_LEFT_ENTRY || src_id == MCB_RIGHT_ENTRY || dst_id == MCB_LEFT_ENTRY || dst_id == MCB_RIGHT_ENTRY)
         return d;
-    auto [s_ch, s_ro, s_co] = location_map_.at(src);
-    auto [d_ch, d_ro, d_co] = location_map_.at(dst);
+    auto [s_ch, s_ro, s_co] = location_map_.at(src_id);
+    auto [d_ch, d_ro, d_co] = location_map_.at(dst_id);
     if (s_ch != d_ch)
     {
         if (s_ch > d_ch)
@@ -135,33 +135,26 @@ TEMPL_CLASS::patch_distance(T src, U dst) const
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T, class U, class Callback> void
-TEMPL_CLASS::for_each_resource_between(T src, U dst, const Callback& callback) const
+TEMPL_CLASS::for_each_resource_between(T src, U dst, cycle_type, cycle_type, const Callback& callback) const
 {
-    _for_each_resource_between(src, dst, callback);
+    _for_each_resource_between(this->translate(src), this->translate(dst), callback);
 }
 
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-TEMPL_PARAMS template <class T> typename TEMPL_CLASS::id_type
-TEMPL_CLASS::translate(T obj) const
+TEMPL_PARAMS template <class T, class U, class Callback> void
+TEMPL_CLASS::for_each_resource_between(T src, U dst, const Callback& callback) const
 {
-    if constexpr (std::is_integral<T>::value)
-        return static_cast<id_type>(obj);
-    else
-        return static_cast<const Impl*>(this)->translate(obj);
+    for_each_resource_between(src, dst, 0, 0, callback);
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 TEMPL_PARAMS template <class T> auto&
-TEMPL_CLASS::_get_local_resource_ref(this auto& self, T obj)
+TEMPL_CLASS::get_local_resource_ref(this auto& self, T obj)
 {
-    id_type x = self.translate(obj);
-    auto it = self.location_map_.find(x);
+    auto it = self.location_map_.find(self.translate(obj));
     if (it == self.location_map_.end())
-        std::cerr << "MultiChannelBus::_get_local_resource_ref(): no location registered for object" << _die{};
+        std::cerr << "MultiChannelBus::get_local_resource_ref(): no location registered for object" << _die{};
     auto [ch,ro,co] = it->second;
     return self.channels_[ch][co];
 }
@@ -169,15 +162,13 @@ TEMPL_CLASS::_get_local_resource_ref(this auto& self, T obj)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-TEMPL_PARAMS template <class T, class U, class Callback> void
-TEMPL_CLASS::_for_each_resource_between(this auto& self, T src, U dst, const Callback& callback)
+TEMPL_PARAMS template <class Callback> void
+TEMPL_CLASS::_for_each_resource_between(this auto& self, id_type src_id, id_type dst_id, const Callback& callback)
 {
-    id_type src_id = self.translate(src),
-            dst_id = self.translate(dst);
     assert(src_id != dst_id && (src_id >= 0 || dst_id >= 0));
 
     if (src_id == MCB_LEFT_ENTRY || src_id == MCB_RIGHT_ENTRY)
-        return self._for_each_resource_between(dst, src, callback);
+        return self._for_each_resource_between(dst_id, src_id, callback);
 
     auto [s_ch, s_ro, s_co] = self.location_map_.at(src_id);
     if (dst_id == MCB_LEFT_ENTRY || dst_id == MCB_RIGHT_ENTRY)

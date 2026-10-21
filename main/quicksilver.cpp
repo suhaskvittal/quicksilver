@@ -1,6 +1,8 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  *  author: Suhas Vittal
  *  date:   16 January 2026
+ *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
  * */
 
 #include "sim.h"
@@ -77,6 +79,7 @@ main(int argc, char* argv[])
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
     int64_t compute_cycle_time_ns;
+    std::string routing_layout;
 
     int64_t memory_cycle_time_ns;
 
@@ -95,7 +98,7 @@ main(int argc, char* argv[])
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
-        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
+        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 0)
         .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
         .optional("", "--max-cycles-no-progress",
                     "Maximum consecutive cycles any single component may spend with no progress before the "
@@ -113,12 +116,16 @@ main(int argc, char* argv[])
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
                       compute_local_memory_capacity, 12)
+        .optional("", "--routing-layout", "Compute routing layout: bus or edpc", routing_layout, "bus")
         .optional("", "--compute-cycle-time-ns", 
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
 
         .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
+
+        .optional("-topols", "", "Enable TopoLS rotation latency hiding", sim::GL_TOPOLS_ENABLED, false)
+        .optional("", "--topols-ancilla", "Dedicated TopoLS ancilla", sim::GL_TOPOLS_ANCILLA, 4)
 
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
@@ -168,6 +175,13 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+    if (sim::GL_TOPOLS_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_RLTP_DEGREE > 0 || sim::GL_TOPOLS_ANCILLA <= 0))
+        std::cerr << "TopoLS requires positive ancilla capacity and exclusive use of rotation acceleration" << _die{};
+    if (routing_layout != "bus" && routing_layout != "edpc")
+        std::cerr << "Unknown routing layout: " << routing_layout << _die{};
+    const auto compute_routing_layout = routing_layout == "edpc"
+                                            ? sim::ComputeSubsystem::RoutingLayout::EDPC
+                                            : sim::ComputeSubsystem::RoutingLayout::BUS;
 
     if (oc_base_ro_latency >= 0)
     {
@@ -273,7 +287,8 @@ main(int argc, char* argv[])
                                                          compute_code_distance,
                                                          compute_local_memory_capacity,
                                                          t_producer,
-                                                         memory_subsystem);
+                                                         memory_subsystem,
+                                                         compute_routing_layout);
 
     /* initialize driver */
 
@@ -354,26 +369,39 @@ main(int argc, char* argv[])
            rltp_footprint,
            rdr_storage_overhead,
            rdr_footprint;
-    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
-    program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+    // The bus estimate uses 0.5 routing patches per program patch. EDPC uses
+    // its allocated grid: one data patch per four physical patch positions.
+    if (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC)
+        program_active_memory_footprint =
+            (compute_subsystem->edpc_patch_count() - 4 * compute_subsystem->dedicated_ancilla_count)
+            * sc_footprint;
+    else
+        program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
     // RLTP physical qubit overheads:
     rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
                                 sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
                              ) * sc_footprint;
     // RDR phsyical qubit overheads:
-    rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+    rdr_storage_overhead = sim::GL_RDR_ENABLED && sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                               ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2)
                                     * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
                               : 0;
     rdr_footprint = sim::GL_RDR_ENABLED
-                        ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+                        ? ((compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC
+                                ? 4 * sim::GL_RDR_CAPACITY * sc_footprint
+                                : 1.5 * sim::GL_RDR_CAPACITY * sc_footprint) + rdr_storage_overhead)
                         : 0;
-    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
+    const size_t topols_footprint = sim::GL_TOPOLS_ENABLED
+        ? (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC ? 4 : 1.5)
+            * sim::GL_TOPOLS_ANCILLA * sc_footprint
+        : 0;
+    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint + topols_footprint;
 
     std::cout << "COMPUTE_FOOTPRINT\n";
     print_stat_line(std::cout, "    PROGRAM_MEMORY", program_active_memory_footprint);
     print_stat_line(std::cout, "    RLTP_WORKSPACE", rltp_footprint);
     print_stat_line(std::cout, "    RDR_WORKSPACE", rdr_footprint);
+    print_stat_line(std::cout, "    TOPOLS_WORKSPACE", topols_footprint);
     print_stat_line(std::cout, "    TOTAL", total_compute_footprint);
 
     /*
@@ -562,7 +590,7 @@ get_default_factory_specifications(std::string_view regime,
         return { sim::t_cc_cultivation(5) };
 
     sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);              // d = 3 color code cultivation
-    sim::ProducerQuantum l2 = sim::t_15to1_distillation(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
+    sim::ProducerQuantum l2 = sim::t_15to1_distillation_compact(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
     l2.buffer_size = ll_buffer_capacity;
 
     return {l1, l2};

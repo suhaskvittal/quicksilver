@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   10 July 2026
+ *  contributor: OpenAI Codex (routing translator migration, 30 September 2026)
  * */
 
 #include "qs_reaction_sim/sim.h"
@@ -38,7 +39,7 @@ cycle_type _inst_latency(Instruction::Type, size_t d);
 ////////////////////////////////////////////////////////////
 
 Driver::routing_type::routing_type(size_t n)
-    :sim::routing::MultiChannelBus<routing_type>(_num_routing_channels(n), _channel_width(n))
+    :sim::routing::MultiChannelBus<routing_translator>(_num_routing_channels(n), _channel_width(n))
 {}
 
 ////////////////////////////////////////////////////////////

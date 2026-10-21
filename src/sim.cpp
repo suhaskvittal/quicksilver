@@ -1,6 +1,8 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
     author: Suhas Vittal
     date:   8 September 2025
+    contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
 */
 
 #include "sim.h"
@@ -46,6 +48,9 @@ int64_t GL_RDR_COMPLETION_BUFFER_CAPACITY{0};
 bool GL_RDR_FIXED_LOOKAHEAD{false};
 double GL_RDR_COST_SCALE{2.0};
 double GL_RDR_INV_THRESHOLD{0.33};
+
+bool GL_TOPOLS_ENABLED{false};
+int64_t GL_TOPOLS_ANCILLA{4};
 
 bool GL_ELIDE_CLIFFORDS{false};
 bool GL_ZERO_LATENCY_T_GATES{false};
@@ -145,6 +150,18 @@ print_sim_stats(std::ostream& out, Driver* d)
         d->rdr()->s_completion_buffer_occu.dump(out, 1);
     }
 
+    if (GL_TOPOLS_ENABLED)
+    {
+        out << "TOPOLS\n";
+        auto* t = d->topols();
+        print_stat_line(out, "    REQUESTS_ALLOCATED", t->s_requests_allocated);
+        print_stat_line(out, "    REQUESTS_COMPLETED", t->s_requests_completed);
+        print_stat_line(out, "    REQUESTS_FULL_LATENCY_HIDDEN", t->s_requests_full_latency_hidden);
+        t->s_latency.dump(out, 1);
+        t->s_hidden_gates.dump(out, 1);
+        t->s_hidden_latency.dump(out, 1);
+        t->s_fraction_hidden_latency.dump(out, 1);
+    }
     for (auto* c : d->clients())
         _print_client_stats(out, d, c);
     print_stats_for_factories(out, "T_FACTORY", d->compute_subsystem()->t_producer());

@@ -1,0 +1,136 @@
+TopoLS integration
+Author: OpenAI Codex (GPT-6.1 Sol)
+Date: 1 October 2026
+
+Implementation
+--------------
+Preserved the supplied TopoLS request/collision design and completed its implementation.
+Fixed missing template commas, pointer constness in unordered_set lookups, the
+undefined qubits_ capacity member, request_start_cycle/start_cycle mismatch, the
+const mutating blocking method, and absent constructor/operate implementation.
+Removed stale blocked-instruction pointer storage and unused retirement flag.
+
+Allocation reserves a currently ready dedicated ancilla and simulates initial ZZ
+by setting program and ancilla readiness to current_cycle()+d. The request owns
+an Instruction copy; the driver can safely retire/delete the original rotation
+and expose its successor Clifford instructions after the initial ZZ.
+
+operate() executes each current synthesis uop through ComputeSubsystem on the
+pinned ancilla, honors readiness/routing/T production, and retires the uop only
+on success. It waits for the last uop to physically complete before setting the
+request instruction's cycle_done and affected program/ancilla availability to
+current_cycle()+d+GL_REACTION_TIME. Existing later readiness is preserved with
+max. Then retire_request() frees the ancilla, commits statistics, and deletes
+its instruction copy. Ancilla reuse waits for that final availability time.
+Empty synthesis sequences bypass current_uop safely. Destructor frees any
+remaining request copies.
+
+Clifford gates touching a request extend its dependent qubit set and hidden-gate
+count. Non-Clifford and memory instructions touching any dependent qubit block.
+Blocking is recomputed on every fetch, recording only the earliest blocking
+cycle. This avoids dangling cached instruction pointers and handles instructions
+blocked by several requests correctly when one request retires first.
+
+The driver advances TopoLS each cycle, allocates ready rotations, updates issued
+Clifford dependencies, disables cycle skipping for TopoLS, and drains requests
+before marking each client complete. Clients reaching their instruction limit
+stop fetching while their requests drain. The simulator's usual instruction
+limit is an unrolled-instruction threshold and can overshoot slightly.
+
+ComputeSubsystem allocates/routes dedicated TopoLS ancilla for bus and EDPC,
+with TOPOLS_CLIENT_ID distinct from program IDs. Idle fidelity includes TopoLS
+ancilla; physical resource estimates report TOPOLS_WORKSPACE and include it in
+total compute footprint (1.5 bus patches or 4 EDPC patches per ancilla).
+
+Configuration: GL_TOPOLS_ENABLED (default false), GL_TOPOLS_ANCILLA (default 2),
+--topols and --topols-ancilla. CLI requires positive capacity and excludes
+simultaneous RDR or RLTP acceleration. CMake includes topols.cpp in qs_simulator.
+Source changes carry GPT-6.1 Sol contributor attribution.
+
+Statistics
+----------
+TOPOLS output includes REQUESTS_ALLOCATED, REQUESTS_COMPLETED,
+REQUESTS_FULL_LATENCY_HIDDEN, LATENCY, HIDDEN_GATES, HIDDEN_LATENCY, and
+HIDDEN_LATENCY_FRACTION histograms (count/mean/std/min/max).
+Request latency runs from allocation through final synthesis completion, before
+the final disentanglement/feedforward delay. Hidden latency is time until the
+first colliding blocked instruction (or completion if never blocked), and the
+hidden fraction divides that by request latency. Client rotation latency reflects
+program-side initial ZZ/issue; request latency reports the asynchronous work.
+
+Files changed
+-------------
+src/sim/driver/topols.cpp, src/sim/driver/topols.h
+src/sim/driver.cpp, src/sim/driver.h
+src/sim/compute_subsystem.cpp
+src/sim.cpp, src/sim.h
+main/quicksilver.cpp
+CMakeLists.txt (TopoLS source entry; later cyclosynth edits are separate)
+TopoLS.txt
+
+Validation
+----------
+cmake --build build --target quicksilver -j 4: PASS.
+git diff --check: PASS.
+Existing unrelated compiler warnings remain (unused helpers, narrowing, missing
+return warnings in existing error paths).
+
+Generated /tmp/topols_fixture.gz containing 120000 instructions over four qubits.
+Each iteration contains RZ(0) with synthesis T,H,S,T,H,T; H(0); CX(0,1); T(1);
+RZ(2) with the same synthesis; CX(2,3). It exercises two independent rotations,
+Clifford overlap, propagation onto a second qubit, blocking of dependent T/next
+rotations, ancilla saturation/reuse, and request draining at the instruction limit.
+Generator source and commands (local build absolute rpath can be adjusted):
+
+// OpenAI Codex (GPT-6.1 Sol), TopoLS validation fixture, 1 October 2026.
+#include "instruction.h"
+#include "generic_io.h"
+int main() {
+ generic_strm_type out; generic_strm_open(out,"/tmp/topols_fixture.gz","wb");
+ uint32_t n=4; generic_strm_write(out,&n,sizeof(n));
+ for(int i=0;i<20000;++i) {
+  Instruction r(Instruction::Type::RZ,{0});
+  r.urotseq={Instruction::Type::T,Instruction::Type::H,Instruction::Type::S,Instruction::Type::T,Instruction::Type::H,Instruction::Type::T};
+  write_instruction_to_stream(out,&r);
+  Instruction h(Instruction::Type::H,{0}); write_instruction_to_stream(out,&h);
+  Instruction cx(Instruction::Type::CX,{0,1}); write_instruction_to_stream(out,&cx);
+  Instruction t(Instruction::Type::T,{1}); write_instruction_to_stream(out,&t);
+  Instruction r2(Instruction::Type::RZ,{2}); r2.urotseq=r.urotseq; write_instruction_to_stream(out,&r2);
+  Instruction c2(Instruction::Type::CX,{2,3}); write_instruction_to_stream(out,&c2);
+ }
+ generic_strm_close(out);
+}
+
+c++ -std=c++23 -Isrc /tmp/topols_trace.cpp -Lbuild -Wl,-rpath,$PWD/build -lqs_common -lz -llzma -o /tmp/topols_trace
+/tmp/topols_trace
+/usr/bin/time -f 'wall_seconds=%e' build/quicksilver /tmp/topols_fixture.gz 10000 -a 4 --topols --topols-ancilla 2
+/usr/bin/time -f 'wall_seconds=%e' build/quicksilver /tmp/topols_fixture.gz 10000 -a 4 --topols --topols-ancilla 2 --routing-layout edpc
+/usr/bin/time -f 'wall_seconds=%e' build/quicksilver /tmp/topols_fixture.gz 10000 -a 4 --topols --topols-ancilla 1
+/usr/bin/time -f 'wall_seconds=%e' build/quicksilver /tmp/topols_fixture.gz 100000 -a 4 --topols --topols-ancilla 2
+
+Results (release build, this machine):
+Bus, 2 ancilla, 10000: 129061 cycles, 0.08s, allocated/completed 1251/1251.
+EDPC, 2 ancilla, 10000: 112825 cycles, 0.08s, allocated/completed 1251/1251.
+Bus, 1 ancilla, 10000: 257353 cycles, 0.10s, allocated/completed 1429/1429.
+Bus, 2 ancilla, 100000: 1287811 cycles, 0.56s, allocated/completed 12501/12501.
+Two-ancilla hidden-gate mean 1.499; hidden-latency fractions 0.162 bus / 0.194 EDPC.
+No requests remain pending at successful shutdown. Runtime scales reasonably.
+Baseline bus without TopoLS: 114723 cycles, 0.07s. This fixture does not claim
+universal speedup: added ZZ/final feedforward and routing may exceed hidden work.
+Zero-capacity configuration rejects with the intended configuration diagnostic.
+
+An initial run using build/cr2t.gz with -a 12 deadlocked on H operands outside
+local memory; that existing scheduled trace is incompatible with that requested
+local-memory layout. The self-contained fixture avoids that input mismatch.
+An initially short 6000-instruction fixture hit the existing client's fatal EOF
+behavior while filling its 16384-instruction window; the final larger fixture
+provides enough trace input for all validation runs.
+
+Model limits
+------------
+Initial and final ZZ overhead follows the supplied simple d-cycle timing model;
+routing for synthesis uops uses the real compute routing model. This is a timing
+simulator, not quantum-state/Pauli-frame validation. Clifford dependency tracking
+is conservative. Final scheduling follows the simulator's existing convention:
+instruction retirement schedules its future availability rather than ticking
+through the final scheduled gate's latency before shutdown.

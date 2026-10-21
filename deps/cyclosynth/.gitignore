@@ -1,0 +1,39 @@
+*.egg-info/
+.tox/
+.env/
+.hypothesis/
+.venv/
+.vscode/
+.mypy_cache/
+.DS_Store
+docs/source/autogen
+__pycache__
+docs/_build
+dask-worker-space
+.ipynb_checkpoints
+dist
+build
+scratch/
+synth/
+.claude
+target/
+.pytest_cache/
+pgo/cyclosynth.profdata
+.cargo/config.toml
+*.csv
+*.png
+*.md
+!THIRD_PARTY.md
+# …but the top-level docs that belong in git:
+!README.md
+!AGENTS.md
+
+# Local-only: run artifacts and generated docs (kept on disk, out of git).
+# The experiment/plotting scripts ARE tracked (reproducibility); only their
+# generated data/figures/logs under scripts/data/ stay local.
+bench_logs/
+scripts/data/
+docs/
+
+# Dev/benchmark binaries — kept locally, out of git (not production).
+/src/bin/

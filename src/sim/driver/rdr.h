@@ -51,6 +51,17 @@ public:
         cycle_type cb_install_cycle;
     };
 
+    struct epoch_type
+    {
+        uint64_t n{0}, // number of rotations
+                 s{0},  // number started
+                 c{0};  // number completed
+
+        double coverage() const { return fpdiv(s, n); }
+        double timeliness() const { return fpdiv(c, s); }
+        double fom() const { return n == 0 ? 0.0 : coverage(); }
+    };
+
     /*
      * Metadata for completion buffer entries (i.e., for stats)
      * */
@@ -61,6 +72,8 @@ public:
     /*
      * Statistics:
      * */
+
+    uint64_t s_total_rotations{0};
 
     uint64_t s_requests_submitted{0};
     uint64_t s_requests_invalidated_before_issue{0};
@@ -96,7 +109,13 @@ private:
 
     ComputeSubsystem* compute_subsystem_;
 
-    ssize_t lookahead_depth_;
+    ssize_t lookahead_depth_,
+            degree_;
+    size_t seq_invalidates_{0};
+
+    bool disable_epoch_update_{false};
+    epoch_type curr_epoch_{},
+               prev_epoch_{};
 public:
     RotationDirectedRunahead(ComputeSubsystem*);
 
@@ -127,29 +146,16 @@ public:
      * */
     bool interrupt_and_invalidate_if_necessary(inst_ptr);
 
+    void sig_rotation_retired();
+
     ssize_t lookahead_depth() const { return lookahead_depth_; }
-    double coverage() const;
-    double timeliness() const;
+    cycle_type current_cycle() const { return compute_subsystem_->current_cycle(); }
+    double coverage() const { return fpdiv(s_requests_started, /*s_requests_submitted*/s_total_rotations); }
+    double timeliness() const { return fpdiv(s_requests_completed, s_requests_started); }
 private:
-    /*
-     * Retires the request, and if possible, places it into the `completion_buffer_`.
-     * */
     void retire_request(request_type&);
-
-    /*
-     * Pins the given qubit to a request in `request_queue_`
-     * */
     void allocate_free_qubit(Qubit*);
-
-    /*
-     * Adds a request to the `request_queue_`.
-     * */
     void enqueue_request(request_type&&);
-
-    /*
-     * This just calls `ComputeSubsystem::current_cycle()`
-     * */
-    cycle_type current_cycle() const;
 
     void update_on_consumption(uint64_t uops, cycle_type rz_prep_time, cycle_type rz_idle_time);
 };

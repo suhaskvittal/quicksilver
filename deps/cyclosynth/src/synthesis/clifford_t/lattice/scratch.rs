@@ -1,0 +1,307 @@
+//! Per-thread scratch buffers and shared infrastructure for the L²-LLL
+//! pipeline: precision constants, type aliases, MPFR macros, and the
+//! `IntScratch` struct that pre-allocates every buffer up front so the
+//! inner LLL loop has zero allocation.
+
+// 8×8 matrix code reads more clearly with explicit (i, j) indexing.
+#![allow(clippy::needless_range_loop)]
+
+use i256::i256;
+use rug::Assign;
+use crate::rings::MpFloat;
+
+// ─── Adaptive precision constants & helpers — from lattice::common ───────────
+
+pub(crate) use crate::synthesis::lattice::common::{
+    compute_lu_prec, compute_prec_q, compute_scale_bits, identity_basis, imat_zero,
+    rfv, rfz, rmat_zero, rvec_zero, TARGET_BITS,
+};
+
+// ─── Type aliases ────────────────────────────────────────────────────────────
+
+pub(crate) type IMat8 = [[i64; 8]; 8];
+pub(crate) type Mat256 = [[i256; 8]; 8];
+
+// ─── In-place MPFR op macros via gmp-mpfr-sys ────────────────────────────────
+//
+// SAFETY: Call `mpfr::{add,sub,mul,div}` on the raw `mpfr_t` directly: the
+// naive `$dst.assign(&$a OP &$b)` allocates a `rug::Incomplete` per op, this
+// is zero-allocation. mpfr permits aliasing rop with op1/op2, so dst == a or
+// dst == b is safe.
+
+macro_rules! r_mul {
+    ($dst:expr, $a:expr, $b:expr) => {
+        unsafe {
+            ::gmp_mpfr_sys::mpfr::mul(
+                $dst.as_raw_mut(),
+                $a.as_raw(),
+                $b.as_raw(),
+                ::gmp_mpfr_sys::mpfr::rnd_t::RNDN,
+            );
+        }
+    };
+}
+macro_rules! r_add {
+    ($dst:expr, $a:expr, $b:expr) => {
+        unsafe {
+            ::gmp_mpfr_sys::mpfr::add(
+                $dst.as_raw_mut(),
+                $a.as_raw(),
+                $b.as_raw(),
+                ::gmp_mpfr_sys::mpfr::rnd_t::RNDN,
+            );
+        }
+    };
+}
+macro_rules! r_sub {
+    ($dst:expr, $a:expr, $b:expr) => {
+        unsafe {
+            ::gmp_mpfr_sys::mpfr::sub(
+                $dst.as_raw_mut(),
+                $a.as_raw(),
+                $b.as_raw(),
+                ::gmp_mpfr_sys::mpfr::rnd_t::RNDN,
+            );
+        }
+    };
+}
+macro_rules! r_div {
+    ($dst:expr, $a:expr, $b:expr) => {
+        unsafe {
+            ::gmp_mpfr_sys::mpfr::div(
+                $dst.as_raw_mut(),
+                $a.as_raw(),
+                $b.as_raw(),
+                ::gmp_mpfr_sys::mpfr::rnd_t::RNDN,
+            );
+        }
+    };
+}
+
+pub(crate) use r_add;
+pub(crate) use r_div;
+pub(crate) use r_mul;
+pub(crate) use r_sub;
+
+// ─── IntScratch struct ───────────────────────────────────────────────────────
+
+/// Per-thread scratch for the L²-LLL pipeline. Allocated once per rayon
+/// worker via `map_init`, reused across all MA prefixes that worker handles.
+/// Every MPFR buffer is pre-allocated at `prec_q` bits up front; no
+/// allocation happens inside the LLL inner loop.
+pub struct IntScratch {
+    /// MPFR precision used for build_q + Cholesky + LU (post-LLL phases).
+    pub(crate) prec_q: u32,
+    /// Adaptive scale `B` such that `Q_int[i][j] ≈ 2^B · Q[i][j]`. Picked
+    /// per find_aligned_lattice_points call so `max(|Q_int|) ≈ 2^TARGET_BITS`.
+    pub(crate) scale_bits: i32,
+
+    // ── MPFR buffers for build_q (constants + per-call working values) ──
+    pub(crate) q_mpfr: [[MpFloat; 8]; 8],
+    pub(crate) c: [MpFloat; 8],
+    pub(crate) one: MpFloat,
+    pub(crate) two: MpFloat,
+    pub(crate) tmp: MpFloat,
+    pub(crate) tmp2: MpFloat,
+    pub(crate) tmp3: MpFloat,
+    pub(crate) acc: MpFloat,
+    pub(crate) p_u: [[MpFloat; 8]; 8],
+    pub(crate) p_ub: [[MpFloat; 8]; 8],
+    pub(crate) y_rf: [MpFloat; 8],
+    pub(crate) eps_rf: MpFloat,
+    pub(crate) r: MpFloat,
+    pub(crate) r_sq: MpFloat,
+    pub(crate) delta_y: MpFloat,
+    pub(crate) delta_perp: MpFloat,
+    pub(crate) inv_dy_sq: MpFloat,
+    pub(crate) inv_dp_sq: MpFloat,
+    pub(crate) inv_r_sq: MpFloat,
+    pub(crate) y_norm_sq: MpFloat,
+    pub(crate) inv_y_norm_sq: MpFloat,
+    pub(crate) cap_mid: MpFloat,
+
+    // ── Q_base hoist ──
+    /// Prefix-independent part of the Q metric:
+    /// `q_base[i][j] = inv_dp_sq·p_u[i][j] + inv_r_sq·p_ub[i][j]`.
+    /// Valid for the `(k, eps)` recorded in `q_base_key`; rebuilt by
+    /// `build_q_base` (via `build_q_mpfr`) only when the key changes.
+    pub(crate) q_base: [[MpFloat; 8]; 8],
+    /// Scalar weight of the prefix-dependent rank-1 term:
+    /// `coef_y = inv_dy_sq − inv_dp_sq` (no cancellation — the terms
+    /// differ by a factor ≈ (4/ε)²), so
+    /// `Q = q_base + (coef_y/‖y‖²)·y·yᵀ`.
+    pub(crate) coef_y: MpFloat,
+    /// `(k, eps.to_bits())` the cached q_base/coef_y/cap_mid were built
+    /// for; `None` until the first build_q_mpfr call.
+    pub(crate) q_base_key: Option<(u32, u64)>,
+    /// LLL-reduced unimodular basis of `q_base` alone, used to warm-seed
+    /// every per-prefix LLL at the same `(k, ε)`: the prefix-dependent
+    /// rank-1 term carries ~half the anisotropy bits, so the q_base
+    /// reduction is most of the shared work. Keyed separately from
+    /// `q_base_key`: computed lazily by `find_aligned_lattice_points` (it
+    /// needs an LLL run, which `build_q_mpfr` must not recurse into).
+    pub(crate) q_base_seed: Option<IMat8>,
+    pub(crate) q_base_seed_key: Option<(u32, u64)>,
+
+    // ── Integer LLL buffers ──
+    pub(crate) q_int: Mat256,
+    pub(crate) basis: IMat8,
+    pub(crate) gram: Mat256,        // G = B · Q_int · Bᵀ
+    pub(crate) temp_bq: Mat256,     // intermediate = B · Q_int
+
+    // ── L²-LLL state (Nguyen-Stehlé 2009): pure f64. Theorem 2 + Figure 7
+    // prove this precision is sufficient for d ≤ 11; we operate at d=8.
+    //
+    // r̄_{i,j} = <b_i*, b_j*> for i ≥ j  (FP-approx of GSO inner products)
+    // μ̄_{i,j} = r̄_{i,j} / r̄_{j,j}     (FP-approx GSO coefficients)
+    // s̄_j^{(i)} = r̄_{i,i} - Σ_{k<j} μ̄_{i,k}·r̄_{i,k}  (Lovász partial sums)
+    //
+    // The exact integer Gram lives in `gram` (i256). f64 entries are derived
+    // on demand via i256→f64 (mantissa truncation; exponent has 1024-bit
+    // range so our 2^240 max gram entries fit with no overflow).
+    pub(crate) r_bar: [[f64; 8]; 8],
+    pub(crate) mu_bar: [[f64; 8]; 8],
+    pub(crate) s_bar: [[f64; 8]; 8],
+
+    // ── post-LLL Cholesky output (f64 production path) ──
+    /// Lower-triangular Cholesky factor of the natural-scale post-LLL Gram,
+    /// computed in f64 directly from the i256 Gram. Justified by the LLL
+    /// invariant κ(G) ≤ (4/3)^(d-1) ≤ 16 at d=8: f64's 53-bit mantissa
+    /// yields ~10⁻¹⁵ absolute error at the SE unit-scale bound check, six
+    /// orders of magnitude below SE's 10⁻⁹ tolerance.
+    pub(crate) l_f64: [[f64; 8]; 8],
+
+    // ── MPFR LU buffers at lu_prec (decoupled from prec_q; see compute_lu_prec) ──
+    pub(crate) lu_prec: u32,
+    pub(crate) lu_a: [[MpFloat; 8]; 8],
+    pub(crate) lu_rhs: [MpFloat; 8],
+    pub(crate) lu_x: [MpFloat; 8],
+    pub(crate) lu_tmp: MpFloat,
+    pub(crate) lu_acc: MpFloat,
+}
+
+// ─── Σ-derived constants (filled once per IntScratch::new) ───────────────────
+
+/// Populate Σ — the 8×8 real embedding of Z[ω,√2]² into ℝ⁸ via two Galois
+/// embeddings (rows 0–3: √2 → +√2; rows 4–7: √2 → −√2). Pattern entries
+/// {0, ±1, ±2} map to {0, ±1, ±1/√2}.
+fn fill_sigma(sigma: &mut [[MpFloat; 8]; 8], prec: u32) {
+    let pattern: [[i32; 8]; 8] = [
+        [1,  2, 0, -2, 0,  0, 0,  0],
+        [0,  2, 1,  2, 0,  0, 0,  0],
+        [0,  0, 0,  0, 1,  2, 0, -2],
+        [0,  0, 0,  0, 0,  2, 1,  2],
+        [1, -2, 0,  2, 0,  0, 0,  0],
+        [0, -2, 1, -2, 0,  0, 0,  0],
+        [0,  0, 0,  0, 1, -2, 0,  2],
+        [0,  0, 0,  0, 0, -2, 1, -2],
+    ];
+    let two = rfv(prec, 2.0);
+    let r2 = two.sqrt().recip();
+    let mut nr2 = rfz(prec);
+    nr2.assign(-&r2);
+    let one = rfv(prec, 1.0);
+    let mut none = rfz(prec);
+    none.assign(-&one);
+    let zero = rfz(prec);
+    for i in 0..8 {
+        for j in 0..8 {
+            sigma[i][j].assign(match pattern[i][j] {
+                1 => &one,
+                -1 => &none,
+                2 => &r2,
+                -2 => &nr2,
+                _ => &zero,
+            });
+        }
+    }
+}
+
+/// Compute `p_u[i][j] = ½·Σ_{r=0..3} σ[r][i]·σ[r][j]` and
+/// `p_ub[i][j] = ½·Σ_{r=4..7} σ[r][i]·σ[r][j]`. Depends only on the
+/// constant Σ matrix, so it runs once at scratch construction; the values
+/// persist across every build_q_mpfr call. Eliminates ~512 MPFR mul + 512
+/// MPFR add ops per find_aligned_lattice_points invocation.
+fn precompute_sigma_projections(
+    scratch: &mut IntScratch,
+    sigma: &[[MpFloat; 8]; 8],
+    half: &MpFloat,
+) {
+    for i in 0..8 {
+        for j in 0..8 {
+            scratch.acc.assign(0.0_f64);
+            scratch.tmp2.assign(0.0_f64);
+            for r_idx in 0..4 {
+                r_mul!(scratch.tmp, sigma[r_idx][i], sigma[r_idx][j]);
+                let acc_clone = scratch.acc.clone();
+                r_add!(scratch.acc, acc_clone, scratch.tmp);
+                r_mul!(scratch.tmp, sigma[r_idx + 4][i], sigma[r_idx + 4][j]);
+                let tmp2_clone = scratch.tmp2.clone();
+                r_add!(scratch.tmp2, tmp2_clone, scratch.tmp);
+            }
+            r_mul!(scratch.p_u[i][j], scratch.acc, half);
+            r_mul!(scratch.p_ub[i][j], scratch.tmp2, half);
+        }
+    }
+}
+
+impl IntScratch {
+    pub fn new(eps: f64) -> Self {
+        let prec_q = compute_prec_q(eps);
+        let lu_prec = compute_lu_prec(eps);
+        let mut s = Self {
+            prec_q,
+            scale_bits: 0,
+            q_mpfr: rmat_zero(prec_q),
+            c: rvec_zero(prec_q),
+            one: rfv(prec_q, 1.0),
+            two: rfv(prec_q, 2.0),
+            tmp: rfz(prec_q),
+            tmp2: rfz(prec_q),
+            tmp3: rfz(prec_q),
+            acc: rfz(prec_q),
+            p_u: rmat_zero(prec_q),
+            p_ub: rmat_zero(prec_q),
+            y_rf: rvec_zero(prec_q),
+            eps_rf: rfz(prec_q),
+            r: rfz(prec_q),
+            r_sq: rfz(prec_q),
+            delta_y: rfz(prec_q),
+            delta_perp: rfz(prec_q),
+            inv_dy_sq: rfz(prec_q),
+            inv_dp_sq: rfz(prec_q),
+            inv_r_sq: rfz(prec_q),
+            y_norm_sq: rfz(prec_q),
+            inv_y_norm_sq: rfz(prec_q),
+            cap_mid: rfz(prec_q),
+            q_base: rmat_zero(prec_q),
+            coef_y: rfz(prec_q),
+            q_base_key: None,
+            q_base_seed: None,
+            q_base_seed_key: None,
+            q_int: imat_zero(),
+            basis: identity_basis(),
+            gram: imat_zero(),
+            temp_bq: imat_zero(),
+            r_bar: [[0.0_f64; 8]; 8],
+            mu_bar: [[0.0_f64; 8]; 8],
+            s_bar: [[0.0_f64; 8]; 8],
+            l_f64: [[0.0_f64; 8]; 8],
+            lu_prec,
+            lu_a: rmat_zero(lu_prec),
+            lu_rhs: rvec_zero(lu_prec),
+            lu_x: rvec_zero(lu_prec),
+            lu_tmp: rfz(lu_prec),
+            lu_acc: rfz(lu_prec),
+        };
+        let mut sigma = rmat_zero::<8>(prec_q);
+        fill_sigma(&mut sigma, prec_q);
+        let half = rfv(prec_q, 0.5);
+        precompute_sigma_projections(&mut s, &sigma, &half);
+        s
+    }
+
+    pub(crate) fn reset_basis(&mut self) {
+        self.basis = identity_basis();
+    }
+}
