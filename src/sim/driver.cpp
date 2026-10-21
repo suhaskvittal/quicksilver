@@ -224,9 +224,11 @@ Driver::skip_to_cycle() const
         auto s = *skip_cycle_target_;
         for (auto* p : {t_producer_, epr_producer_})
         {
+            if (p == nullptr)
+                continue;
             auto e = p->next_event_cycle();
             if (!p->is_saturated() && e.has_value())
-                s = std::min(s, *e);
+                s = std::min(s, convert_cycles_between_frequencies(*e, p->freq_khz, freq_khz));
         }
         s = std::max(current_cycle()+1, s);
         return std::make_optional(s);

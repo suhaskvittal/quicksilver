@@ -56,7 +56,7 @@ level_type::pop_event(cycle_type c)
     if (e.ready_cycle <= c)
     {
         unified_buffer_occupancy += e.count;
-        next_available_cycle[e.prod_id] = c+1;
+        next_available_cycle[e.prod_id] = c + traits.restart_delay;
         event_queue.pop_front();
         return true;
     }

@@ -330,6 +330,7 @@ if (BUILD_TESTING)
 
     qs_add_test(test_resource_estimation)
     qs_add_test(test_memory_level)
+    qs_add_test(test_epr_memory)
     qs_add_test(test_operable)
     qs_add_test(test_routing)
     qs_add_test(test_stall_monitor)

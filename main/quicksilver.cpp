@@ -146,7 +146,7 @@ main(int argc, char* argv[])
         /*
          *
          * */
-        .optional("-rm", "--remote-memory", "Operate memory as a remote region", remote_memory, false)
+        .optional("-rm", "--remote-memory", "Use remote EPR distillation instead of ideal EPR distribution", remote_memory, false)
         .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production",
                       remote_memory_epr_budget, 100000)
 
@@ -234,9 +234,9 @@ main(int argc, char* argv[])
                                     : 0;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
 
-    /* initialize EPR production (only used for remote memory) */
+    /* Every memory access uses EPR pairs, ideally distributed unless -rm is set. */
 
-    sim::BulkProducer* epr_producer{nullptr};
+    auto* epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
     sim::configuration::Allocation epr_alloc{};
     if (remote_memory)
     {
@@ -245,32 +245,25 @@ main(int argc, char* argv[])
             sim::ed_protocol_2b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
         epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
 
-        epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
         for (const auto& [quantum, count] : epr_alloc.levels)
             epr_producer->add_level(quantum, count);
+    }
+    else
+    {
+        const auto quantum = sim::ideal_epr_distribution(memory_code_distance);
+        epr_producer->add_level(quantum, 1);
+        epr_alloc.estimated_throughput = m_freq_khz * 1e3 / quantum.cycles_per_production;
     }
 
     std::vector<sim::MemoryLevel*> memory_subsystem;
     if (main_memory_qubits > 0)
     {
-        sim::MemoryLevel* bb_memory;
-        if (remote_memory)
-        {
-            bb_memory = new sim::RemoteMemory<sim::BBMemory>(m_freq_khz,
-                                                                main_memory_qubits,
-                                                                memory_block_physical_qubits,
-                                                                memory_block_capacity,
-                                                                memory_code_distance,
-                                                                epr_producer);
-        }
-        else
-        {
-            bb_memory = new sim::BBMemory(m_freq_khz, 
-                                                main_memory_qubits, 
-                                                memory_block_physical_qubits, 
-                                                memory_block_capacity, 
-                                                memory_code_distance);
-        }
+        auto* bb_memory = new sim::RemoteMemory<sim::BBMemory>(m_freq_khz,
+                                                            main_memory_qubits,
+                                                            memory_block_physical_qubits,
+                                                            memory_block_capacity,
+                                                            memory_code_distance,
+                                                            epr_producer);
         memory_subsystem.push_back(bb_memory);
     }
 
@@ -392,15 +385,9 @@ main(int argc, char* argv[])
                                                         memory_subsystem.end(),
                                                         size_t{0},
                                                         std::plus<size_t>{},
-                                                        [sc_footprint, remote_memory] (const auto* m)
+                                                        [] (const auto* m)
                                                         {
-                                                            size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
-                                                            size_t routing_overhead;
-                                                            if (remote_memory)
-                                                                routing_overhead = 0;
-                                                            else
-                                                                routing_overhead = 0.5*m->num_blocks*sc_footprint;
-                                                            return memory_overhead + routing_overhead;
+                                                            return m->storage_physical_qubit_count*m->num_blocks;
                                                         });
     
     std::cout << "MEMORY_FOOTPRINT\n";
@@ -409,11 +396,8 @@ main(int argc, char* argv[])
     std::cout << "FACTORY_FOOTPRINT\n";
     print_stat_line(std::cout, "    TOTAL", ms_alloc.physical_qubit_count);
 
-    if (remote_memory)
-    {
-        std::cout << "EPR_FOOTPRINT\n";
-        print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
-    }
+    std::cout << "EPR_FOOTPRINT\n";
+    print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
 
     const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint
                                         + ms_alloc.physical_qubit_count + epr_alloc.physical_qubit_count;
@@ -427,13 +411,13 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "    RDR", fidelity.rdr);
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
+    print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
     if (remote_memory)
     {
         // calculate L0 ingress rate (physical EPR generation rate)
         auto [l0_q, l0_n] = epr_alloc.levels[0];
         double l0_ingress_rate = l0_n * fpdiv(l0_q.d_input_states, l0_q.cycles_per_production) * (epr_producer->freq_khz * 1e3);
 
-        print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
         print_stat_line(std::cout, "PHYSICAL_EPR_DISTR_RATE_MAX_PER_S", l0_ingress_rate);
     }
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());

@@ -16,14 +16,6 @@ namespace sim
 namespace
 {
 
-constexpr size_t NUM_CHANNELS{1};
-
-/*
- * Computes the width of each channel given number of channels
- * and total number of blocks in the entire system
- * */
-constexpr size_t _channel_width(size_t num_channels, size_t total_blocks);
-
 std::string _name(size_t, size_t, size_t);
 
 } // anon
@@ -33,23 +25,8 @@ std::string _name(size_t, size_t, size_t);
 
 BBMemory::BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d)
     :MemoryLevel(_name(n,k,d), freq_khz, qubit_count, n, k, d),
-    routing_(NUM_CHANNELS, _channel_width(NUM_CHANNELS, num_blocks)),
     adapters_(num_blocks, 0)
-{
-    // define routing space:
-    for (size_t i = 0; i < num_blocks; i++)
-    {
-        size_t ii{i};
-        const int ch = ii % NUM_CHANNELS;
-        ii /= NUM_CHANNELS;
-        const int ro = ii & 1;
-        ii >>= 1;
-        const int co = ii;
-        assert(co < routing_.channel_width);
-
-        routing_.set_location(i, ch, ro, co);
-    }
-}
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -57,15 +34,7 @@ BBMemory::BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size
 cycle_type
 BBMemory::next_ready_cycle_for_load(Qubit* q) const
 {
-    size_t idx = block_index_of(q);
-
-    cycle_type ready_cycle = adapters_[idx];
-    routing_.for_each_resource_between(idx, routing::MCB_LEFT_ENTRY,
-                        [this, &ready_cycle, d=storage_code_distance] (const auto& r)
-                        {
-                            ready_cycle = std::max(ready_cycle, r.next_ready_cycle(current_cycle(), d));
-                        });
-    return ready_cycle;
+    return adapters_[block_index_of(q)];
 }
 
 ////////////////////////////////////////////////////////////
@@ -99,52 +68,17 @@ BBMemory::log_fidelity(Client* c, double scale, double d_freq_khz, double p) con
 MemoryAccessResult
 BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 {
-    const cycle_type d{storage_code_distance}, 
-                     transit{transit_latency()};
-
-    // surgery starts immediately, so the adapter has to be ready now:
     if (adapters_[idx] > current_cycle())
         return MemoryAccessResult{};
 
-    // d rounds of surgery, plus the shift automorphism at the head of them
-    cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (is_credit_based_)  // using teleportation -- need extra d cycles (two PPMs)
-        surgery += d;
-
-    // the loaded qubit is exposed as soon as surgery completes; the transit out of the block
-    // that follows does not gate dependent instructions
-    MemoryAccessResult out{.latency=surgery, .freq_khz=freq_khz};
-
-    // check if we can lock the routing space for the surgery operation:
-    bool surgery_ok{true};
-    if (!is_credit_based_)
-        surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle() + surgery);
-
-    // routing space out of the memory is also locked for the transit phase
-    bool exit_ok{true};
-    if (!is_credit_based_)
-    {
-        exit_ok = routing_.test_resources_between(
-                            idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+transit);
-    }
-
-    if (surgery_ok && exit_ok)
-    {
-        out.code = MemoryAccessResult::Code::SUCCESS;
-        adapters_[idx] = current_cycle() + surgery + transit;
-
-        if (!is_credit_based_)
-        {
-            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+surgery);
-            routing_.lock_resources_between(
-                            idx, routing::MCB_LEFT_ENTRY, current_cycle()+surgery, current_cycle()+surgery+transit);
-        }
-
-        s_surgery_operations += 2;
-        s_shift_automorphisms++;
-    }
-
-    return out;
+    // Teleportation needs two d-round PPMs, plus any exposed automorphism.
+    const cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx)
+                                 + storage_code_distance;
+    adapters_[idx] = current_cycle() + surgery;
+    s_surgery_operations += 2;
+    s_shift_automorphisms++;
+    return MemoryAccessResult{.code=MemoryAccessResult::Code::SUCCESS,
+                              .latency=surgery, .freq_khz=freq_khz};
 }
 
 ////////////////////////////////////////////////////////////
@@ -153,37 +87,15 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 MemoryAccessResult
 BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 {
-    const cycle_type d{storage_code_distance}, transit{transit_latency()};
-
-    // the first `transit` cycles are spent routing to the block, so locally the adapter only
-    // has to be free by then; remotely there is no routing phase, so it has to be free now.
-    if (adapters_[idx] > current_cycle()+transit)
+    if (adapters_[idx] > current_cycle())
         return MemoryAccessResult{};
 
-    // shift automorphism arises from the second d rounds (the surgery, once routed in)
-    // if using remote memory, then there is an inter-module measurement between credit block and this block
-    cycle_type surgery = latency_of_surgery_operation(current_cycle()+transit, idx);
-
-    // unlike load, since store does not affect the execution of dependent instructions,
-    // latency exposed to user is 0. But, it does lock down routing resources
-    MemoryAccessResult out{.freq_khz=freq_khz};
-
-    // check if we can route to the block
-    bool ok{true};
-    if (!is_credit_based_)
-        ok = routing_.test_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+transit);
-    if (ok)
-    {
-        out.code = MemoryAccessResult::Code::SUCCESS;
-        if (!is_credit_based_)
-            routing_.lock_resources_between(idx, routing::MCB_LEFT_ENTRY, current_cycle(), current_cycle()+transit);
-        adapters_[idx] = current_cycle()+transit+surgery;
-
-        s_surgery_operations++;
-        s_shift_automorphisms++;
-    }
-
-    return out;
+    const cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
+    adapters_[idx] = current_cycle() + surgery;
+    s_surgery_operations++;
+    s_shift_automorphisms++;
+    // Stores do not delay dependent instructions, but occupy the block adapter.
+    return MemoryAccessResult{.code=MemoryAccessResult::Code::SUCCESS, .freq_khz=freq_khz};
 }
 
 ////////////////////////////////////////////////////////////
@@ -192,51 +104,17 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 MemoryAccessResult
 BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st)
 {
-    const cycle_type d{storage_code_distance}, transit{transit_latency()};
-
     if (adapters_[idx] > current_cycle())
         return MemoryAccessResult{};
 
-    // by convention the load goes first, so it takes the one shift automorphism; the store
-    // surgery that follows (once the store qubit has transited in) is a plain d rounds
-    cycle_type ld_surgery = latency_of_surgery_operation(current_cycle(), idx);
-    if (is_credit_based_)  // extra PPM with teleportation
-        ld_surgery += d;
-
-    MemoryAccessResult out{.latency=ld_surgery, .freq_khz=freq_khz};
-
-    bool ld_surgery_ok{true};
-    if (!is_credit_based_)
-        ld_surgery_ok = routing_.test_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
-
-    // load exit and store entry are contiguous on the bus
-    bool exit_and_st_ok{true};
-    if (!is_credit_based_)
-    {
-        exit_and_st_ok = routing_.test_resources_between(
-                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
-    }
-
-    if (ld_surgery_ok && exit_and_st_ok)
-    {
-        out.code = MemoryAccessResult::Code::SUCCESS;
-
-        if (!is_credit_based_)
-        {
-            routing_.lock_local_resource(idx, current_cycle(), current_cycle()+ld_surgery);
-            routing_.lock_resources_between(
-                        idx, routing::MCB_LEFT_ENTRY, current_cycle()+ld_surgery, current_cycle()+ld_surgery+2*transit+d);
-        }
-
-        // load surgery, load exit, store entry, then the store's own d-round surgery;
-        // for a credit-based (remote) block `transit == 0`, so this reduces to `ld_surgery+d`.
-        adapters_[idx] = current_cycle()+ld_surgery+2*transit+d;
-
-        s_surgery_operations += 3;
-        s_shift_automorphisms++;
-    }
-
-    return out;
+    const cycle_type ld_surgery = latency_of_surgery_operation(current_cycle(), idx)
+                                    + storage_code_distance;
+    // Load first, then the store's d-round surgery; no memory bus transit.
+    adapters_[idx] = current_cycle() + ld_surgery + storage_code_distance;
+    s_surgery_operations += 3;
+    s_shift_automorphisms++;
+    return MemoryAccessResult{.code=MemoryAccessResult::Code::SUCCESS,
+                              .latency=ld_surgery, .freq_khz=freq_khz};
 }
 
 ////////////////////////////////////////////////////////////
@@ -260,16 +138,6 @@ BBMemory::latency_of_surgery_operation(cycle_type ref, size_t idx) const
 
 namespace
 {
-
-constexpr size_t
-_channel_width(size_t num_channels, size_t total_blocks)
-{
-    size_t blocks_per_channel = std::ceil(fpdiv(total_blocks, num_channels));
-    size_t w = blocks_per_channel >> 1;
-    if (blocks_per_channel & 1)
-        w++;
-    return w;
-}
 
 std::string
 _name(size_t n, size_t k, size_t d)

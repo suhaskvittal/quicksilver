@@ -154,7 +154,7 @@ public:
 
     /*
      * True if an access of the given type targeting `ld` currently has the EPR credit it
-     * would need (trivially true if `ld` is not resident in remote memory).
+     * would need (trivially true if `ld` is already in compute-local memory).
      * */
     bool epr_credit_available_for(Qubit* ld, Instruction::Type) const;
 protected:

@@ -24,6 +24,14 @@ set by `APPENDIX_MEMORY_CYCLE_TIME_NS` in `run_all_workloads.py`. These runs
 retain remote memory and its 50,000 physical qubit EPR budget. The main
 evaluation continues to use 1,250,000 ns (1.25 ms).
 
+The simulator baseline (without `-rm`) also uses EPR pairs for all memory
+accesses. Its ideal distribution starts with an empty buffer, holds at most
+eight perfect pairs, and produces one pair every `4 * memory_code_distance`
+memory cycles while the buffer has space. This ideal supply adds no physical
+qubit footprint. Memory-side bus routing is removed; compute-side routing
+contention and its footprint remain. `-rm` selects the existing EPR
+distillation model instead of this ideal supply.
+
 Appendix compiled traces and results are isolated under
 `benchmarks/bin/compiled/hint_isca2026_appendix/` and
 `out/hint_isca2026_appendix/`, respectively. Individual command groups are

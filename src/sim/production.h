@@ -44,6 +44,8 @@ struct ProducerQuantum
     double infidelity;
     size_t physical_qubit_count;
     cycle_type cycles_per_production;
+    // Idle cycles between completing one batch and starting the next.
+    cycle_type restart_delay{1};
 };
 
 ////////////////////////////////////////////////////////////
@@ -195,6 +197,9 @@ enum class EDImplMethod
      * */
     DISAGGREGATED_TYPE_A   // YSC on compute qubits, BB code on memory substrate
 };
+
+// Perfect EPR pairs, one every 4*d memory cycles, with an eight-pair buffer.
+ProducerQuantum ideal_epr_distribution(size_t memory_code_distance);
 
 /*
  * Protocol 1:

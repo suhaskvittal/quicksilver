@@ -26,14 +26,7 @@ TEMPL_CLASS::RemoteMemory(double freq_khz,
     :IMPL(freq_khz, qubit_count, n, k, d),
     epr_producer_(epr_producer),
     epr_producer_adapter_ready_(epr_adapter_count(), 0)
-{
-    // a remote region is not reached over the on-chip bus, so there is no routing
-    // space to contend for, nor a bus transit phase in the access latency.
-    if constexpr (std::is_same<IMPL, BBMemory>::value)
-    {
-        this->is_credit_based_ = true;
-    }
-}
+{}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -81,9 +74,7 @@ TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
 {
     const size_t d = this->storage_code_distance;
-    // unavailability (adapter not ready) takes priority over a credit stall: with
-    // routing disabled for remote memory, the adapter check is IMPL's entire
-    // availability condition, so we can read it directly without invoking IMPL.
+    // Block adapter availability takes priority over a credit stall.
     if (this->adapters_[idx] > this->current_cycle())
         return MemoryAccessResult{};
 
@@ -106,9 +97,7 @@ TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 {
     const size_t d = this->storage_code_distance;
-    // matches BBMemory::store_impl's gate: locally the adapter only needs to be free by the
-    // end of the transit phase; remotely there is no transit phase, so this reduces to
-    // `current_cycle()` on its own.
+    // A teleportation store needs the block adapter immediately.
     if (this->adapters_[idx] > this->current_cycle())
         return MemoryAccessResult{};
 
@@ -152,6 +141,8 @@ TEMPL_CLASS::coupled_load_store_impl(size_t idx, storage_type& s, Qubit* ld, Qub
 TEMPL_PARAMS bool
 TEMPL_CLASS::can_consume_epr(size_t n) const
 {
+    if (epr_producer_adapter_ready_.empty())
+        return epr_producer_->top_level_buffer_occupancy() >= n;
     auto begin = epr_producer_adapter_ready_.begin(), 
          end = epr_producer_adapter_ready_.end();
     auto it = std::find_if(begin, end,
@@ -171,7 +162,8 @@ TEMPL_CLASS::can_consume_epr(size_t n) const
 TEMPL_PARAMS void
 TEMPL_CLASS::consume_epr(size_t n, cycle_type latency)
 {
-    epr_producer_adapter_ready_[epr_adapter_idx_] = this->current_cycle() + latency;
+    if (!epr_producer_adapter_ready_.empty())
+        epr_producer_adapter_ready_[epr_adapter_idx_] = this->current_cycle() + latency;
     epr_producer_->consume(n);
     s_epr_consumed += n;
 }
@@ -182,6 +174,10 @@ TEMPL_CLASS::consume_epr(size_t n, cycle_type latency)
 TEMPL_PARAMS size_t
 TEMPL_CLASS::epr_adapter_count() const
 {
+    // Ideal distribution has no distillation-adapter contention; the block's
+    // own adapter still limits accesses to that block.
+    if (!epr_producer_->top_level_traits().is_distiller)
+        return 0;
     const size_t k = this->storage_logical_qubit_count;
     const size_t nq = epr_producer_->top_level_traits().d_input_states * epr_producer_->top_level_count();
     return (nq+(k-1)) / k;

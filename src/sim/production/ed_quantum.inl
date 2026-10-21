@@ -31,6 +31,22 @@ constexpr size_t D_EXT_CMP{4};
 ////////////////////////////////////////////////////////////
 
 ProducerQuantum
+ideal_epr_distribution(size_t memory_code_distance)
+{
+    return ProducerQuantum{
+        .resource = ResourceType::EPR,
+        .is_distiller = false,
+        .d_input_states = 0,
+        .d_output_states = 1,
+        .buffer_size = 8,
+        .infidelity = 0.0,
+        .physical_qubit_count = 0,
+        .cycles_per_production = 4 * memory_code_distance,
+        .restart_delay = 0,
+    };
+}
+
+ProducerQuantum
 ed_protocol_1a(EDImplMethod m)
 {
     ProducerQuantum q

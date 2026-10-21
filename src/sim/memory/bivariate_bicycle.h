@@ -7,7 +7,6 @@
 #define SIM_MEMORY_BIVARIATE_BICYCLE_h
 
 #include "sim/memory_level.h"
-#include "sim/routing/multi_channel_bus.h"
 
 namespace sim
 {
@@ -20,15 +19,7 @@ class BBMemory : public MemoryLevel
 public:
     using typename MemoryLevel::storage_type;
 
-    struct routing_type : public routing::MultiChannelBus<routing_type>
-    {
-        routing_type(size_t c, size_t w)
-            :MultiChannelBus(c, w)
-        {}
-    };
 protected:
-    routing_type routing_;
-
     /*
      * `adapters_` contains the ready cycle for each BB code adapter.
      * */
@@ -37,13 +28,8 @@ protected:
     /* a shift automorphism costs at most this many cycles */
     constexpr static cycle_type SHIFT_AUT_LATENCY{2};
 
-    /*
-     * True for a `RemoteMemory<BBMemory>` (set from its constructor): the block is reached
-     * over entanglement (EPR credits) rather than the on-chip bus, so there is no routing
-     * space to contend for and no bus transit phase in the access latency.
-     * */
-    bool is_credit_based_{false};
 public:
+    // Teleportation substrate; RemoteMemory supplies EPR credits for every access.
     BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
 
     cycle_type next_ready_cycle_for_load(Qubit*) const override;
@@ -57,8 +43,6 @@ protected:
     MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
 
-    /* the on-chip bus transit phase, absent for a remote block */
-    cycle_type transit_latency() const { return is_credit_based_ ? 0 : storage_code_distance; }
 private:
     /*
      * Latency of a `d`-round surgery operation that begins at cycle `ref`, including the shift

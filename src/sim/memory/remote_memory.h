@@ -10,7 +10,6 @@
 #include "sim/memory/bivariate_bicycle.h"
 #include "sim/production.h"
 
-#include <type_traits>
 #include <vector>
 
 namespace sim
@@ -20,10 +19,9 @@ namespace sim
 ////////////////////////////////////////////////////////////
 
 /*
- * Wraps a `MemoryLevel` implementation so that it is operated as a *remote* region:
- * the memory substrate is only reachable over entanglement, so every access must
- * spend EPR credits held locally by the code block being accessed. Credits are
- * replenished from `epr_producer_`, which distills them.
+ * Wraps a memory substrate so every access spends EPR credits from a shared
+ * producer. Baseline memory uses ideal distribution; remote memory uses
+ * entanglement distillation and also contends for the distiller's adapters.
  * */
 template <class T>
 class RemoteMemory : public T

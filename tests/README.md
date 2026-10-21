@@ -37,6 +37,22 @@ block `i % num_blocks`).
 - `test_striped_mapping_empty` — mapping an empty range inserts nothing;
   all blocks stay empty.
 
+## test_epr_memory.cpp
+
+Checks EPR-backed memory access for both baseline ideal distribution and the
+existing remote distillation producer:
+
+- Baseline production starts empty, emits one perfect pair every `4d` memory
+  cycles, holds at most eight pairs, and resumes after buffer space is freed.
+- Loads and stores each consume one pair; coupled load/store consumes two.
+  Failed accesses preserve credits and memory contents.
+- Block adapters still serialize accesses to the same block; independent blocks
+  can access memory concurrently without a memory bus.
+- Compute-side bus reservations still block memory accesses without consuming
+  EPR credits.
+- Production follows the memory clock and distillation retains its existing
+  restart timing.
+
 ## test_operable.cpp
 
 Tests the clock/frequency machinery in `sim/operable.h` / `sim/operable.cpp`.
