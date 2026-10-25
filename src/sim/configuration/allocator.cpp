@@ -44,7 +44,7 @@ output_count(const ProducerQuantum& q)
 size_t
 physical_qubit_count_with_buffer(const ProducerQuantum& q)
 {
-    size_t d_buffer = surface_code_distance_for_target_logical_error_rate(10*q.infidelity, GL_PHYSICAL_ERROR_RATE);
+    size_t d_buffer = surface_code_distance_for_target_logical_error_rate(q.infidelity, GL_PHYSICAL_ERROR_RATE);
     return q.physical_qubit_count + (q.buffer_size - output_count(q)) * surface_code_physical_qubit_count(d_buffer);
 }
 

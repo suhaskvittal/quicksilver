@@ -179,5 +179,7 @@ if __name__ == '__main__':
 #                   ostrm.write(f'rz(fpa{2*NUM_BITS}{create_fpa_string(_rot, NUM_BITS)}) c;\n')
     print('qft denom: ', QFT_DENOM) 
 
+    os.system(f'xz -z -T 32 {output_file}')
+
 #################################################################
 #################################################################

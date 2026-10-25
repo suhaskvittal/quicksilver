@@ -2,6 +2,7 @@
 
 Run these commands from the repository root. The compile and simulation modes
 generate `commands.out`; execute its commands with the usual batch runner.
+Compilation reads the nine input traces from `benchmarks/bin/optimized/`.
 Compile the traces before running simulations.
 
 ```bash
@@ -9,8 +10,9 @@ bash scripts/hint/run_all.sh compile
 bash scripts/hint/run_all.sh sim
 ```
 
-Both modes include the main evaluation and the appendix. To generate only the
-appendix commands, use `appendix_compile` and `appendix_sim` instead.
+Both modes include the main and appendix workloads in the same EIF, EIF-LA,
+and HINT command groups. The main workloads also have baseline and EPR
+sensitivity simulations.
 
 The appendix compares EIF, EIF-LA, and HINT on the chromium, ethylene oxide,
 and hc3h2cn SELECT subroutines (`_q_sel`) and the available Gidney 2025 Shor
@@ -32,20 +34,19 @@ qubit footprint. Memory-side bus routing is removed; compute-side routing
 contention and its footprint remain. `-rm` selects the existing EPR
 distillation model instead of this ideal supply.
 
-Appendix compiled traces and results are isolated under
-`benchmarks/bin/compiled/hint_isca2026_appendix/` and
-`out/hint_isca2026_appendix/`, respectively. Individual command groups are
-also available, for example:
+All compiled traces and results are written under
+`benchmarks/bin/compiled/hint_isca2026/` and `out/hint_isca2026/`,
+respectively. Individual command groups are also available, for example:
 
 ```bash
-python3 -m scripts.hint.run_all_workloads compile_appendix_hint
-python3 -m scripts.hint.run_all_workloads sim_appendix_hint
+python3 -m scripts.hint.run_all_workloads compile_hint
+python3 -m scripts.hint.run_all_workloads sim_hint
 ```
 
 After all appendix simulations finish, generate the comparison table:
 
 ```bash
-bash scripts/hint/run_all.sh appendix_report > out/hint_isca2026_appendix/comparison.csv
+bash scripts/hint/run_all.sh appendix_report > out/hint_isca2026/appendix_comparison.csv
 ```
 
 The CSV contains each policy's application throughput (`CLIENT 0/KIPS`) and
