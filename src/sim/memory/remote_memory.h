@@ -44,6 +44,7 @@ public:
     RemoteMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d, BulkProducer* epr_producer);
 
     cycle_type next_ready_cycle_for_load(Qubit*) const override;
+    cycle_type next_ready_cycle_for_access(Qubit*, Instruction::Type) const override;
     double     log_fidelity(Client*, double, double, double) const override;
     bool       has_epr_credit(Qubit*, Instruction::Type) const override;
 protected:

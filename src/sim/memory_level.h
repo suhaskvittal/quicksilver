@@ -121,6 +121,10 @@ public:
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
     virtual cycle_type next_ready_cycle_for_load(Qubit*) const =0;
+    virtual cycle_type next_ready_cycle_for_access(Qubit* q, Instruction::Type) const
+    {
+        return next_ready_cycle_for_load(q);
+    }
 
     /*
      * Returns fidelity of memory subsystem for client's application.

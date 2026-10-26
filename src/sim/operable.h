@@ -75,6 +75,9 @@ protected:
      * done.
      * */
     virtual long operate() =0;
+
+    // Process any state changes before target, leaving target itself unexecuted.
+    virtual void fast_forward_to_cycle(cycle_type target) { current_cycle_ = target; }
 private:
     friend void coordinate_clock_scale(std::vector<Operable*>);
     friend void fast_forward_all_operables_to_time_ns(std::vector<Operable*>, uint64_t);

@@ -125,6 +125,23 @@ test_coordinate_clock_scale_cadence()
     CHECK_EQ(solo.current_cycle(), cycle_type{6});
 }
 
+void test_fast_forward_preserves_clock_phase()
+{
+    CountingOperable fast(2000.0), slow(1000.0);
+    CountingOperable reference_fast(2000.0), reference_slow(1000.0);
+    coordinate_clock_scale({&fast, &slow});
+    coordinate_clock_scale({&reference_fast, &reference_slow});
+    fast.tick(); slow.tick();
+    for (int i = 0; i < 5; ++i) { reference_fast.tick(); reference_slow.tick(); }
+    fast_forward_all_operables_to_time_ns({&fast, &slow}, convert_cycles_to_time_ns(5, 2000.0));
+    for (int i = 0; i < 12; ++i)
+    {
+        CHECK_EQ(fast.current_cycle(), reference_fast.current_cycle());
+        CHECK_EQ(slow.current_cycle(), reference_slow.current_cycle());
+        fast.tick(); slow.tick(); reference_fast.tick(); reference_slow.tick();
+    }
+}
+
 /*
  * fast_forward_all_operables_to_time_ns sets each operable's current cycle to
  * convert_time_ns_to_cycles(target, its freq).
@@ -153,5 +170,6 @@ main()
     RUN(test_convert_cycles_time_roundtrip);
     RUN(test_coordinate_clock_scale_cadence);
     RUN(test_fast_forward);
+    RUN(test_fast_forward_preserves_clock_phase);
     return qstest::finish();
 }

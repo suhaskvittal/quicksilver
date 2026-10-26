@@ -18,6 +18,49 @@ void advance_to(std::vector<Operable*> ops, cycle_type cycle)
             op->tick();
 }
 
+void test_production_fast_forward_matches_ticks()
+{
+    for (bool distillation : {false, true})
+    {
+        BulkProducer stepped("stepped", 1000.0), skipped("skipped", 1000.0);
+        for (auto* p : {&stepped, &skipped})
+        {
+            if (distillation)
+            {
+                p->add_level(ed_protocol_2a(EDImplMethod::DISAGGREGATED_TYPE_A), 8);
+                p->add_level(ed_protocol_2b(EDImplMethod::DISAGGREGATED_TYPE_A), 4);
+            }
+            else
+                p->add_level(ideal_epr_distribution(D), 1);
+        }
+        for (cycle_type target : {1UL, 24UL, 25UL, 49UL, 200UL, 1000UL, 10000UL, 10037UL, 20000UL})
+        {
+            advance_to({&stepped}, target);
+            fast_forward_all_operables_to_time_ns({&skipped}, convert_cycles_to_time_ns(target, 1000.0));
+            CHECK_EQ(stepped.current_cycle(), skipped.current_cycle());
+            for (size_t i = 0; i < stepped.level_count(); ++i)
+            {
+                const auto& a = stepped.level(i);
+                const auto& b = skipped.level(i);
+                CHECK_EQ(a.unified_buffer_occupancy, b.unified_buffer_occupancy);
+                CHECK_EQ(a.s_completions, b.s_completions);
+                CHECK_EQ(a.s_cycles_stalled_on_input, b.s_cycles_stalled_on_input);
+                CHECK_EQ(a.s_cycles_stalled_on_buffer, b.s_cycles_stalled_on_buffer);
+                CHECK(a.next_available_cycle == b.next_available_cycle);
+                CHECK(a.preq_resource_count == b.preq_resource_count);
+                CHECK_EQ(a.event_queue.size(), b.event_queue.size());
+                for (size_t j = 0; j < std::min(a.event_queue.size(), b.event_queue.size()); ++j)
+                {
+                    CHECK_EQ(a.event_queue[j].prod_id, b.event_queue[j].prod_id);
+                    CHECK_EQ(a.event_queue[j].count, b.event_queue[j].count);
+                    CHECK_EQ(a.event_queue[j].ready_cycle, b.event_queue[j].ready_cycle);
+                }
+            }
+            CHECK_EQ(stepped.consume(2), skipped.consume(2));
+        }
+    }
+}
+
 void test_ideal_production_timing_and_capacity()
 {
     BulkProducer producer("ideal_epr", 1000.0);
@@ -63,11 +106,14 @@ void test_coupled_access_requires_two_pairs()
     advance_to({&producer, &memory}, PERIOD+1);
     CHECK(memory.has_epr_credit(&ld, Instruction::Type::LOAD));
     CHECK(!memory.has_epr_credit(&ld, Instruction::Type::COUPLED_LOAD_STORE));
+    CHECK(memory.next_ready_cycle_for_access(&ld, Instruction::Type::LOAD) <= memory.current_cycle());
+    CHECK(memory.next_ready_cycle_for_access(&ld, Instruction::Type::COUPLED_LOAD_STORE) > memory.current_cycle());
     CHECK(!memory.do_coupled_load_store(&ld, &st).success());
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{1});
     CHECK_EQ(memory.blocks()[0].count(&ld), size_t{1});
     advance_to({&producer, &memory}, 2*PERIOD+1);
     const auto start = memory.current_cycle();
+    CHECK(memory.next_ready_cycle_for_access(&ld, Instruction::Type::COUPLED_LOAD_STORE) <= start);
     auto result = memory.do_coupled_load_store(&ld, &st);
     CHECK(result.success());
     CHECK_EQ(result.latency, cycle_type{2*D});
@@ -76,6 +122,7 @@ void test_coupled_access_requires_two_pairs()
     CHECK_EQ(memory.blocks()[0].count(&ld), size_t{0});
     CHECK_EQ(memory.blocks()[0].count(&st), size_t{1});
     CHECK_EQ(memory.next_ready_cycle_for_load(&st), start+3*D);
+    CHECK(memory.next_ready_cycle_for_access(&st, Instruction::Type::COUPLED_LOAD_STORE) >= start+3*D);
 }
 
 void test_load_store_credits_and_block_adapter()
@@ -193,6 +240,7 @@ void test_production_uses_memory_clock()
 
 int main()
 {
+    RUN(test_production_fast_forward_matches_ticks);
     RUN(test_ideal_production_timing_and_capacity);
     RUN(test_coupled_access_requires_two_pairs);
     RUN(test_load_store_credits_and_block_adapter);

@@ -229,11 +229,14 @@ _coalesce(inst_ptr curr, inst_ptr prev)
         // would've been caught earlier.
         assert(!_fpa_is_near_zero(s));
 
-        // check if `s` corresponds to some discrete angle:
-        double d = M_PI / convert_fpa_to_float(s);  // i.e., pi/4 --> 4
-        if (std::abs(d - std::round(d)) < ANALOG_ANGLE_TRUNC_TOL)
+        // The discrete encoding counts quarter turns: T = pi/4, S = pi/2,
+        // Z = pi. Dividing pi by the angle also classifies pi/8, pi/16, etc.
+        // as integers, but those values have no discrete gate encoding.
+        double quarter_turns = 4.0 * convert_fpa_to_float(s) / M_PI;
+        int turns = static_cast<int>(std::round(quarter_turns));
+        int8_t a = static_cast<int8_t>((turns % 8 + 8) % 8);
+        if (a != 0 && std::abs(quarter_turns - turns) < ANALOG_ANGLE_TRUNC_TOL)
         {
-            int8_t a = static_cast<int8_t>(std::round(d));
             auto [t1, t2] = _reverse_discretization(a, _is_z_basis(curr->type));
             out[0].emplace(t1, curr->q_begin(), curr->q_end());
             if (t2 != Instruction::Type::NIL)

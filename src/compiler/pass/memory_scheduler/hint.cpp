@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <unordered_set>
 
 namespace compiler
@@ -25,6 +26,8 @@ namespace memory_scheduler
 
 namespace
 {
+
+using frozen_set_type = std::unordered_set<qubit_type>;
 
 /*
  * CST = Compute Set Tree
@@ -48,26 +51,28 @@ struct CSTNode
      * inverted tree (many parents, single child).
      * */
     CSTNode* child{nullptr};
-
-    /*
-     * `frozen` is set to handle dependencies, for example.
-     * Encountering a frozen node while building the CST freezes
-     * other nodes.
-     * */
-    bool frozen{false};
+    CSTNode* youngest_descendant{nullptr};
 };
+
+// Keep the entry nodes and merged nodes for the lifetime of this thread.
+// Their pointers remain stable even when the owning vectors grow.
+static thread_local std::vector<CSTNode*> ST_ENTRY_POINTS;
+static thread_local std::vector<std::unique_ptr<CSTNode>> ST_ENTRY_STORAGE;
+static thread_local std::vector<std::unique_ptr<CSTNode>> ST_MERGED_STORAGE;
+static thread_local size_t ST_MERGED_NODES_USED{0};
 
 /*
  * `_cst_init` initializes the "entry_points" of the CST (one per qubit).
  * A qubit in the current active set has 0 memory cost, and any are not have
  * 1 memory cost.
  * */
-std::vector<CSTNode*> _cst_init(const active_set_type&, size_t qubit_count);
+void _cst_init(const active_set_type&, size_t qubit_count);
+CSTNode* _cst_next_merged_node();
 
 /*
  * Updates the CST by creating a new node or updating the values in an existing node.
  * */
-void _cst_update(std::vector<CSTNode*>&, inst_ptr, Config conf);
+void _cst_update(std::vector<CSTNode*>&, frozen_set_type&, inst_ptr, Config conf);
 
 /*
  * Traverses the CST by using the `child` pointer in each node. Returns the
@@ -91,11 +96,6 @@ double _cst_score(const CSTNode*);
 double _cst_score(int32_t compute_count, int32_t memory_count);
 
 /*
- * Deallocates all `CSTNode` pointers.
- * */
-void _cst_free(std::vector<CSTNode*>&&);
-
-/*
  * Generic DFS function for a CST.
  * The loop callback is called on the first visit to a node.
  * The exit callback is called on all visited nodes (after the DFS completes).
@@ -117,17 +117,18 @@ Result
 hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
 {
     // build the CST:
-    auto entry_points = _cst_init(active_set, dag->qubit_count);
+    _cst_init(active_set, dag->qubit_count);
+    frozen_set_type frozen_qubits;
     dag->for_each_instruction_in_layer_order(
             0,
             conf.hint_lookahead_depth,
-            [&entry_points, &conf] (inst_ptr inst, size_t) { _cst_update(entry_points, inst, conf); }
+            [&] (inst_ptr inst, size_t) { _cst_update(ST_ENTRY_POINTS, frozen_qubits, inst, conf); }
     );
 
     // compute active set
     active_set_type best_active_set = conf.hint_use_complex_selection
-                                        ? _cst_find_best_active_set_complex(entry_points, conf.active_set_capacity)
-                                        : _cst_find_best_active_set_simple(entry_points);
+                                        ? _cst_find_best_active_set_complex(ST_ENTRY_POINTS, conf.active_set_capacity)
+                                        : _cst_find_best_active_set_simple(ST_ENTRY_POINTS);
 
     // compute eviction scores for each qubit using `best_active_set`
     std::vector<double> scores(dag->qubit_count, 0.0);
@@ -135,7 +136,7 @@ hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
     {
         for (auto q : best_active_set)
         {
-            auto* node = entry_points[q];
+            auto* node = ST_ENTRY_POINTS[q];
             while (node != nullptr)
             {
                 for (auto x : node->qubits)
@@ -147,7 +148,6 @@ hint(const active_set_type& active_set, const dag_ptr& dag, Config conf)
 
     auto out = transform_active_set(active_set, best_active_set, scores);
 
-    _cst_free(std::move(entry_points));
     return out;
 }
 
@@ -162,46 +162,69 @@ namespace
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-std::vector<CSTNode*>
+void
 _cst_init(const active_set_type& active_set, size_t qubit_count)
 {
-    std::vector<CSTNode*> entry(qubit_count);
+    while (ST_ENTRY_STORAGE.size() < qubit_count)
+    {
+        qubit_type q = ST_ENTRY_STORAGE.size();
+        auto node = std::make_unique<CSTNode>();
+        node->qubits.insert(q);
+        ST_ENTRY_STORAGE.push_back(std::move(node));
+    }
+
+    ST_ENTRY_POINTS.resize(qubit_count);
+    ST_MERGED_NODES_USED = 0;
     for (qubit_type i = 0; i < qubit_count; i++)
     {
-        CSTNode::score_type memory_score = active_set.count(i) ? 0 : 1;
-        entry[i] = new CSTNode{active_set_type{i}, 0, memory_score};
+        CSTNode* node = ST_ENTRY_STORAGE[i].get();
+        node->compute_count = 0;
+        node->memory_count = active_set.count(i) ? 0 : 1;
+        node->child = nullptr;
+        node->youngest_descendant = node;
+        ST_ENTRY_POINTS[i] = node;
     }
-    return entry;
+}
+
+CSTNode*
+_cst_next_merged_node()
+{
+    if (ST_MERGED_NODES_USED == ST_MERGED_STORAGE.size())
+        ST_MERGED_STORAGE.push_back(std::make_unique<CSTNode>());
+    CSTNode* node = ST_MERGED_STORAGE[ST_MERGED_NODES_USED++].get();
+    node->qubits.clear();
+    node->compute_count = 0;
+    node->memory_count = 0;
+    node->child = nullptr;
+    node->youngest_descendant = node;
+    return node;
 }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
 void
-_cst_update(std::vector<CSTNode*>& entry_points, inst_ptr inst, Config conf)
+_cst_update(std::vector<CSTNode*>& entry_points, frozen_set_type& frozen, inst_ptr inst, Config conf)
 {
+    bool any_frozen = std::any_of(inst->q_begin(), inst->q_end(), [&] (auto q) { return frozen.count(q); });
+    if (any_frozen)
+    {
+        frozen.insert(inst->q_begin(), inst->q_end());
+        return;
+    }
+
     // identify the deepest nodes in the CST that contain the arguments of `inst`
     std::unordered_set<CSTNode*> deepest_nodes;
     deepest_nodes.reserve(get_inst_qubit_count(inst->type));
-    bool any_frozen{false};
     for (auto it = inst->q_begin(); it != inst->q_end(); it++)
     {
         auto* x = _cst_traverse(entry_points[*it]);
+        entry_points[*it]->youngest_descendant = x;
         deepest_nodes.insert(x);
-        any_frozen |= x->frozen;
     }
 
     if (deepest_nodes.empty())
         std::cerr << "_cst_update: found no nodes for inst: " << *inst << _die{};
-
-    // if any nodes are frozen, then freeze all encountered nodes
-    // and exit
-    if (any_frozen)
-    {
-        for (auto* x : deepest_nodes)
-            x->frozen = true;
-        return;
-    }
 
     if (deepest_nodes.size() == 1)
     {
@@ -212,7 +235,7 @@ _cst_update(std::vector<CSTNode*>& entry_points, inst_ptr inst, Config conf)
     else
     {
         // need to aggregate all `deepest_nodes` into one combined node:
-        CSTNode* y = new CSTNode{};
+        CSTNode* y = _cst_next_merged_node();
         for (auto* x : deepest_nodes)
         {
             y->qubits.insert(x->qubits.begin(), x->qubits.end());
@@ -221,18 +244,18 @@ _cst_update(std::vector<CSTNode*>& entry_points, inst_ptr inst, Config conf)
         }
         y->compute_count += _score_instruction(inst);
 
-        // if `y->qubits` is too large (exceeds active set capacity), then
-        // freeze all nodes and delete `y`
+        // If the candidate exceeds capacity, freeze its qubits and reuse this
+        // node for the next candidate; it has not been linked into the tree.
         if (y->qubits.size() > conf.active_set_capacity)
         {
-            delete y;
-            for (auto* x : deepest_nodes)
-                x->frozen = true;
+            frozen.insert(y->qubits.begin(), y->qubits.end());
+            ST_MERGED_NODES_USED--;
             return;
         }
 
         for (auto* x : deepest_nodes)
             x->child = y;
+        std::for_each(inst->q_begin(), inst->q_end(), [&] (auto q) { entry_points[q]->youngest_descendant = y; });
     }
 }
 
@@ -242,6 +265,7 @@ _cst_update(std::vector<CSTNode*>& entry_points, inst_ptr inst, Config conf)
 CSTNode*
 _cst_traverse(CSTNode* x)
 {
+    x = x->youngest_descendant;
     while (x->child != nullptr)
         x = x->child;
     return x;
@@ -302,6 +326,7 @@ _cst_find_best_active_set_complex(const std::vector<CSTNode*>& entry_points, siz
     {
         for (const auto* x : nodes_by_size[k-1])
         {
+            /*
             // Check if `x` by itself is good enough:
             double xs = _cst_score(x);
             if (xs > best_score)
@@ -309,6 +334,7 @@ _cst_find_best_active_set_complex(const std::vector<CSTNode*>& entry_points, siz
                 best_score = xs;
                 best_active_set = x->qubits;
             }
+            */
 
             // Skip combination search if already at full capacity:
             if (k == active_set_capacity)
@@ -340,6 +366,8 @@ _cst_find_best_active_set_complex(const std::vector<CSTNode*>& entry_points, siz
         }
     }
 
+    if (best_score < 0)
+        return _cst_find_best_active_set_simple(entry_points);
     return best_active_set;
 }
 
@@ -358,17 +386,6 @@ _cst_score(int32_t compute_count, int32_t memory_count)
     double C = static_cast<double>(compute_count);
     double M = static_cast<double>(memory_count);
     return C / (M+1.0); // need to add 1 in case M = 0
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-void
-_cst_free(std::vector<CSTNode*>&& entry_points)
-{
-    _cst_generic_dfs(entry_points,
-                    [] (CSTNode*) {},
-                    [] (CSTNode* x) { delete x; });
 }
 
 ////////////////////////////////////////////////////////////

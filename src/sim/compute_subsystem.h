@@ -168,6 +168,7 @@ public:
      * would need (trivially true if `ld` is already in compute-local memory).
      * */
     bool epr_credit_available_for(Qubit* ld, Instruction::Type) const;
+    cycle_type next_memory_access_cycle(Qubit* ld, Instruction::Type) const;
 protected:
     long operate() override { return 1; }
 private:

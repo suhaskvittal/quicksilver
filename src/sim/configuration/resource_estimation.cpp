@@ -38,10 +38,14 @@ double
 surface_code_logical_error_rate(size_t _d, double p)
 {
     const double d = static_cast<double>(_d);
-    // `0.1 * (100p)^(0.5*(d+1))` is the standard estimate for the logical error rate
-    // accumulated over one full `d`-round syndrome extraction cycle; dividing by `d` converts
-    // this to a per (single-round) cycle rate.
-    return (0.1 * std::pow(100*p, 0.5*(d+1))) / d;
+
+    // this is a compute LER model for Libra (Cody Jones's surface code decoder) that I computed
+    // manually
+    // 0.045316423 * (p / 0.0067174571) ** (0.59777057 * d)
+    const double A = 0.045316423,
+                 PTH = 0.0067174571,
+                 B = 0.59777057;
+    return A * std::pow(p/PTH, B*d);
 }
 
 double
@@ -54,9 +58,11 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
     else if (d == 12)
         return 2e-7;
     else if (d == 18)
+        return 2e-11;
+    else if (d == 24)
+        return 2e-15; // don't actually know, but fits the trend
+    else if (d == 30)
         return 2e-18;
-    else  // (d = 24)
-        return 2e-25; // don't actually know, but fits the trend
 }
 
 ////////////////////////////////////////////////////////////

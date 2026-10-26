@@ -333,7 +333,7 @@ main(int argc, char* argv[])
         if (skip_threshold > 0 && driver->cycles_with_no_progress() >= skip_threshold)
         {
             auto skip = driver->skip_to_cycle();
-            if (skip.has_value())
+            if (skip.has_value() && *skip > driver->current_cycle()+1)
             {
                 if (skip_verbose)
                 {
@@ -437,6 +437,11 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "    COMPUTE", fidelity.compute);
     print_stat_line(std::cout, "    MEMORY", fidelity.mem);
     print_stat_line(std::cout, "    RDR", fidelity.rdr);
+
+    print_stat_line(std::cout, "COMPUTE_PER_CYCLE_ERROR_RATE", 
+                    sim::configuration::surface_code_logical_error_rate(compute_code_distance, sim::GL_PHYSICAL_ERROR_RATE));
+    print_stat_line(std::cout, "MEMORY_PER_CYCLE_ERROR_RATE", 
+                    sim::configuration::bivariate_bicycle_code_block_error_rate(memory_code_distance, sim::GL_PHYSICAL_ERROR_RATE));
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
     print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
@@ -554,11 +559,11 @@ size_t
 get_compute_code_distance(std::string_view regime)
 {
     if (regime == "T")
-        return 23;
+        return 25;
     else if (regime == "G")
-        return 17;
+        return 19;
     else if (regime == "M")
-        return 11;
+        return 13;
     else
         std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
 }

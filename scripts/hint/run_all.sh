@@ -24,11 +24,11 @@ case "$MODE" in
             sim_hint_ed_sensitivity
         )
         ;;
-    appendix_report)
-        exec python3 -m scripts.hint.run_all_workloads report_appendix
+    report)
+        exec python3 -m scripts.hint.run_all_workloads report_comparison
         ;;
     *)
-        echo "usage: $0 {compile|sim|appendix_report}" >&2
+        echo "usage: $0 {compile|sim|report}" >&2
         exit 1
         ;;
 esac

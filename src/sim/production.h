@@ -153,12 +153,14 @@ public:
     bool is_saturated() const { return top_level_buffer_occupancy() >= top_level_buffer_capacity(); }
 
     /*
-     * Earliest cycle at which any level has a pending event, if any. Used to compute
+     * Earliest actionable completion or initiation, accounting for backpressure. Used to compute
      * skip-cycle targets.
      * */
     std::optional<cycle_type> next_event_cycle() const;
 
     void print_deadlock_info(std::ostream&) const override;
+protected:
+    void fast_forward_to_cycle(cycle_type target) override;
 private:
     long handle_resource_completions(level_type&, ssize_t level_idx);
     long handle_resource_initiations(level_type&, ssize_t level_idx);

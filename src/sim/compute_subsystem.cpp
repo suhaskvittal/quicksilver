@@ -478,6 +478,22 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+cycle_type
+ComputeSubsystem::next_memory_access_cycle(Qubit* ld, Instruction::Type t) const
+{
+    const auto level = memory_level_map_.at(ld);
+    if (level < 0)
+        return current_cycle();
+    const auto* memory = memory_subsystem_[level];
+    const auto ready = memory->next_ready_cycle_for_access(ld, t);
+    if (ready <= memory->current_cycle())
+        return current_cycle();
+    // current_cycle() is the next cycle to execute. The adapter becomes usable
+    // after the preceding memory tick advances that counter to `ready`.
+    return std::max(current_cycle()+1, convert_cycles_between_frequencies(ready-1,
+                                             memory->freq_khz, freq_khz)+1);
+}
+
 execute_result_type
 ComputeSubsystem::do_memory_access(inst_ptr inst, const std::vector<Qubit*>& args)
 {

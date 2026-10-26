@@ -7,6 +7,7 @@
 #include "sim/configuration/resource_estimation.h"
 
 #include <cassert>
+#include <limits>
 #include <iomanip>
 #include <iostream>
 #include <random>
@@ -135,16 +136,53 @@ BulkProducer::physical_qubit_count() const
 std::optional<cycle_type>
 BulkProducer::next_event_cycle() const
 {
-    std::optional<cycle_type> earliest{};
-    for (const auto& lvl : levels_)
-    {
-        if (lvl.event_queue.empty())
-            continue;
-        cycle_type c = lvl.event_queue.front().ready_cycle;
-        if (!earliest.has_value() || c < *earliest)
+    std::optional<cycle_type> earliest;
+    auto consider = [&](cycle_type c) {
+        c = std::max(c, current_cycle());
+        if (!earliest || c < *earliest)
             earliest = c;
+    };
+    for (size_t i = 0; i < levels_.size(); ++i)
+    {
+        const auto& lvl = levels_[i];
+        if (!lvl.event_queue.empty() && lvl.occupancy_remaining() >= lvl.event_queue.front().count)
+            consider(lvl.event_queue.front().ready_cycle);
+        if (lvl.unified_buffer_occupancy >= lvl.unified_buffer_capacity)
+            continue;
+        for (size_t j = 0; j < lvl.producer_count; ++j)
+        {
+            if (lvl.next_available_cycle[j] == std::numeric_limits<cycle_type>::max())
+                continue;
+            if (lvl.traits.is_distiller && i > 0 && levels_[i-1].unified_buffer_occupancy == 0
+                    && lvl.preq_resource_count[j] < lvl.traits.d_input_states)
+                continue;
+            consider(lvl.next_available_cycle[j]);
+        }
     }
     return earliest;
+}
+
+void
+BulkProducer::fast_forward_to_cycle(cycle_type target)
+{
+    while (current_cycle() < target)
+    {
+        operate();
+        const auto next = next_event_cycle();
+        const cycle_type end = next ? std::min(target, std::max(current_cycle()+1, *next)) : target;
+        const cycle_type idle = end - current_cycle() - 1;
+        // No state changes occur in these idle cycles, but stall statistics still accrue.
+        for (size_t i = 0; i < levels_.size(); ++i)
+        {
+            auto& lvl = levels_[i];
+            if (lvl.unified_buffer_occupancy >= lvl.unified_buffer_capacity)
+                lvl.s_cycles_stalled_on_buffer += idle;
+            else if (lvl.traits.is_distiller && i > 0
+                    && levels_[i-1].unified_buffer_occupancy < lvl.traits.d_input_states)
+                lvl.s_cycles_stalled_on_input += idle;
+        }
+        Operable::fast_forward_to_cycle(end);
+    }
 }
 
 ////////////////////////////////////////////////////////////

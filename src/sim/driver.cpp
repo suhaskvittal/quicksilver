@@ -223,19 +223,11 @@ Driver::done() const
 std::optional<cycle_type>
 Driver::skip_to_cycle() const
 {
-    // check that production cannot do anything (top-level buffer is full)
+    // Producers catch up across the skipped interval before the next driver tick.
     const bool ok_to_skip = !GL_RDR_ENABLED && !GL_TOPOLS_ENABLED;
     if (ok_to_skip && skip_cycle_target_.has_value())
     {
         auto s = *skip_cycle_target_;
-        for (auto* p : {t_producer_, epr_producer_})
-        {
-            if (p == nullptr)
-                continue;
-            auto e = p->next_event_cycle();
-            if (!p->is_saturated() && e.has_value())
-                s = std::min(s, convert_cycles_between_frequencies(*e, p->freq_khz, freq_khz));
-        }
         s = std::max(current_cycle()+1, s);
         return std::make_optional(s);
     }
@@ -301,6 +293,7 @@ Driver::application_fidelity(int id, uint64_t scale_to_inst, double p) const
 long
 Driver::operate()
 {
+    skip_cycle_target_.reset();
     long progress{0};
 
     /* 1. update clients and execute context switch if needed */
@@ -465,7 +458,6 @@ Driver::retire_instruction(Client* c, inst_ptr inst, cycle_type inst_latency)
 long
 Driver::fetch_and_execute_instructions_from_client(Client* c)
 {
-    skip_cycle_target_.reset();
     if (_client_is_done(c, simulation_instructions))
         return 0;
 
@@ -514,6 +506,13 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                     are_operands_ready = false;
                     s = std::max(q->cycle_available, s);
                 }
+            }
+
+            if (is_memory_access(executed_inst->type))
+            {
+                const auto ready = compute_subsystem_->next_memory_access_cycle(operands[0], executed_inst->type);
+                s = std::max(s, ready);
+                are_operands_ready &= ready <= current_cycle();
             }
 
             if (!are_operands_ready)
@@ -572,6 +571,21 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
             {
                 auto result = compute_subsystem_->execute_instruction(executed_inst, operands);
                 success_count += result.progress;
+                if (!result.progress)
+                {
+                    // A routing retry may succeed next cycle. If only magic states are
+                    // missing, wait for the producer's next actionable event instead.
+                    cycle_type retry = current_cycle()+1;
+                    if (is_t_like_instruction(executed_inst->type)
+                            && compute_subsystem_->count_available_magic_states() == 0)
+                    {
+                        const auto event = t_producer_->next_event_cycle();
+                        if (event)
+                            retry = std::max(retry, convert_cycles_between_frequencies(
+                                    *event, t_producer_->freq_khz, freq_khz));
+                    }
+                    skip_cycle_target_ = skip_cycle_target_ ? std::min(*skip_cycle_target_, retry) : retry;
+                }
                 if (result.progress)
                 {
                     update_instruction_stats_before_retire(executed_inst);

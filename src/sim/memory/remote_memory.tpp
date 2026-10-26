@@ -48,6 +48,25 @@ TEMPL_CLASS::next_ready_cycle_for_load(Qubit* q) const
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+TEMPL_PARAMS cycle_type
+TEMPL_CLASS::next_ready_cycle_for_access(Qubit* q, Instruction::Type t) const
+{
+    cycle_type ready = IMPL::next_ready_cycle_for_load(q);
+    if (!epr_producer_adapter_ready_.empty())
+        ready = std::max(ready, *std::min_element(epr_producer_adapter_ready_.begin(),
+                                                epr_producer_adapter_ready_.end()));
+    const size_t required = t == Instruction::Type::COUPLED_LOAD_STORE ? 2 : 1;
+    if (epr_producer_->top_level_buffer_occupancy() < required)
+    {
+        const auto event = epr_producer_->next_event_cycle();
+        const auto retry = event ? convert_cycles_between_frequencies(*event, epr_producer_->freq_khz,
+                                                                      this->freq_khz)
+                                 : this->current_cycle()+1;
+        ready = std::max(ready, std::max(this->current_cycle()+1, retry));
+    }
+    return ready;
+}
+
 TEMPL_PARAMS double
 TEMPL_CLASS::log_fidelity(Client* c, double scale, double d_freq_khz, double p) const
 {
