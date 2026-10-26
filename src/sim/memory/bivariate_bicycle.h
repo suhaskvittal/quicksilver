@@ -42,16 +42,8 @@ protected:
     MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) override;
     MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) override;
-protected:
-    cycle_type block_ready_cycle(size_t idx) const override { return adapters_[idx]; }
 
 private:
-    /*
-     * Load latency can be hidden if resources are available well ahead of the actual load:
-     * Returns latency of loading from given memory block.
-     * */
-    cycle_type exposed_load_latency(cycle_type ld_req_cycle, size_t idx) const override;
-
     /*
      * Latency of a `d`-round surgery operation that begins at cycle `ref`, including the shift
      * automorphism if the adapter has not been idle long enough by then to hide it.

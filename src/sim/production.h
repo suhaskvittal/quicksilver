@@ -117,8 +117,6 @@ private:
      * highest fidelity resource states.
      * */
     std::vector<level_type> levels_;
-    // Completion cycles of resources in the top-level buffer, in consumption order.
-    std::deque<cycle_type> top_level_ready_cycles_;
 public:
     BulkProducer(std::string_view name, double freq_khz);
 
@@ -131,10 +129,6 @@ public:
      * nothing) if fewer than `count` are available.
      * */
     bool consume(size_t count);
-
-    // Completion cycle of the newest resource among the next `count` to consume.
-    // Empty when fewer than `count` resources are buffered.
-    std::optional<cycle_type> top_level_resource_ready_cycle(size_t count) const;
 
     size_t top_level_count() const { return levels_.back().producer_count; }
     size_t top_level_buffer_occupancy() const { return levels_.back().unified_buffer_occupancy; }

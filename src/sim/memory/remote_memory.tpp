@@ -53,7 +53,8 @@ TEMPL_CLASS::next_ready_cycle_for_access(Qubit* q, Instruction::Type t) const
 {
     cycle_type ready = IMPL::next_ready_cycle_for_load(q);
     if (!epr_producer_adapter_ready_.empty())
-        ready = std::max(ready, *std::min_element(epr_producer_adapter_ready_.begin(), epr_producer_adapter_ready_.end()));
+        ready = std::max(ready, *std::min_element(epr_producer_adapter_ready_.begin(),
+                                                epr_producer_adapter_ready_.end()));
     const size_t required = t == Instruction::Type::COUPLED_LOAD_STORE ? 2 : 1;
     if (epr_producer_->top_level_buffer_occupancy() < required)
     {
@@ -91,8 +92,9 @@ TEMPL_CLASS::has_epr_credit(Qubit* q, Instruction::Type t) const
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
 {
+    const size_t d = this->storage_code_distance;
     // Block adapter availability takes priority over a credit stall.
-    if (intern_block_ready_cycle(idx) > this->current_cycle())
+    if (this->adapters_[idx] > this->current_cycle())
         return MemoryAccessResult{};
 
     // check if credits are available in storage
@@ -101,12 +103,9 @@ TEMPL_CLASS::load_impl(size_t idx, storage_type& s, Qubit* q)
         s_cycles_stalled_on_epr++;
         return MemoryAccessResult{.code = MemoryAccessResult::Code::FAIL_NO_CREDIT};
     }
-
-    access_resource_ready_cycle_ = resource_ready_cycle(1);
     auto out = IMPL::load_impl(idx, s, q);
-    access_resource_ready_cycle_ = 0;
     if (out.success())
-        consume_epr(1, intern_block_ready_cycle(idx));
+        consume_epr(1, 2*d);
     return out;
 }
 
@@ -118,7 +117,7 @@ TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 {
     const size_t d = this->storage_code_distance;
     // A teleportation store needs the block adapter immediately.
-    if (intern_block_ready_cycle(idx) > this->current_cycle())
+    if (this->adapters_[idx] > this->current_cycle())
         return MemoryAccessResult{};
 
     // check if credits are available in storage
@@ -129,7 +128,7 @@ TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
     }
     auto out = IMPL::store_impl(idx, s, q);
     if (out.success())
-        consume_epr(1, this->current_cycle() + d);
+        consume_epr(1, 2*d);
     return out;
 }
 
@@ -139,7 +138,8 @@ TEMPL_CLASS::store_impl(size_t idx, storage_type& s, Qubit* q)
 TEMPL_PARAMS MemoryAccessResult
 TEMPL_CLASS::coupled_load_store_impl(size_t idx, storage_type& s, Qubit* ld, Qubit* st)
 {
-    if (intern_block_ready_cycle(idx) > this->current_cycle())
+    const size_t d = this->storage_code_distance;
+    if (this->adapters_[idx] > this->current_cycle())
         return MemoryAccessResult{};
 
     if (!can_consume_epr(2))
@@ -148,11 +148,9 @@ TEMPL_CLASS::coupled_load_store_impl(size_t idx, storage_type& s, Qubit* ld, Qub
         return MemoryAccessResult{.code = MemoryAccessResult::Code::FAIL_NO_CREDIT};
     }
 
-    access_resource_ready_cycle_ = resource_ready_cycle(2);
     auto out = IMPL::coupled_load_store_impl(idx, s, ld, st);
-    access_resource_ready_cycle_ = 0;
     if (out.success())
-        consume_epr(2, intern_block_ready_cycle(idx));
+        consume_epr(2, 3*d);
     return out;
 }
 
@@ -166,8 +164,9 @@ TEMPL_CLASS::can_consume_epr(size_t n) const
         return epr_producer_->top_level_buffer_occupancy() >= n;
     auto begin = epr_producer_adapter_ready_.begin(),
          end = epr_producer_adapter_ready_.end();
-    auto it = std::min_element(begin, end);
-    if (*it > this->current_cycle())
+    auto it = std::find_if(begin, end,
+                            [this] (cycle_type c) { return c <= this->current_cycle(); });
+    if (it == end)
     {
         return false;
     }
@@ -180,21 +179,12 @@ TEMPL_CLASS::can_consume_epr(size_t n) const
 
 
 TEMPL_PARAMS void
-TEMPL_CLASS::consume_epr(size_t n, cycle_type ready_cycle)
+TEMPL_CLASS::consume_epr(size_t n, cycle_type latency)
 {
     if (!epr_producer_adapter_ready_.empty())
-        epr_producer_adapter_ready_[epr_adapter_idx_] = ready_cycle;
+        epr_producer_adapter_ready_[epr_adapter_idx_] = this->current_cycle() + latency;
     epr_producer_->consume(n);
     s_epr_consumed += n;
-}
-
-TEMPL_PARAMS cycle_type
-TEMPL_CLASS::resource_ready_cycle(size_t n) const
-{
-    const auto produced = epr_producer_->top_level_resource_ready_cycle(n);
-    assert(produced.has_value());
-    return convert_cycles_between_frequencies(*produced,
-                                              epr_producer_->freq_khz, this->freq_khz);
 }
 
 ////////////////////////////////////////////////////////////
@@ -210,19 +200,6 @@ TEMPL_CLASS::epr_adapter_count() const
     const size_t k = this->storage_logical_qubit_count;
     const size_t nq = epr_producer_->top_level_traits().d_input_states * epr_producer_->top_level_count();
     return (nq+(k-1)) / k;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-TEMPL_PARAMS cycle_type
-TEMPL_CLASS::block_ready_cycle(size_t idx) const
-{
-    cycle_type ready = intern_block_ready_cycle(idx);
-    if (!epr_producer_adapter_ready_.empty())
-        ready = std::max(ready, *std::min_element(epr_producer_adapter_ready_.begin(),
-                                                 epr_producer_adapter_ready_.end()));
-    return std::max(ready, access_resource_ready_cycle_);
 }
 
 ////////////////////////////////////////////////////////////

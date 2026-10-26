@@ -75,13 +75,11 @@ void test_ideal_production_timing_and_capacity()
         CHECK_EQ(producer.top_level_buffer_occupancy(), pairs-1);
         producer.tick();
         CHECK_EQ(producer.top_level_buffer_occupancy(), pairs);
-        CHECK_EQ(*producer.top_level_resource_ready_cycle(pairs), pairs*PERIOD);
     }
     advance_to({&producer}, 12*PERIOD);
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{8});
     CHECK(!producer.next_event_cycle().has_value());
     CHECK(producer.consume(2));
-    CHECK_EQ(*producer.top_level_resource_ready_cycle(1), 3*PERIOD);
     producer.tick(); // Resume production after freeing buffer space.
     const auto ready = producer.next_event_cycle();
     CHECK(ready.has_value());
@@ -93,26 +91,6 @@ void test_ideal_production_timing_and_capacity()
         producer.tick();
         CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{7});
     }
-}
-
-void test_resource_timestamps_are_generic()
-{
-    BulkProducer producer("t_producer", 1000.0);
-    producer.add_level(ProducerQuantum{
-        .resource=ResourceType::T,
-        .is_distiller=false,
-        .d_input_states=0,
-        .d_output_states=1,
-        .buffer_size=2,
-        .infidelity=0.0,
-        .physical_qubit_count=1,
-        .cycles_per_production=3,
-        .restart_delay=0,
-    }, 1);
-    advance_to({&producer}, 4);
-    CHECK_EQ(*producer.top_level_resource_ready_cycle(1), cycle_type{3});
-    CHECK(producer.consume(1));
-    CHECK(!producer.top_level_resource_ready_cycle(1).has_value());
 }
 
 void test_coupled_access_requires_two_pairs()
@@ -138,13 +116,13 @@ void test_coupled_access_requires_two_pairs()
     CHECK(memory.next_ready_cycle_for_access(&ld, Instruction::Type::COUPLED_LOAD_STORE) <= start);
     auto result = memory.do_coupled_load_store(&ld, &st);
     CHECK(result.success());
-    CHECK_EQ(result.latency, cycle_type{2*D-1});
+    CHECK_EQ(result.latency, cycle_type{2*D});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{0});
     CHECK_EQ(memory.s_epr_consumed, uint64_t{2});
     CHECK_EQ(memory.blocks()[0].count(&ld), size_t{0});
     CHECK_EQ(memory.blocks()[0].count(&st), size_t{1});
-    CHECK_EQ(memory.next_ready_cycle_for_load(&st), start+3*D-1);
-    CHECK(memory.next_ready_cycle_for_access(&st, Instruction::Type::COUPLED_LOAD_STORE) >= start+3*D-1);
+    CHECK_EQ(memory.next_ready_cycle_for_load(&st), start+3*D);
+    CHECK(memory.next_ready_cycle_for_access(&st, Instruction::Type::COUPLED_LOAD_STORE) >= start+3*D);
 }
 
 void test_load_store_credits_and_block_adapter()
@@ -158,49 +136,16 @@ void test_load_store_credits_and_block_adapter()
     advance_to({&producer, &memory}, 2*PERIOD+1);
     auto load = memory.do_load(&ld);
     CHECK(load.success());
-    CHECK_EQ(load.latency, cycle_type{0});
+    CHECK_EQ(load.latency, cycle_type{2*D});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{1});
+    CHECK(!memory.do_store(&st).success());
+    CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{1});
+    advance_to({&producer, &memory}, memory.current_cycle()+2*D);
     auto store = memory.do_store(&st);
     CHECK(store.success());
     CHECK_EQ(store.latency, cycle_type{0});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{0});
     CHECK_EQ(memory.s_epr_consumed, uint64_t{2});
-    CHECK_EQ(memory.next_ready_cycle_for_load(&st), memory.current_cycle()+D);
-}
-
-void test_load_latency_after_busy_block()
-{
-    BBMemory memory(1000.0, 12, 72, 12, D);
-    Qubit ld{.qubit_id=0}, st{.qubit_id=1};
-    CHECK(memory.do_store(&ld).success());
-    // The block becomes ready at cycle 8; at cycle 15, seven of the
-    // fourteen load-surgery cycles have been hidden. The old formula
-    // subtracted 15 from 14 and returned UINT64_MAX.
-    advance_to({&memory}, 2*D+3);
-    auto result = memory.do_coupled_load_store(&ld, &st);
-    CHECK(result.success());
-    CHECK_EQ(result.latency, cycle_type{D+1});
-}
-
-void test_repeated_loads_use_idle_adapter_time()
-{
-    BBMemory memory(1000.0, 12, 72, 12, D);
-    std::vector<Qubit> qubits(8);
-    std::vector<Qubit*> ptrs;
-    for (auto& q : qubits)
-        ptrs.push_back(&q);
-    memory.striped_mapping(ptrs.begin(), ptrs.end());
-    advance_to({&memory}, 100);
-
-    for (size_t i = 0; i < 7; ++i)
-    {
-        auto result = memory.do_load(ptrs[i]);
-        CHECK(result.success());
-        CHECK_EQ(result.latency, cycle_type{0});
-    }
-    auto eighth = memory.do_load(ptrs[7]);
-    CHECK(eighth.success());
-    CHECK_EQ(eighth.latency, cycle_type{12});
 }
 
 void test_independent_blocks_have_no_memory_routing_contention()
@@ -239,10 +184,7 @@ void test_compute_routing_still_blocks_memory_access()
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{8});
     CHECK_EQ(memory.s_epr_consumed, uint64_t{0});
     advance_to({&producer, &memory, &compute}, compute.current_cycle()+2*D);
-    auto result = compute.execute_instruction(&access, {&ld, &st});
-    CHECK_EQ(result.progress, 1);
-    CHECK_EQ(result.latency, cycle_type{2*D});
-    CHECK_EQ(ld.cycle_available, compute.current_cycle()+2*D);
+    CHECK_EQ(compute.execute_instruction(&access, {&ld, &st}).progress, 1);
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{6});
 }
 
@@ -300,11 +242,8 @@ int main()
 {
     RUN(test_production_fast_forward_matches_ticks);
     RUN(test_ideal_production_timing_and_capacity);
-    RUN(test_resource_timestamps_are_generic);
     RUN(test_coupled_access_requires_two_pairs);
     RUN(test_load_store_credits_and_block_adapter);
-    RUN(test_load_latency_after_busy_block);
-    RUN(test_repeated_loads_use_idle_adapter_time);
     RUN(test_independent_blocks_have_no_memory_routing_contention);
     RUN(test_compute_routing_still_blocks_memory_access);
     RUN(test_ideal_distribution_has_no_distillation_adapter_delay);

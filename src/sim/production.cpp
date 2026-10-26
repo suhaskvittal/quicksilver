@@ -115,17 +115,7 @@ BulkProducer::consume(size_t count)
     if (top.unified_buffer_occupancy < count)
         return false;
     top.unified_buffer_occupancy -= count;
-    for (size_t i = 0; i < count; ++i)
-        top_level_ready_cycles_.pop_front();
     return true;
-}
-
-std::optional<cycle_type>
-BulkProducer::top_level_resource_ready_cycle(size_t count) const
-{
-    if (count == 0 || top_level_ready_cycles_.size() < count)
-        return std::nullopt;
-    return top_level_ready_cycles_[count-1];
 }
 
 ////////////////////////////////////////////////////////////
@@ -236,12 +226,8 @@ BulkProducer::handle_resource_completions(level_type& lvl, ssize_t i)
     long progress{0};
     while (!lvl.event_queue.empty() && lvl.occupancy_remaining() >= lvl.event_queue.front().count)
     {
-        const auto event = lvl.event_queue.front();
         if (lvl.pop_event(current_cycle()))
         {
-            if (i == static_cast<ssize_t>(levels_.size()-1))
-                for (size_t j = 0; j < event.count; ++j)
-                    top_level_ready_cycles_.push_back(event.ready_cycle);
             lvl.s_completions++;
             progress++;
         }
