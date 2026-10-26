@@ -31,29 +31,15 @@ namespace
 std::vector<std::string> split_trace_string(std::string);
 
 /*
- * Compiles the given trace by performing memory access scheduler. The `trace`
- * reference is then overwritten with the new trace.
- * */
-void jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity);
-
-/*
  * Retrieves the number of qubits for the given trace:
  * */
 size_t get_number_of_qubits(std::string_view);
 
 /*
- * Returns the code distance for the given error-rate regime
- * */
-size_t get_compute_code_distance(std::string_view);
-size_t get_memory_code_distance(std::string_view);
-
-/*
  * Gets the default production specifications for magic state factories (parametrized by
  * values that can be extended by the user).
  * */
-std::vector<sim::ProducerQuantum> get_default_factory_specifications(std::string_view regime,
-                                                                      int64_t compute_cycle_time_ns,
-                                                                      int64_t ll_buffer_capacity);
+std::vector<sim::ProducerQuantum> get_default_factory_specifications(int64_t ll_buffer_capacity);
 
 } // anon
 
@@ -72,16 +58,16 @@ main(int argc, char* argv[])
     int64_t ratemode;
     int64_t skip_threshold;
     bool    skip_verbose;
-    bool    jit;
-    std::string regime;
     int64_t total_inst;
 
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
-    int64_t compute_cycle_time_ns;
+    int64_t compute_cycle_time_ns,
+            compute_code_distance;
     std::string routing_layout;
 
-    int64_t memory_cycle_time_ns;
+    int64_t memory_cycle_time_ns,
+            memory_code_distance;
 
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
@@ -97,18 +83,14 @@ main(int argc, char* argv[])
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
-        .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
         .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 0)
         .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
+        .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
         .optional("", "--max-cycles-no-progress",
                     "Maximum consecutive cycles any single component may spend with no progress before the "
                     "simulation declares a deadlock and aborts",
                     sim::GL_MAX_CYCLES_WITH_NO_PROGRESS, 1'000'000)
-        .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
 
-        .optional("", "--regime", 
-                    "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
-                    regime, "T")
         .optional("", "--total-program-instructions", 
                     "Total instructions in the program. Used for resource estimates. Does not affect performance.",
                     total_inst, 1'000'000'000ll)
@@ -120,6 +102,7 @@ main(int argc, char* argv[])
         .optional("", "--compute-cycle-time-ns", 
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
+        .optional("", "--compute-code-distance", "Compute subsystem code distance", compute_code_distance, 25)
 
         .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
@@ -144,6 +127,7 @@ main(int argc, char* argv[])
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
                         memory_cycle_time_ns, 1300)
+        .optional("", "--memory-code-distance", "Memory subsystem code distance", memory_code_distance, 24)
 
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
@@ -154,8 +138,7 @@ main(int argc, char* argv[])
          *
          * */
         .optional("-rm", "--remote-memory", "Use remote EPR distillation instead of ideal EPR distribution", remote_memory, false)
-        .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production",
-                      remote_memory_epr_budget, 100000)
+        .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production", remote_memory_epr_budget, 100000)
 
         /*
          * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of it
@@ -189,15 +172,9 @@ main(int argc, char* argv[])
         memory_cycle_time_ns = 600 + oc_base_ro_latency;
     }
 
-    /* Parse trace string and do jit compilation if neeeded */
-
     auto traces = split_trace_string(trace_string);
     if (ratemode > 1 && traces.size() > 1)
         std::cerr << "cannot have multiple input traces if ratemode > 1" << _die{};
-
-    if (jit)
-        for (std::string& trace : traces)
-            jit_compile(trace, inst_sim, compute_local_memory_capacity);
 
     if (ratemode > 1)
     {
@@ -206,18 +183,16 @@ main(int argc, char* argv[])
         std::fill(traces.begin(), traces.end(), trace);
     }
 
-    // from `regime`, set parameters:
-    const size_t compute_code_distance = get_compute_code_distance(regime),
-                 memory_code_distance = get_memory_code_distance(regime);
-
-    const size_t memory_block_physical_qubits = sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
-    const size_t memory_block_capacity = sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
+    const size_t memory_block_physical_qubits = 
+        sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
+    const size_t memory_block_capacity = 
+        sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
 
     /* initialize magic state factories */
 
     const double c_freq_khz = sim::compute_freq_khz(compute_cycle_time_ns);
 
-    auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
+    auto ms_specs = get_default_factory_specifications(factory_ll_buffer_capacity);
     if (oc_base_ro_latency >= 0)
     {
         // The last production level runs its syndrome extraction on a separate (typically
@@ -498,50 +473,6 @@ split_trace_string(std::string s)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
-jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
-{
-    constexpr auto MEMORY_ACCESS_SCHEDULER{compiler::pass::memory_scheduler::hint};
-
-    std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
-    std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
-
-    mkdir(trace_dir.c_str(), 0777);
-
-    auto ext_it = trace_filename.find(".gz");
-    if (ext_it == std::string::npos)
-        ext_it = trace_filename.find(".xz");
-    std::string base_name = trace_filename.substr(0, ext_it);
-    std::string active_set_capacity_str = std::to_string(active_set_capacity);
-    std::string inst_str = std::to_string(inst_sim/1'000'000) + "M";
-
-    std::string compiled_trace = trace_dir + base_name + "_a" + active_set_capacity_str + "_" + inst_str + ".gz";
-    
-    std::cout << "********* (jit) running memory access scheduler for " << trace 
-                << " -> " << compiled_trace << " *********\n";
-
-    generic_strm_type istrm, ostrm;
-    generic_strm_open(istrm, trace, "rb");
-    generic_strm_open(ostrm, compiled_trace, "wb");
-
-    compiler::pass::memory_scheduler::Config conf;
-    conf.active_set_capacity = active_set_capacity;
-    conf.inst_compile_limit = static_cast<int64_t>(5 * inst_sim);
-    conf.print_progress_frequency = 0;
-    conf.dag_inst_capacity = 100000;
-    conf.hint_lookahead_depth = 256;
-
-    run(ostrm, istrm, MEMORY_ACCESS_SCHEDULER, conf);
-
-    generic_strm_close(istrm);
-    generic_strm_close(ostrm);
-
-    trace = compiled_trace;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
 get_number_of_qubits(std::string_view trace)
 {
@@ -555,45 +486,9 @@ get_number_of_qubits(std::string_view trace)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t
-get_compute_code_distance(std::string_view regime)
-{
-    if (regime == "T")
-        return 25;
-    else if (regime == "G")
-        return 19;
-    else if (regime == "M")
-        return 13;
-    else
-        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
-}
-
-size_t
-get_memory_code_distance(std::string_view regime)
-{
-    if (regime == "T")
-        return 24;
-    else if (regime == "G")
-        return 18;
-    else if (regime == "M")
-        return 12;
-    else
-        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 std::vector<sim::ProducerQuantum>
-get_default_factory_specifications(std::string_view regime,
-                                    int64_t /* compute_cycle_time_ns -- unused: BulkProducer runs every level
-                                                on a single clock, so ProducerQuantum carries cycle *counts*,
-                                                not a per-level ns clock */,
-                                    int64_t ll_buffer_capacity)
+get_default_factory_specifications(int64_t ll_buffer_capacity)
 {
-    if (regime == "G")
-        return { sim::t_cc_cultivation(5) };
-
     sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);              // d = 3 color code cultivation
     sim::ProducerQuantum l2 = sim::t_15to1_distillation(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
     l2.buffer_size = ll_buffer_capacity;

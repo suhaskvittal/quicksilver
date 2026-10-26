@@ -142,6 +142,7 @@ public:
     virtual bool has_epr_credit(Qubit*, Instruction::Type) const { return true; }
 
     const std::vector<storage_type>& blocks() const { return blocks_; }
+    cycle_type d() const { return storage_code_distance; }
 protected:
     /*
      * Returns the index of the block holding `q`. If `q` is not resident in this
@@ -152,6 +153,9 @@ protected:
     virtual MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) =0;
+    virtual cycle_type exposed_load_latency(cycle_type ld_req_cycle, size_t idx) const =0;
+
+    virtual cycle_type block_ready_cycle(size_t idx) const =0;
 
     long operate() override { return 1; }
 };

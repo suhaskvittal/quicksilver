@@ -34,7 +34,7 @@ BBMemory::BBMemory(double freq_khz, size_t qubit_count, size_t n, size_t k, size
 cycle_type
 BBMemory::next_ready_cycle_for_load(Qubit* q) const
 {
-    return adapters_[block_index_of(q)];
+    return block_ready_cycle(block_index_of(q));
 }
 
 ////////////////////////////////////////////////////////////
@@ -47,12 +47,12 @@ BBMemory::log_fidelity(Client* c, double scale, double d_freq_khz, double p) con
     const double surgery_ops = s_surgery_operations * scale;
     const double aut_ops = s_shift_automorphisms * scale;
 
-    const double ber_per_d_cycles = configuration::bivariate_bicycle_code_block_error_rate(storage_code_distance, p);
-    const double surgery_error_per_op = ber_per_d_cycles*100,
-                 aut_error_per_op = ber_per_d_cycles*10;
+    const double ber_per_cycle = configuration::bivariate_bicycle_code_block_error_rate(d(), p);
+    const double surgery_error_per_op = ber_per_cycle*100,
+                 aut_error_per_op = ber_per_cycle*10;
 
     // memory (idle) fidelity
-    const double log_f_mem = num_blocks * fpdiv(cycles, storage_code_distance) * std::log(1-ber_per_d_cycles);
+    const double log_f_mem = num_blocks * cycles * std::log(1-ber_per_cycle);
     // surgery fidelity
     const double log_f_surgery = surgery_ops * std::log(1-surgery_error_per_op);
     // automorphism fidelity
@@ -68,13 +68,13 @@ BBMemory::log_fidelity(Client* c, double scale, double d_freq_khz, double p) con
 MemoryAccessResult
 BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 {
-    if (adapters_[idx] > current_cycle())
+    if (block_ready_cycle(idx) > current_cycle())
         return MemoryAccessResult{};
 
     // Teleportation needs two d-round PPMs, plus any exposed automorphism.
-    const cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx)
-                                 + storage_code_distance;
-    adapters_[idx] = current_cycle() + surgery;
+    const cycle_type surgery = exposed_load_latency(current_cycle(), idx);
+    const cycle_type ref = block_ready_cycle(idx);
+    adapters_[idx] = ref + latency_of_surgery_operation(ref, idx) + d();
     s_surgery_operations += 2;
     s_shift_automorphisms++;
     return MemoryAccessResult{.code=MemoryAccessResult::Code::SUCCESS,
@@ -87,7 +87,7 @@ BBMemory::load_impl(size_t idx, storage_type&, Qubit* q)
 MemoryAccessResult
 BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 {
-    if (adapters_[idx] > current_cycle())
+    if (block_ready_cycle(idx) > current_cycle())
         return MemoryAccessResult{};
 
     const cycle_type surgery = latency_of_surgery_operation(current_cycle(), idx);
@@ -104,13 +104,14 @@ BBMemory::store_impl(size_t idx, storage_type&, Qubit* q)
 MemoryAccessResult
 BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st)
 {
-    if (adapters_[idx] > current_cycle())
+    if (block_ready_cycle(idx) > current_cycle())
         return MemoryAccessResult{};
 
-    const cycle_type ld_surgery = latency_of_surgery_operation(current_cycle(), idx)
-                                    + storage_code_distance;
+    const cycle_type ld_surgery = exposed_load_latency(current_cycle(), idx);
     // Load first, then the store's d-round surgery; no memory bus transit.
-    adapters_[idx] = current_cycle() + ld_surgery + storage_code_distance;
+    const cycle_type ref = block_ready_cycle(idx);
+    const cycle_type load_done = ref + latency_of_surgery_operation(ref, idx) + d();
+    adapters_[idx] = std::max(load_done, current_cycle()) + d();
     s_surgery_operations += 3;
     s_shift_automorphisms++;
     return MemoryAccessResult{.code=MemoryAccessResult::Code::SUCCESS,
@@ -121,11 +122,20 @@ BBMemory::coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* s
 ////////////////////////////////////////////////////////////
 
 cycle_type
+BBMemory::exposed_load_latency(cycle_type ld_req_cycle, size_t idx) const
+{
+    auto ref = block_ready_cycle(idx);
+    cycle_type latency = latency_of_surgery_operation(ref, idx) + d();
+    if (latency > ld_req_cycle - ref) return latency - (ld_req_cycle - ref);
+    else                              return 0;
+}
+
+cycle_type
 BBMemory::latency_of_surgery_operation(cycle_type ref, size_t idx) const
 {
     cycle_type a = adapters_[idx];
     assert(a <= ref);
-    cycle_type latency = storage_code_distance;
+    cycle_type latency = d();
     if (ref - a < SHIFT_AUT_LATENCY)
         latency += SHIFT_AUT_LATENCY - (ref - a);  // shift automorphism latency (max SHIFT_AUT_LATENCY cycles)
                                                    // we assume that it can be hidden if the adapter

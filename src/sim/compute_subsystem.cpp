@@ -531,7 +531,8 @@ ComputeSubsystem::do_memory_access(inst_ptr inst, const std::vector<Qubit*>& arg
     *q_it = ld;
 
     execute_result_type out{.progress=1};
-    out.latency = convert_cycles_between_frequencies(result.latency, result.freq_khz, freq_khz);
+    out.latency = std::max(cycle_type{2}*code_distance,
+                           convert_cycles_between_frequencies(result.latency, result.freq_khz, freq_khz));
     return out;
 }
 

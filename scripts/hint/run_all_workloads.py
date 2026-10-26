@@ -1,6 +1,8 @@
 # author: Suhas Vittal
 
 from scripts.common import *
+from functools import cache
+import subprocess
 from sys import argv
 
 ##############################################
@@ -39,7 +41,7 @@ WORKLOADS = [
 SIM_INST_COUNT = 100_000_000
 PRINT_PROGRESS = SIM_INST_COUNT
 FACTORY_BUDGET = 75000
-REACTION_TIME = 30
+REACTION_TIME = 45
 
 DEFAULT_CAPACITY = 16
 CAP_ARRAY = [8, 16, 24, 32, 48, 64]
@@ -64,9 +66,9 @@ EPR_BUDGET = 2*EPR_UNIT
 '''
     Compiler settings:
 '''
-HINT_LOOKAHEAD_DEPTH = 256
-EIF_LA_LOOKAHEAD_DEPTH = 128
-LOOKAHEAD_DEPTHS = [8, 16, 32, 64, 128, 256, 512]
+HINT_LOOKAHEAD_DEPTH = 4096
+EIF_LA_LOOKAHEAD_DEPTH = 256
+LOOKAHEAD_DEPTHS = [16, 64, 256, 1024, 4096, 16384]
 COMPILE_INST_COUNT = int(2*SIM_INST_COUNT)
 LOOKAHEAD_SWEEP_INST_COUNT = 20_000_000
 
@@ -77,29 +79,42 @@ OPT_INST_COUNT = 100
 
 def remote_kwargs(epr_budget=EPR_BUDGET, memory_cycle_time_ns=MEMORY_CYCLE_TIME_NS) -> dict:
     return {
-        '--regime': REGIME,
         '-rm': '',
         '--memory-cycle-time-ns': memory_cycle_time_ns,
         '--remote-memory-epr-budget': epr_budget,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
         '--reaction-time': REACTION_TIME,
-        '-skip': 1
+        '-skip': 1,
+        '--compute-code-distance': 29,
+        '--memory-code-distance', 30
     }
 
 def local_kwargs(memory_cycle_time_ns=BASELINE_MEMORY_CYCLE_TIME_NS) -> dict:
     return {
-        '--regime': REGIME,
         '--memory-cycle-time-ns': memory_cycle_time_ns,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
-        '--reaction-time': REACTION_TIME
+        '--reaction-time': REACTION_TIME,
+        '--compute-code-distance': 29,
+        '--memory-code-distance', 30
     }
 
+@cache
 def total_program_instructions(workload: str) -> int:
-    if get_workload_name(workload) == 'BQ_grover_3sat_schoning_1710':
-        # The optimized Grover trace has no benchmarks/stats entry. Measured
-        # with qs_report on benchmarks/bin/optimized/BQ_grover_3sat_schoning_1710.xz.
-        return 233_895_889
-    return get_total_inst_count_for_workload(workload)
+    report = subprocess.run(
+        ['./build/qs_report', workload, '-pp', '1000000000000'],
+        capture_output=True, text=True, check=True,
+    )
+    for line in report.stdout.splitlines():
+        fields = line.split()
+        if fields and fields[0] == 'UNROLLED_INST_COUNT':
+            count = int(fields[1])
+            name = get_workload_name(workload)
+            if name == 'BQ_gidney25_rsa2048_256_of_20805':
+                return (count * 20805 + 128) // 256
+            if name == 'BQ_beauregard_shor_rsa256_iter_4':
+                return count * 256 // 4
+            return count
+    raise ValueError(f'qs_report did not report UNROLLED_INST_COUNT for {workload}')
 
 ##############################################
 ##############################################

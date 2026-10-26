@@ -581,11 +581,14 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                     {
                         const auto event = t_producer_->next_event_cycle();
                         if (event)
-                            retry = std::max(retry, convert_cycles_between_frequencies(
-                                    *event, t_producer_->freq_khz, freq_khz));
+                        {
+                            cycle_type t = convert_cycles_between_frequencies(*event, t_producer_->freq_khz, freq_khz);
+                            retry = std::max(retry, t);
+                        }
                     }
                     skip_cycle_target_ = skip_cycle_target_ ? std::min(*skip_cycle_target_, retry) : retry;
                 }
+
                 if (result.progress)
                 {
                     update_instruction_stats_before_retire(executed_inst);

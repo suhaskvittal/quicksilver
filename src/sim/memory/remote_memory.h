@@ -37,6 +37,8 @@ public:
 private:
     BulkProducer* epr_producer_;
     std::vector<cycle_type> epr_producer_adapter_ready_;
+    // Production time of the resource batch selected for the current access.
+    cycle_type access_resource_ready_cycle_{0};
 
     // This is a variable to speedup the pattern of `can_consume_epr() --> consume_epr()`
     mutable size_t epr_adapter_idx_{};
@@ -54,8 +56,12 @@ protected:
 private:
     bool can_consume_epr(size_t amt) const;
     void consume_epr(size_t amt, cycle_type);
+    cycle_type resource_ready_cycle(size_t amt) const;
 
     size_t epr_adapter_count() const;
+
+    cycle_type intern_block_ready_cycle(size_t idx) const { return T::block_ready_cycle(idx); }
+    cycle_type block_ready_cycle(size_t idx) const override;
 };
 
 ////////////////////////////////////////////////////////////
