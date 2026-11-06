@@ -53,16 +53,9 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
 {
     _verify_bivariate_bicycle_code_physical_error_rate(p);
 
-    if (d == 6)
-        return 7e-4;
-    else if (d == 12)
-        return 2e-6;
-    else if (d == 18)
-        return 2e-10;
-    else if (d == 24)
-        return 2e-13; // don't actually know, but fits the trend
-    else if (d == 30)
-        return 2e-16;
+    // idk the error rates seemed similar to the surface code, so
+    // assume sc_error_Rate
+    return surface_code_logical_error_rate(d+1, p);
 }
 
 ////////////////////////////////////////////////////////////

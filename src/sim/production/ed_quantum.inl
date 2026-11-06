@@ -38,7 +38,7 @@ ideal_epr_distribution(size_t memory_code_distance)
         .is_distiller = false,
         .d_input_states = 0,
         .d_output_states = 1,
-        .buffer_size = 8,
+        .buffer_size = 1000,
         .infidelity = 0.0,
         .physical_qubit_count = 0,
         .cycles_per_production = 4 * memory_code_distance,

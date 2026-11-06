@@ -30,13 +30,13 @@ constexpr size_t
 bivariate_bicycle_code_physical_qubit_count(size_t d)
 {
     const size_t scaling_factor = 1 << (d/6-1);
-    return (2*72 + 50)*scaling_factor;  // 45 is for the adapter
+    return (2*72 + 50)*scaling_factor;  // 50 is for the ancilla system
 }
 
 constexpr size_t
 bivariate_bicycle_code_logical_qubit_count(size_t d)
 {
-    return 12;
+    return 11;  // one qubit is lost as a probe
 }
 
 ////////////////////////////////////////////////////////////

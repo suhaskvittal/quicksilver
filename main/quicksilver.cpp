@@ -10,8 +10,7 @@
 #include "sim/configuration/resource_estimation.h"
 #include "sim/compute_subsystem.h"
 #include "sim/driver.h"
-#include "sim/memory/bivariate_bicycle.h"
-#include "sim/memory/remote_memory.h"
+#include "sim/memory/qldpc_memory.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 
@@ -73,6 +72,7 @@ main(int argc, char* argv[])
     int64_t factory_physical_qubit_budget;
 
     bool    remote_memory;
+    int64_t remote_memory_ed_protocol;
     int64_t remote_memory_epr_budget;
 
     int64_t oc_base_ro_latency;
@@ -137,7 +137,8 @@ main(int argc, char* argv[])
         /*
          *
          * */
-        .optional("-rm", "--remote-memory", "Use remote EPR distillation instead of ideal EPR distribution", remote_memory, false)
+        .optional("-rm", "--remote-memory", "Enable remote EPR distillation for memory access", remote_memory, false)
+        .optional("", "--remote-memory-ed-protocol-id", "Entanglement distillation protocol", remote_memory_ed_protocol, 1)
         .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production", remote_memory_epr_budget, 100000)
 
         /*
@@ -223,37 +224,31 @@ main(int argc, char* argv[])
                                     : 0;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
 
-    /* Every memory access uses EPR pairs, ideally distributed unless -rm is set. */
-
-    auto* epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
-    sim::configuration::Allocation epr_alloc{};
-    if (remote_memory)
-    {
-        std::vector<sim::ProducerQuantum> ed_specs{
-            sim::ed_protocol_2a(sim::EDImplMethod::DISAGGREGATED_TYPE_A),
-            sim::ed_protocol_2b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
-        epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
-
-        for (const auto& [quantum, count] : epr_alloc.levels)
-            epr_producer->add_level(quantum, count);
-    }
-    else
-    {
-        const auto quantum = sim::ideal_epr_distribution(memory_code_distance);
-        epr_producer->add_level(quantum, 1);
-        epr_alloc.estimated_throughput = m_freq_khz * 1e3 / quantum.cycles_per_production;
-    }
+    /* Remote memory accesses consume EPR pairs from the distillation producer. */
 
     std::vector<sim::MemoryLevel*> memory_subsystem;
+    sim::BulkProducer* epr_producer{nullptr};
+    sim::configuration::Allocation epr_alloc{};
     if (main_memory_qubits > 0)
     {
-        auto* bb_memory = new sim::RemoteMemory<sim::BBMemory>(m_freq_khz,
-                                                            main_memory_qubits,
-                                                            memory_block_physical_qubits,
-                                                            memory_block_capacity,
-                                                            memory_code_distance,
-                                                            epr_producer);
-        memory_subsystem.push_back(bb_memory);
+        if (remote_memory)
+        {
+            epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
+            std::vector<sim::ProducerQuantum> ed_specs;
+            if (remote_memory_ed_protocol == 1)
+                ed_specs = {sim::ed_protocol_1a(sim::EDImplMethod::DISAGGREGATED_TYPE_A), sim::ed_protocol_1b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+            else if (remote_memory_ed_protocol == 2)
+                ed_specs = {sim::ed_protocol_2a(sim::EDImplMethod::DISAGGREGATED_TYPE_A), sim::ed_protocol_2b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+            else
+                std::cerr << "quicksilver: unexpected ED protocol = " << remote_memory_ed_protocol << _die{};
+            epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
+
+            for (const auto& [quantum, count] : epr_alloc.levels)
+                epr_producer->add_level(quantum, count);
+        }
+        memory_subsystem.push_back(new sim::QLDPCMemory(m_freq_khz, main_memory_qubits,
+                                                        memory_block_physical_qubits, memory_block_capacity,
+                                                        memory_code_distance, {}, epr_producer));
     }
 
     /* initialize compute subsystem */
@@ -399,8 +394,11 @@ main(int argc, char* argv[])
     std::cout << "FACTORY_FOOTPRINT\n";
     print_stat_line(std::cout, "    TOTAL", ms_alloc.physical_qubit_count);
 
-    std::cout << "EPR_FOOTPRINT\n";
-    print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
+    if (epr_producer != nullptr)
+    {
+        std::cout << "EPR_FOOTPRINT\n";
+        print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
+    }
 
     const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint
                                         + ms_alloc.physical_qubit_count + epr_alloc.physical_qubit_count;
@@ -420,7 +418,7 @@ main(int argc, char* argv[])
 
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
     print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
-    if (remote_memory)
+    if (epr_producer != nullptr)
     {
         // calculate L0 ingress rate (physical EPR generation rate)
         auto [l0_q, l0_n] = epr_alloc.levels[0];
@@ -435,9 +433,9 @@ main(int argc, char* argv[])
     delete driver;
     delete compute_subsystem;
     delete t_producer;
-    delete epr_producer;
     for (auto* m : memory_subsystem)
         delete m;
+    delete epr_producer;
 
     return 0;
 }
@@ -489,8 +487,8 @@ get_number_of_qubits(std::string_view trace)
 std::vector<sim::ProducerQuantum>
 get_default_factory_specifications(int64_t ll_buffer_capacity)
 {
-    sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);              // d = 3 color code cultivation
-    sim::ProducerQuantum l2 = sim::t_15to1_distillation(25, 11, 11, l1.infidelity);  // 15:1, (dx,dz,dm) = (25,11,11)
+    sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);
+    sim::ProducerQuantum l2 = sim::t_15to1_distillation(27, 15, 15, l1.infidelity);
     l2.buffer_size = ll_buffer_capacity;
 
     return {l1, l2};

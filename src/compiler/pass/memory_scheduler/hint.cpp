@@ -322,45 +322,41 @@ _cst_find_best_active_set_complex(const std::vector<CSTNode*>& entry_points, siz
     active_set_type best_active_set;
     double best_score{-1.0};
 
-    for (size_t k = active_set_capacity; k > 0; k--)
+    for (size_t k = active_set_capacity; k >= active_set_capacity/2; k--)
     {
         for (const auto* x : nodes_by_size[k-1])
         {
-            /*
-            // Check if `x` by itself is good enough:
             double xs = _cst_score(x);
             if (xs > best_score)
             {
                 best_score = xs;
                 best_active_set = x->qubits;
             }
-            */
-
-            // Skip combination search if already at full capacity:
-            if (k == active_set_capacity)
-                continue;
 
             // Try combining with disjoint active sets of complementary size:
             size_t complement_size = active_set_capacity - k;
             if (complement_size > active_set_capacity || complement_size == 0)
                 continue;
 
-            for (const auto* y : nodes_by_size[complement_size - 1])
+            for (size_t s = complement_size; s > 1; s--)
             {
-                // Make sure the active sets are disjoint:
-                bool have_common_qubit = std::any_of(x->qubits.begin(), x->qubits.end(),
-                                                     [y] (qubit_type q) { return y->qubits.count(q); });
-                if (have_common_qubit)
-                    continue;
-
-                // Compute the score of the combined set:
-                double combined_score = _cst_score(x->compute_count + y->compute_count,
-                                                   x->memory_count + y->memory_count);
-                if (combined_score > best_score)
+                for (const auto* y : nodes_by_size[s-1])
                 {
-                    best_score = combined_score;
-                    best_active_set = x->qubits;
-                    best_active_set.insert(y->qubits.begin(), y->qubits.end());
+                    // Make sure the active sets are disjoint:
+                    bool have_common_qubit = std::any_of(x->qubits.begin(), x->qubits.end(),
+                                                         [y] (qubit_type q) { return y->qubits.count(q); });
+                    if (have_common_qubit)
+                        continue;
+
+                    // Compute the score of the combined set:
+                    double combined_score = _cst_score(x->compute_count + y->compute_count,
+                                                       std::max(x->memory_count, y->memory_count));
+                    if (combined_score > best_score)
+                    {
+                        best_score = combined_score;
+                        best_active_set = x->qubits;
+                        best_active_set.insert(y->qubits.begin(), y->qubits.end());
+                    }
                 }
             }
         }

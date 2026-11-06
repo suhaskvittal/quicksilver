@@ -119,7 +119,7 @@ set(SIM_FILES
     src/sim/driver.cpp
     src/sim/driver/topols.cpp
     src/sim/driver/rdr.cpp
-    src/sim/memory/bivariate_bicycle.cpp
+    src/sim/memory/qldpc_memory.cpp
     src/sim/memory_level.cpp
     src/sim/operable.cpp
     src/sim/production.cpp

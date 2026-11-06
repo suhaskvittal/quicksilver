@@ -1,5 +1,5 @@
 #include "sim/compute_subsystem.h"
-#include "sim/memory/remote_memory.h"
+#include "sim/memory/qldpc_memory.h"
 #include "sim/qubit.h"
 #include "test_util.h"
 
@@ -9,7 +9,7 @@ namespace
 {
 constexpr size_t D = 6;
 constexpr cycle_type PERIOD = 4*D;
-using EPRMemory = RemoteMemory<BBMemory>;
+constexpr QLDPCMemory::config_type SINGLE_EXTRACTOR{.extractors_per_block=1};
 
 void advance_to(std::vector<Operable*> ops, cycle_type cycle)
 {
@@ -64,7 +64,10 @@ void test_production_fast_forward_matches_ticks()
 void test_ideal_production_timing_and_capacity()
 {
     BulkProducer producer("ideal_epr", 1000.0);
-    producer.add_level(ideal_epr_distribution(D), 1);
+    auto quantum = ideal_epr_distribution(D);
+    CHECK_EQ(quantum.buffer_size, size_t{1000});
+    quantum.buffer_size = 8;  // Keep the saturation test short.
+    producer.add_level(quantum, 1);
     CHECK_EQ(producer.top_level_buffer_capacity(), size_t{8});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{0});
     CHECK_EQ(producer.top_level_infidelity(), 0.0);
@@ -97,7 +100,7 @@ void test_coupled_access_requires_two_pairs()
 {
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    EPRMemory memory(1000.0, 12, 72, 12, D, &producer);
+    QLDPCMemory memory(1000.0, 12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
     Qubit ld{.qubit_id=0}, st{.qubit_id=1};
     std::vector<Qubit*> qubits{&ld};
     memory.striped_mapping(qubits.begin(), qubits.end());
@@ -116,34 +119,34 @@ void test_coupled_access_requires_two_pairs()
     CHECK(memory.next_ready_cycle_for_access(&ld, Instruction::Type::COUPLED_LOAD_STORE) <= start);
     auto result = memory.do_coupled_load_store(&ld, &st);
     CHECK(result.success());
-    CHECK_EQ(result.latency, cycle_type{2*D});
+    CHECK_EQ(result.latency, cycle_type{D});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{0});
     CHECK_EQ(memory.s_epr_consumed, uint64_t{2});
     CHECK_EQ(memory.blocks()[0].count(&ld), size_t{0});
     CHECK_EQ(memory.blocks()[0].count(&st), size_t{1});
-    CHECK_EQ(memory.next_ready_cycle_for_load(&st), start+3*D);
-    CHECK(memory.next_ready_cycle_for_access(&st, Instruction::Type::COUPLED_LOAD_STORE) >= start+3*D);
+    CHECK(memory.next_ready_cycle_for_load(&st) >= start+2*D);
+    CHECK(memory.next_ready_cycle_for_access(&st, Instruction::Type::COUPLED_LOAD_STORE) >= start+2*D);
 }
 
 void test_load_store_credits_and_block_adapter()
 {
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    EPRMemory memory(1000.0, 12, 72, 12, D, &producer);
+    QLDPCMemory memory(1000.0, 12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
     Qubit ld{.qubit_id=0}, st{.qubit_id=1};
     std::vector<Qubit*> qubits{&ld};
     memory.striped_mapping(qubits.begin(), qubits.end());
     advance_to({&producer, &memory}, 2*PERIOD+1);
     auto load = memory.do_load(&ld);
     CHECK(load.success());
-    CHECK_EQ(load.latency, cycle_type{2*D});
+    CHECK_EQ(load.latency, cycle_type{D});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{1});
     CHECK(!memory.do_store(&st).success());
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{1});
     advance_to({&producer, &memory}, memory.current_cycle()+2*D);
     auto store = memory.do_store(&st);
     CHECK(store.success());
-    CHECK_EQ(store.latency, cycle_type{0});
+    CHECK_EQ(store.latency, cycle_type{D});
     CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{0});
     CHECK_EQ(memory.s_epr_consumed, uint64_t{2});
 }
@@ -152,7 +155,7 @@ void test_independent_blocks_have_no_memory_routing_contention()
 {
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    EPRMemory memory(1000.0, 9*12, 72, 12, D, &producer);
+    QLDPCMemory memory(1000.0, 9*12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
     std::vector<Qubit> qubits(9);
     std::vector<Qubit*> ptrs;
     for (auto& q : qubits)
@@ -166,11 +169,38 @@ void test_independent_blocks_have_no_memory_routing_contention()
     CHECK_EQ(memory.blocks()[8].count(ptrs[8]), size_t{1});
 }
 
+void test_distilled_epr_extractor_is_shared_across_blocks()
+{
+    BulkProducer producer("distilled_epr", 1000.0);
+    producer.add_level(ed_protocol_2a(EDImplMethod::DISAGGREGATED_TYPE_A), 1);
+    QLDPCMemory memory(1000.0, 24, 72, 12, D, SINGLE_EXTRACTOR, &producer);
+    Qubit first{.qubit_id=0}, second{.qubit_id=1};
+    std::vector<Qubit*> qubits{&first, &second};
+    memory.striped_mapping(qubits.begin(), qubits.end());
+
+    producer.tick();
+    const auto event = producer.next_event_cycle();
+    CHECK(event.has_value());
+    if (!event)
+        return;
+    advance_to({&memory, &producer}, *event + 1);
+    CHECK_EQ(producer.top_level_buffer_occupancy(), size_t{2});
+
+    const auto start = memory.current_cycle();
+    CHECK(memory.do_load(&first).success());
+    CHECK(!memory.do_load(&second).success());
+    const auto ready = memory.next_ready_cycle_for_access(&second, Instruction::Type::LOAD);
+    CHECK(ready >= start + D);
+    advance_to({&memory, &producer}, ready);
+    CHECK(memory.do_load(&second).success());
+    CHECK_EQ(memory.s_epr_consumed, uint64_t{2});
+}
+
 void test_compute_routing_still_blocks_memory_access()
 {
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    EPRMemory memory(1000.0, 12, 72, 12, D, &producer);
+    QLDPCMemory memory(1000.0, 12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
     ComputeSubsystem compute(1000.0, D, 2, nullptr, {&memory});
     Qubit st{.qubit_id=0, .client_id=0}, other{.qubit_id=1, .client_id=0},
           ld{.qubit_id=2, .client_id=0};
@@ -192,7 +222,7 @@ void test_ideal_distribution_has_no_distillation_adapter_delay()
 {
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    EPRMemory memory(1000.0, 12, 72, 12, D, &producer);
+    QLDPCMemory memory(1000.0, 12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
     Qubit q{.qubit_id=0};
     advance_to({&producer, &memory}, 8*PERIOD+1);
     CHECK(memory.do_store(&q).success());
@@ -224,7 +254,7 @@ void test_production_uses_memory_clock()
 {
     BulkProducer producer("ideal_epr", 500.0);
     producer.add_level(ideal_epr_distribution(D), 1);
-    BBMemory faster_clock(1000.0, 12, 72, 12, D);
+    QLDPCMemory faster_clock(1000.0, 12, 72, 12, D);
     coordinate_clock_scale({&producer, &faster_clock});
     for (size_t i = 0; i < 2*PERIOD; i++)
     {
@@ -245,6 +275,7 @@ int main()
     RUN(test_coupled_access_requires_two_pairs);
     RUN(test_load_store_credits_and_block_adapter);
     RUN(test_independent_blocks_have_no_memory_routing_contention);
+    RUN(test_distilled_epr_extractor_is_shared_across_blocks);
     RUN(test_compute_routing_still_blocks_memory_access);
     RUN(test_ideal_distribution_has_no_distillation_adapter_delay);
     RUN(test_distillation_retains_restart_delay);

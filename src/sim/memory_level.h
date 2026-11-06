@@ -136,8 +136,7 @@ public:
     /*
      * True if an access of the given type touching `q` currently has the EPR credit it
      * would need to proceed (2 credits for `COUPLED_LOAD_STORE`, 1 otherwise). Trivially
-     * true for the bare substrate; `RemoteMemory` checks the shared credit pool
-     * for both ideal baseline distribution and remote distillation.
+     * QLDPCMemory checks the shared EPR credit pool when a producer is present.
      * */
     virtual bool has_epr_credit(Qubit*, Instruction::Type) const { return true; }
 

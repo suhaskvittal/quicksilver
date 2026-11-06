@@ -21,7 +21,7 @@ Not a test itself — the shared assertion harness used by every file below.
 ## test_memory_level.cpp
 
 Tests `MemoryLevel::striped_mapping` (`sim/memory_level.h`), exercised
-through the concrete `BBMemory` subclass. `striped_mapping` round-robins a
+through the concrete `QLDPCMemory` subclass. `striped_mapping` round-robins a
 range of qubits across a level's code blocks (qubit at position `i` goes to
 block `i % num_blocks`).
 
@@ -42,12 +42,13 @@ block `i % num_blocks`).
 Checks EPR-backed memory access for both baseline ideal distribution and the
 existing remote distillation producer:
 
-- Baseline production starts empty, emits one perfect pair every `4d` memory
-  cycles, holds at most eight pairs, and resumes after buffer space is freed.
+- Ideal production starts empty and emits one perfect pair every `4d` memory
+  cycles. The saturation test uses an eight-pair buffer; the default is 1000.
 - Loads and stores each consume one pair; coupled load/store consumes two.
   Failed accesses preserve credits and memory contents.
-- Block adapters still serialize accesses to the same block; independent blocks
+- A single extractor serializes accesses to the same block; independent blocks
   can access memory concurrently without a memory bus.
+- Distilled EPR extractors contend across program blocks.
 - Compute-side bus reservations still block memory accesses without consuming
   EPR credits.
 - Production follows the memory clock and distillation retains its existing

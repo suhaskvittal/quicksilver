@@ -2,13 +2,15 @@
 
 from scripts.common import *
 from functools import cache
-import subprocess
+from pathlib import Path
+import shlex
 from sys import argv
 
 ##############################################
 ##############################################
 
 PROJECT = 'hint_micro2026'
+WORKLOAD_REPORT_DIR = Path('benchmarks/workload_reports')
 
 '''
     Use the optimized traces for every study. This intentionally does not use
@@ -40,11 +42,11 @@ WORKLOADS = [
 '''
 SIM_INST_COUNT = 100_000_000
 PRINT_PROGRESS = SIM_INST_COUNT
-FACTORY_BUDGET = 75000
-REACTION_TIME = 45
+FACTORY_BUDGET = 150_000
+REACTION_TIME = 27
 
 DEFAULT_CAPACITY = 16
-CAP_ARRAY = [8, 16, 24, 32, 48, 64]
+CAP_ARRAY = [8, 16, 32, 48, 64]
 
 REGIME = 'T'
 MEMORY_CYCLE_TIME_NS = 1_250_000   # remote memory: ~1042x the 1200 ns compute default
@@ -60,15 +62,15 @@ MAX_CYCLES_NO_PROGRESS = 10_000_000
 # `--remote-memory-epr-budget`, not a count of ED units). The base remote-memory
 # runs use 2*EPR_UNIT = 50k physical qubits; the ED sensitivity sweep scales the
 # same unit by u in {4, 8, 16} -> 100k / 200k / 400k.
-EPR_UNIT = 25_000
+EPR_UNIT = 50_000
 EPR_BUDGET = 2*EPR_UNIT
 
 '''
     Compiler settings:
 '''
-HINT_LOOKAHEAD_DEPTH = 4096
+HINT_LOOKAHEAD_DEPTH = 256
 EIF_LA_LOOKAHEAD_DEPTH = 256
-LOOKAHEAD_DEPTHS = [16, 64, 256, 1024, 4096, 16384]
+LOOKAHEAD_DEPTHS = [16, 32, 64, 128, 256, 512]
 COMPILE_INST_COUNT = int(2*SIM_INST_COUNT)
 LOOKAHEAD_SWEEP_INST_COUNT = 20_000_000
 
@@ -81,12 +83,13 @@ def remote_kwargs(epr_budget=EPR_BUDGET, memory_cycle_time_ns=MEMORY_CYCLE_TIME_
     return {
         '-rm': '',
         '--memory-cycle-time-ns': memory_cycle_time_ns,
+        '--remote-memory-ed-protocol-id': 1,
         '--remote-memory-epr-budget': epr_budget,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
         '--reaction-time': REACTION_TIME,
         '-skip': 1,
-        '--compute-code-distance': 29,
-        '--memory-code-distance', 30
+        '--compute-code-distance': 25,
+        '--memory-code-distance': 24
     }
 
 def local_kwargs(memory_cycle_time_ns=BASELINE_MEMORY_CYCLE_TIME_NS) -> dict:
@@ -94,27 +97,29 @@ def local_kwargs(memory_cycle_time_ns=BASELINE_MEMORY_CYCLE_TIME_NS) -> dict:
         '--memory-cycle-time-ns': memory_cycle_time_ns,
         '--max-cycles-no-progress': MAX_CYCLES_NO_PROGRESS,
         '--reaction-time': REACTION_TIME,
-        '--compute-code-distance': 29,
-        '--memory-code-distance', 30
+        '-skip': 1,
+        '--compute-code-distance': 25,
+        '--memory-code-distance': 24,
     }
 
 @cache
 def total_program_instructions(workload: str) -> int:
-    report = subprocess.run(
-        ['./build/qs_report', workload, '-pp', '1000000000000'],
-        capture_output=True, text=True, check=True,
-    )
-    for line in report.stdout.splitlines():
+    report_path = WORKLOAD_REPORT_DIR / f'{get_workload_name(workload)}.out'
+    if not report_path.is_file():
+        raise FileNotFoundError(f'{report_path}: run scripts/generate_workload_reports.sh, then execute commands.out')
+    for line in report_path.read_text().splitlines():
         fields = line.split()
         if fields and fields[0] == 'UNROLLED_INST_COUNT':
             count = int(fields[1])
-            name = get_workload_name(workload)
-            if name == 'BQ_gidney25_rsa2048_256_of_20805':
-                return (count * 20805 + 128) // 256
-            if name == 'BQ_beauregard_shor_rsa256_iter_4':
-                return count * 256 // 4
             return count
-    raise ValueError(f'qs_report did not report UNROLLED_INST_COUNT for {workload}')
+    raise ValueError(f'{report_path}: qs_report did not report UNROLLED_INST_COUNT')
+
+
+def report_commands():
+    for workload in WORKLOADS:
+        report_path = WORKLOAD_REPORT_DIR / f'{get_workload_name(workload)}.out'
+        command = shlex.join(('./build/qs_report', workload, '-pp', '1000000000000'))
+        print(f'{command} > {shlex.quote(str(report_path))}')
 
 ##############################################
 ##############################################
@@ -160,6 +165,9 @@ experiment = argv[1]
 if experiment == 'report_comparison':
     report_comparison()
 
+elif experiment == 'report_commands':
+    report_commands()
+
 elif experiment == 'compile_eif':
     for w in WORKLOADS:
         for a in CAP_ARRAY:
@@ -168,9 +176,10 @@ elif experiment == 'compile_eif':
 elif experiment == 'compile_eif_la':
     for w in WORKLOADS:
         for a in CAP_ARRAY:
-            for ld in LOOKAHEAD_DEPTHS:
+            depths = LOOKAHEAD_DEPTHS if (a == DEFAULT_CAPACITY) else [EIF_LA_LOOKAHEAD_DEPTH]
+            for ld in depths:
                 run_memory_scheduler(w, PROJECT, f'eif_la_ld{ld}_a{a}', active_set_capacity=a,
-                                    inst_limit=COMPILE_INST_COUNT if ld == EIF_LA_LOOKAHEAD_DEPTH else LOOKAHEAD_SWEEP_INST_COUNT,
+                                    inst_limit=COMPILE_INST_COUNT,
                                     scheduler_id=0,
                                     kwargs={
                                         '--eif-lookahead-depth': ld
@@ -179,9 +188,10 @@ elif experiment == 'compile_eif_la':
 elif experiment == 'compile_hint':
     for w in WORKLOADS:
         for a in CAP_ARRAY:
-            for ld in LOOKAHEAD_DEPTHS:
+            depths = LOOKAHEAD_DEPTHS if (a == DEFAULT_CAPACITY) else [HINT_LOOKAHEAD_DEPTH]
+            for ld in depths:
                 run_memory_scheduler(w, PROJECT, f'hint_ld{ld}_a{a}', active_set_capacity=a,
-                                    inst_limit=COMPILE_INST_COUNT if ld == HINT_LOOKAHEAD_DEPTH else LOOKAHEAD_SWEEP_INST_COUNT,
+                                    inst_limit=COMPILE_INST_COUNT,
                                     scheduler_id=1,
                                     kwargs={
                                         '--hint-lookahead-depth': ld,
