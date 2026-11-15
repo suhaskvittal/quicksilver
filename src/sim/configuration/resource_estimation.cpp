@@ -38,7 +38,14 @@ double
 surface_code_logical_error_rate(size_t _d, double p)
 {
     const double d = static_cast<double>(_d);
-    return 0.1 * std::pow(100*p, 0.5*(d+1));
+
+    // this is a compute LER model for Libra (Cody Jones's surface code decoder) that I computed
+    // manually
+    // 0.045316423 * (p / 0.0067174571) ** (0.59777057 * d)
+    const double A = 0.045316423,
+                 PTH = 0.0067174571,
+                 B = 0.59777057;
+    return A * std::pow(p/PTH, B*d);
 }
 
 double
@@ -46,14 +53,9 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
 {
     _verify_bivariate_bicycle_code_physical_error_rate(p);
 
-    if (d == 6)
-        return 7e-5;
-    else if (d == 12)
-        return 2e-7;
-    else if (d == 18)
-        return 2e-18;
-    else  // (d = 24)
-        return 2e-25; // don't actually know, but fits the trend
+    // idk the error rates seemed similar to the surface code, so
+    // assume sc_error_Rate
+    return surface_code_logical_error_rate(d+1, p);
 }
 
 ////////////////////////////////////////////////////////////
@@ -62,13 +64,22 @@ bivariate_bicycle_code_block_error_rate(size_t d, double p)
 size_t
 surface_code_distance_for_target_logical_error_rate(double e, double p)
 {
-    constexpr double ROUNDING_TOL{0.3};  // `0.3` is arbitrary, feel free to change to your favorite float
+    // `surface_code_logical_error_rate` is per-cycle (divides the closed-form `d`-cycle
+    // estimate by `d`), so there's no closed-form inverse for `d` anymore -- `d` appears both
+    // in the exponent and as a linear divisor. `surface_code_logical_error_rate(d, p)` is
+    // monotonically decreasing in `d` for `p < 0.01`, so a linear search is sufficient (code
+    // distances of interest are small).
+    constexpr size_t D_MAX{201};
 
-    double d = 2.0 * ( (std::log(e) - std::log(0.1)) / std::log(100*p) ) - 1.0;
-    // need to round intelligently while avoiding floating point issues.
-    double _d_out = (d - std::floor(d) < ROUNDING_TOL) ? std::floor(d) : std::ceil(d);
-    size_t d_out = static_cast<size_t>(_d_out);
-    return std::max(static_cast<size_t>(d_out), size_t{2});
+    size_t d = 2;
+    while (d < D_MAX && surface_code_logical_error_rate(d, p) > e)
+        d++;
+    if (d == D_MAX)
+    {
+        std::cerr << "surface_code_distance_for_target_logical_error_rate: could not find a distance <= "
+                    << D_MAX << " achieving target error rate " << e << " at p = " << p << _die{};
+    }
+    return d;
 }
 
 size_t

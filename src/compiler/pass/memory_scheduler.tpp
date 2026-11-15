@@ -3,7 +3,10 @@
  *  date:   4 January 2026
  * */
 
+#include "compiler/pass/memory_scheduler/memory_stream.h"
+
 #include <deque>
+#include <optional>
 
 namespace compiler
 {
@@ -16,7 +19,8 @@ namespace memory_scheduler
 ////////////////////////////////////////////////////////////
 
 template <class SchedulerImpl> Stats
-run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& scheduler, Config conf)
+run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& scheduler, Config conf,
+    const MemoryStreamOptions* mstream_opts)
 {
     Stats stats;
 
@@ -29,8 +33,18 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
     for (qubit_type i = 0; i < conf.active_set_capacity; i++)
         active_set.insert(i);
 
+    /* --- memory stream instrumentation: construct writer, now that `num_qubits` is known --- */
+    std::optional<MemoryStreamWriter> mstream;
+    if (mstream_opts != nullptr)
+    {
+        mstream.emplace(*mstream_opts->strm, io.num_qubits, conf.active_set_capacity,
+                         mstream_opts->scheduler_id, mstream_opts->scheduler_name, active_set);
+    }
+    /* --- end instrumentation --- */
+
     dag_ptr  dag{new DAG{io.num_qubits}};
     int64_t  inst_done{0};
+    uint64_t compute_since_prev_epoch{0};  // memory stream instrumentation
     while (inst_done < conf.inst_compile_limit && (dag->inst_count() > 0 || !generic_strm_eof(istrm)))
     {
         const uint64_t inst_done_before{inst_done};
@@ -50,12 +64,35 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
             auto out = scheduler(active_set, dag, conf);
             assert(out.active_set.size() == conf.active_set_capacity);
 
+            /* --- memory stream instrumentation: record BEFORE `write_instructions`,
+             * which takes ownership of `out.memory_accesses` and may delete them --- */
+            if (mstream)
+            {
+                for (auto* inst : out.memory_accesses)
+                {
+                    qubit_type load  = inst->qubits.size() > 0 ? *inst->q_begin()     : -1;
+                    qubit_type evict = inst->qubits.size() > 1 ? *(inst->q_begin()+1) : -1;
+                    mstream->record_access(load, evict);
+                }
+            }
+            /* --- end instrumentation --- */
+
             io.write_instructions(out.memory_accesses.begin(), out.memory_accesses.end());
             active_set = std::move(out.active_set);
 
             stats.memory_accesses += out.memory_accesses.size();
             stats.unused_bandwidth.add(out.unused_bandwidth);
+            stats.memory_level_parallelism.add(out.memory_accesses.size());
             stats.scheduler_epochs++;
+
+            /* --- memory stream instrumentation --- */
+            if (mstream)
+            {
+                mstream->record_epoch(inst_done, compute_since_prev_epoch, out.unused_bandwidth,
+                                       dag->front_layer_size(), dag->inst_count(), active_set);
+                compute_since_prev_epoch = 0;
+            }
+            /* --- end instrumentation --- */
         }
         else
         {
@@ -66,7 +103,8 @@ run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl& sch
                 if (conf.count_whole_instructions)
                     inst_done++;
                 else
-                    inst_done += inst->uop_count();
+                    inst_done += inst->unrolled_inst_count();
+                compute_since_prev_epoch += inst->unrolled_inst_count();
             }
         }
 

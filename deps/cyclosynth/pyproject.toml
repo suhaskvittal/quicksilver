@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cyclosynth"
+version = "0.1.0"
+description = "Optimal-T-count Clifford+T synthesis for single-qubit unitaries."
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[tool.maturin]
+features = ["python"]
+# `strip = true` conflicts with Cargo.toml's `[profile.release] debug = 1`
+# (maturin refuses to strip a binary that asked for debuginfo). Leaving
+# symbols in — small wheel-size cost, easier dev profiling.
+strip = false

@@ -1,3 +1,5 @@
+# contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+# contributor: OpenAI Codex (RAD verification test, 10 November 2026)
 cmake_minimum_required(VERSION 3.20.3)
 project(quicksilver VERSION 1.0.0 LANGUAGES CXX)
 
@@ -111,20 +113,17 @@ set(COMPILER_FILES
     src/compiler/pass/util.cpp)
 
 set(SIM_FILES
-    src/sim/configuration/allocator/epr.cpp
-    src/sim/configuration/allocator/magic_state.cpp
-    src/sim/configuration/predefined_ed_protocols.cpp
+    src/sim/configuration/allocator.cpp
     src/sim/configuration/resource_estimation.cpp
     src/sim/client.cpp
     src/sim/compute_subsystem.cpp
     src/sim/driver.cpp
+    src/sim/driver/topols.cpp
     src/sim/driver/rdr.cpp
-    src/sim/memory/bivariate_bicycle.cpp
+    src/sim/memory/qldpc_memory.cpp
     src/sim/memory_level.cpp
     src/sim/operable.cpp
     src/sim/production.cpp
-    src/sim/production/epr.cpp
-    src/sim/production/magic_state.cpp
     src/sim/routing.cpp
     src/sim.cpp)
 
@@ -175,6 +174,17 @@ target_link_libraries(qs_gen_binary PRIVATE qs_common
 
 # Rotation LUT constructor (qs_build_lut)
 
+# Contributor: Codex (GPT-6 Sol), 2 October 2026.
+# Build the native cyclosynth bridge separately with Cargo (see Cyclosynth.txt).
+option(COMPILE_V_LUT_BUILDER "Build the standalone Clifford+V LUT constructor" OFF)
+if (COMPILE_LUT_BUILDER OR COMPILE_V_LUT_BUILDER)
+set(CYCLOSYNTH_BRIDGE "${CMAKE_CURRENT_SOURCE_DIR}/deps/cyclosynth/target/release/examples/qs_rz_bridge"
+    CACHE FILEPATH "Native cyclosynth Rz synthesis bridge")
+add_executable(qs_build_lut_v main/qs_build_lut_v.cpp)
+target_compile_definitions(qs_build_lut_v PRIVATE QS_CYCLOSYNTH_BRIDGE="${CYCLOSYNTH_BRIDGE}")
+target_compile_options(qs_build_lut_v PRIVATE ${COMPILE_OPTIONS})
+endif()
+
 if (COMPILE_LUT_BUILDER)
 
 add_executable(qs_build_lut main/qs_build_lut.cpp
@@ -202,7 +212,8 @@ add_executable(qs_memory_scheduler main/qs_memory_scheduler.cpp
                                     ${COMPILER_FILES}
                                     src/compiler/pass/memory_scheduler.cpp
                                     src/compiler/pass/memory_scheduler/eif.cpp
-                                    src/compiler/pass/memory_scheduler/hint.cpp)
+                                    src/compiler/pass/memory_scheduler/hint.cpp
+                                    src/compiler/pass/memory_scheduler/memory_stream.cpp)
 target_include_directories(qs_memory_scheduler PRIVATE "src")
 target_compile_options(qs_memory_scheduler PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(qs_memory_scheduler PRIVATE qs_common)
@@ -258,6 +269,16 @@ target_link_libraries(qs_report PRIVATE qs_common)
 ###################################################
 ###################################################
 
+# V-gate (Clifford+V) synthesis reduction estimate (qs_v_synthesis_estimate)
+
+add_executable(qs_v_synthesis_estimate main/qs_v_synthesis_estimate.cpp)
+target_include_directories(qs_v_synthesis_estimate PRIVATE "src")
+target_compile_options(qs_v_synthesis_estimate PRIVATE ${COMPILE_OPTIONS})
+target_link_libraries(qs_v_synthesis_estimate PRIVATE qs_common)
+
+###################################################
+###################################################
+
 # Synthetic single-qubit T benchmark generator (qs_generate_synthetic_t_benchmark)
 
 add_executable(qs_generate_synthetic_t_benchmark main/qs_generate_synthetic_t_benchmark.cpp)
@@ -297,7 +318,8 @@ add_executable(quicksilver main/quicksilver.cpp
                             src/compiler/pass/util.cpp
                             src/compiler/pass/memory_scheduler.cpp
                             src/compiler/pass/memory_scheduler/eif.cpp
-                            src/compiler/pass/memory_scheduler/hint.cpp)
+                            src/compiler/pass/memory_scheduler/hint.cpp
+                            src/compiler/pass/memory_scheduler/memory_stream.cpp)
 target_include_directories(quicksilver PRIVATE "src")
 target_compile_options(quicksilver PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(quicksilver PRIVATE qs_simulator)
@@ -322,8 +344,10 @@ if (BUILD_TESTING)
 
     qs_add_test(test_resource_estimation)
     qs_add_test(test_memory_level)
+    qs_add_test(test_epr_memory)
     qs_add_test(test_operable)
     qs_add_test(test_routing)
+    qs_add_test(test_rad)
     qs_add_test(test_stall_monitor)
 endif()
 
@@ -370,7 +394,8 @@ if (COMPILE_ILP_OPT)
     add_executable(qs_memory_optimality main/qs_memory_optimality.cpp
                                         src/compiler/pass/memory_scheduler.cpp
                                         src/compiler/pass/memory_scheduler/eif.cpp
-                                        src/compiler/pass/memory_scheduler/hint.cpp)
+                                        src/compiler/pass/memory_scheduler/hint.cpp
+                                        src/compiler/pass/memory_scheduler/memory_stream.cpp)
     target_include_directories(qs_memory_optimality PRIVATE "src")
     # Intentionally omit ${COMPILE_OPTIONS} (LTO/-march=native) here: the driver
     # is not hot (the solve happens inside OR-Tools, already optimized), and it

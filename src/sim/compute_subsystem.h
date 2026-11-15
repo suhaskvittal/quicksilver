@@ -1,6 +1,9 @@
 /*
  *  author: Suhas Vittal
  *  date:   11 March 2026
+ *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (phenomenological decoder integration, 10 November 2026)
+ *  contributor: OpenAI Codex (RAD decoder access, 10 November 2026)
  * */
 
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
@@ -9,9 +12,12 @@
 #include "globals.h"
 #include "instruction.h"
 #include "sim/production.h"
+#include "sim/decoder_subsystem.h"
 #include "sim/memory_level.h"
 #include "sim/routing/multi_channel_bus.h"
+#include "sim/routing/edpc_layout.h"
 
+#include <type_traits>
 #include <vector>
 
 namespace sim
@@ -25,7 +31,6 @@ class ComputeSubsystem : public Operable
 public:
     using inst_ptr = Instruction*;
     using local_storage_type = std::vector<Qubit*>;
-    using production_level_type = std::vector<ProducerBase*>;
     using memory_subsystem_type = std::vector<MemoryLevel*>;
     
     /*
@@ -40,17 +45,18 @@ public:
     };
 
     /*
-     * Routing implementation:
+     * Routing translator (translates qubits to a unique routing id) and data types
      * */
-    struct routing_type : routing::MultiChannelBus<routing_type>
+    struct routing_translator
     {
-        using routing::MultiChannelBus<routing_type>::id_type;
-
         ComputeSubsystem* c;
 
-        routing_type(ComputeSubsystem*);
-        id_type translate(Qubit*) const;
+        routing_translator(ComputeSubsystem*);
+        routing::id_type translate(Qubit*) const;
     };
+
+    enum class RoutingLayout { BUS, EDPC };
+    using routing_ptr = std::unique_ptr<RoutingBase<routing_translator>>;
 
     /*
      * Array type for tracking instruction frequency
@@ -67,6 +73,7 @@ public:
      * This is mainly used so that we know where to route.
      * */
     const size_t dedicated_ancilla_count;
+    const RoutingLayout routing_layout;
 
     /*
      * Statistics:
@@ -74,10 +81,11 @@ public:
     inst_usage_array s_inst_executed_by_type{};
 private:
     local_storage_type local_memory_;
-    production_level_type t_factories_;
+    BulkProducer* t_producer_;
     memory_subsystem_type memory_subsystem_;
+    DecoderSubsystemBase* decoder_subsystem_;
 
-    routing_type routing_;
+    routing_ptr routing_;
 
     local_storage_type dedicated_ancilla_;
 
@@ -96,8 +104,10 @@ public:
     ComputeSubsystem(double freq_khz, 
                         size_t code_distance, 
                         size_t local_memory_capacity,
-                        production_level_type t_factories,
-                        memory_subsystem_type memory_subsystem);
+                        BulkProducer* t_producer,
+                        memory_subsystem_type memory_subsystem,
+                        DecoderSubsystemBase* decoder_subsystem,
+                        RoutingLayout routing_layout = RoutingLayout::BUS);
     ~ComputeSubsystem();
 
     void initialize_qubits(std::vector<Qubit*> program_qubits);
@@ -107,7 +117,7 @@ public:
      * and the second operand are the pointers to the qubits this instruction
      * operates on.
      * */
-    execute_result_type execute_instruction(inst_ptr, std::vector<Qubit*>);
+    execute_result_type execute_instruction(inst_ptr, const std::vector<Qubit*>&);
 
     /*
      * Implementation of a rotation gate's uops using reaction-limited
@@ -138,6 +148,10 @@ public:
     bool rdr_apply_rotation_magic_state_from_surface_code(Qubit* target, Qubit* magic_state);
     bool rdr_apply_rotation_magic_state_from_memory(Qubit*);
 
+    template <class T, class U, class Callback>
+    void for_each_resource_between(T, U, cycle_type from, cycle_type to,
+                                   const Callback&) const;
+
     /*
      * `log_fidelity()` returns the natural log of the fidelity of the compute subsystem (no error
      * occurs during execution) for the given `Client*`. `scale` indicates the amount to scale
@@ -147,11 +161,20 @@ public:
     double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const; 
 
     const local_storage_type& local_memory() const { return local_memory_; }
-    const production_level_type& t_factories() const { return t_factories_; }
+    BulkProducer* t_producer() const { return t_producer_; }
+    DecoderSubsystemBase* decoder_subsystem() const { return decoder_subsystem_; }
     const memory_subsystem_type& memory_subsystem() const { return memory_subsystem_; }
     const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
+    size_t edpc_patch_count() const;
 
     size_t count_available_magic_states() const;
+
+    /*
+     * True if an access of the given type targeting `ld` currently has the EPR credit it
+     * would need (trivially true if `ld` is already in compute-local memory).
+     * */
+    bool epr_credit_available_for(Qubit* ld, Instruction::Type) const;
+    cycle_type next_memory_access_cycle(Qubit* ld, Instruction::Type) const;
 protected:
     long operate() override { return 1; }
 private:
@@ -159,8 +182,31 @@ private:
     execute_result_type do_s_like_gate(inst_ptr, Qubit*);
     execute_result_type do_cx_like_gate(inst_ptr, Qubit*, Qubit*);
     execute_result_type do_t_like_gate(inst_ptr, Qubit*);
-    execute_result_type do_memory_access(inst_ptr, std::vector<Qubit*>);
+    execute_result_type do_memory_access(inst_ptr, const std::vector<Qubit*>&);
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Implementation of `ComputeSubysstem::for_each_resource_between()`
+ * */
+
+template <class T, class U, class Callback> void
+ComputeSubsystem::for_each_resource_between(T src, U dst, cycle_type from, cycle_type to,
+                                            const Callback& callback) const
+{
+    if (routing_layout == RoutingLayout::BUS)
+    {
+        auto* bus = static_cast<const routing::MultiChannelBus<routing_translator>*>(routing_.get());
+        bus->for_each_resource_between(src, dst, from, to, callback);
+    }
+    else
+    {
+        auto* edpc = static_cast<const routing::EDPCLayout<routing_translator>*>(routing_.get());
+        edpc->for_each_resource_between(src, dst, from, to, callback);
+    }
+}
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

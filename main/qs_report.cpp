@@ -9,6 +9,7 @@
 #include "instruction.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -38,11 +39,15 @@ int main(int argc, char* argv[])
     uint64_t t_gates{0};
     uint64_t cx_cz_gates{0};
     uint64_t mem_accesses{0};
+    uint64_t hs_gates{0};
     uint64_t unrolled_insts{0};
 
     uint64_t t_gates_from_rz{0};
     uint64_t t_gates_from_rz_corr{0};
     uint64_t t_gates_from_ccx{0};
+    uint64_t corr_ratio_count{0};
+    double corr_ratio_mean{0.0};
+    double corr_ratio_m2{0.0};
 
     // Instruction-level parallelism: ASAP-layer the compute DAG. `qubit_next_layer[q]`
     // is the earliest layer a future instruction on qubit `q` can occupy; a layer holds
@@ -86,10 +91,15 @@ int main(int argc, char* argv[])
         num_layers = std::max(num_layers, layer + 1);
         compute_inst_count++;
 
+        // For rotations specifically, `u` must be computed *after* the near-Clifford skip check
+        // below decides whether this instruction is credited at all -- otherwise a silently
+        // skipped rotation (angle within 1e-11 of a Clifford multiple, which only prints when
+        // additionally < pi/8) still inflated the denominator with zero numerator credit.
         size_t u = inst->unrolled_inst_count();
         if (is_rotation_instruction(inst->type))
-            u = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return !is_software_instruction(t); });
-        unrolled_insts += u;
+            u = 0;   // filled in below, once we know whether this rotation is skipped
+        if (!is_rotation_instruction(inst->type))
+            unrolled_insts += u;
 
         if (is_memory_access(inst->type))
         {
@@ -115,8 +125,11 @@ int main(int argc, char* argv[])
             }
 
             const size_t n = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return is_t_like_instruction(t); });
+            const size_t n_all = std::count_if(inst->urotseq.begin(), inst->urotseq.end(), [] (auto t) { return !is_software_instruction(t); });
             t_gates += n;
             t_gates_from_rz += n;
+            hs_gates += n_all - n;   // Clifford (H/S-like) housekeeping ops in the synthesized sequence
+            unrolled_insts += n_all;
 
             // this has a correction, then update `t_gates_from_rz_corr`
             if (GL_USE_RDR_ISA)
@@ -124,6 +137,15 @@ int main(int argc, char* argv[])
                 const size_t n_corr = std::count_if(inst->corr_urotseq_array[0].begin(), inst->corr_urotseq_array[0].end(), 
                                                         [] (auto t) { return is_t_like_instruction(t); });
                 t_gates_from_rz_corr += n_corr;
+                // A rotation with no base T gates has no defined correction/base ratio.
+                if (n != 0)
+                {
+                    const double ratio = fpdiv(n_corr, n);
+                    ++corr_ratio_count;
+                    const double delta = ratio - corr_ratio_mean;
+                    corr_ratio_mean += delta / corr_ratio_count;
+                    corr_ratio_m2 += delta * (ratio - corr_ratio_mean);
+                }
             }
 
             theta_min = std::min(theta_min, x);
@@ -133,15 +155,19 @@ int main(int argc, char* argv[])
         {
              cx_cz_gates++;
         }
-        else if (is_toffoli_like_instruction(inst->type)) 
+        else if (is_toffoli_like_instruction(inst->type))
         {
             t_gates      += TOFFOLI_T_GATE_COUNT;
             cx_cz_gates  += TOFFOLI_CX_GATE_COUNT;
 
             t_gates_from_ccx += TOFFOLI_T_GATE_COUNT;
+            // CCX needs 2 extra H's (basis change) beyond CCZ's 13-uop T+CX decomposition;
+            // `u` (already added to `unrolled_insts` above) is the full uop count either way.
+            hs_gates += u - (TOFFOLI_T_GATE_COUNT + TOFFOLI_CX_GATE_COUNT);
         }
         else if (inst->type == Instruction::Type::H || is_s_like_instruction(inst->type))
         {
+            hs_gates += u;
         }
         else
         {
@@ -160,7 +186,9 @@ int main(int argc, char* argv[])
     double t_fraction_ccx = fpdiv(t_gates_from_ccx, unrolled_insts);
     double cx_fraction = fpdiv(cx_cz_gates, unrolled_insts);
     double mem_fraction = fpdiv(mem_accesses, unrolled_insts);
+    double hs_fraction = fpdiv(hs_gates, unrolled_insts);
     double corr_ratio = fpdiv(t_gates_from_rz_corr, t_gates_from_rz);
+    double corr_ratio_std = std::sqrt(fpdiv(corr_ratio_m2, corr_ratio_count));
 
     print_stat_line(std::cout, "NUM_QUBITS",          num_qubits);
     print_stat_line(std::cout, "T_GATES",             t_gates);
@@ -168,6 +196,7 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "T_GATES_FROM_CCX",    t_gates_from_ccx);
     print_stat_line(std::cout, "CX_CZ_GATES",         cx_cz_gates);
     print_stat_line(std::cout, "MEMORY_ACCESSES",     mem_accesses);
+    print_stat_line(std::cout, "HS_GATES",            hs_gates);
     print_stat_line(std::cout, "UNROLLED_INST_COUNT", unrolled_insts);
 
     print_stat_line(std::cout, "T_GATE_%",     100*t_fraction);
@@ -175,8 +204,11 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "T_GATE_CCX_%", 100*t_fraction_ccx);
     print_stat_line(std::cout, "CX_GATE_%",    100*cx_fraction);
     print_stat_line(std::cout, "MEM_%",        100*mem_fraction);
+    print_stat_line(std::cout, "HS_GATE_%",    100*hs_fraction);
 
     print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO", corr_ratio);
+    print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO_COUNT", corr_ratio_count);
+    print_stat_line(std::cout, "RZ(2X)_TO_RZ(X)_RATIO_STD", corr_ratio_std);
     print_stat_line(std::cout, "THETA_MIN", theta_min);
     print_stat_line(std::cout, "THETA_MAX", theta_max);
 
@@ -185,4 +217,3 @@ int main(int argc, char* argv[])
     print_stat_line(std::cout, "DAG_LAYERS",         num_layers);
     print_stat_line(std::cout, "MEAN_ILP",           fpdiv(compute_inst_count, num_layers));
 }
-

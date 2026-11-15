@@ -36,6 +36,13 @@ DAG::get_front_layer_if(const Pred& pred) const
     return front_layer_insts;
 }
 
+template <class Callback> void
+DAG::for_each_instruction_in_front_layer(const Callback& cb) const
+{
+    for (const auto& [inst, __unused_node] : front_layer_)
+        cb(inst);
+}
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 

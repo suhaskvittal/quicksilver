@@ -1,0 +1,37 @@
+RDR / RDPC revision TODOs
+Source: first page (cover letter) of ../RDR_HPCA2027_REVISION_DRAFT1.pdf
+
+Reviewer A
+[ ] A1. Sensitivity to setup: run and report sensitivity studies for compute-subsystem size and routing layout. Explain why changing compute size has little effect, and add the EDPC high-routing-space layout evaluation. Replace the Section XX placeholder.
+[ ] A2. RLTP optimization: substantiate the claimed O(n) construction and its optimality in an appendix. Confirm RLTP, baseline, and RDPC use the same factory configurations; describe the routing-contention-only RLTP optimizations. Replace Appendix XX.
+[ ] A3. DAG scheduling runtime: add the FPGA measurements supporting negligible software-side overhead. Explain the limits of offline scheduling under nondeterministic gate teleportation and identify it as future work. Replace Section XX.
+
+Reviewer B
+[ ] B1. Spacetime footprint: calculate and report RDPC's spacetime footprint, including the comparison requested by the reviewer. Replace Section XX.
+[ ] B2. Partially fault-tolerant overlap: compare RDPC qualitatively with prior work that overlaps rotation preparation, and explain which assumptions or challenges change in a fully fault-tolerant regime. Replace Section XX.
+[ ] B3. Topo-LS: explain how RDPC complements the Topo-LS construction and evaluate their combination. Replace Section XX.
+
+Reviewer C
+[ ] C1. Evaluation methodology: document the shared simulator and system setup used for RDPC and RLTP, with enough detail to support reproducibility; prepare the artifact for submission if accepted. Replace Section XX.
+[ ] C2. Total footprint: provide a complete physical-qubit footprint breakdown and explain what is included in each component. Replace Section XX.
+[ ] C3. Representative region: define where the representative region begins, how it is selected, and which measurements use it. Replace the unanswered cover-letter placeholder.
+[ ] C4. RLTP-3: show why degree 3 gives no speedup because the initial teleportation latency is insufficiently amortized.
+[ ] C5. Distribution of the angle-dependent quantity: add its standard deviation to the cited table, update the cited equation, and explain the distribution. Replace both Table XX and Equation XX.
+[ ] C6. Fidelity model: document assumptions, component error contributions, and the fidelity calculation in the revised paper. Replace Section XX.
+
+Reviewer D
+[ ] D1. PREPARE rotations: evaluate PREPARE using Ry rotations, quantify the lower space overhead, and explain why Ry-based PREPARE is used by the benchmark suites cited in the paper. Replace Section XX.
+[ ] D2. Yoked surface-code storage: quantify or model its routing overhead, include that cost in the relevant comparison, and answer the reviewer's question explicitly. This remains marked TODO in the cover letter.
+
+Reviewer E
+[ ] E1. Claimed 2x speedup: explain the source and conditions of the speedup in the revised text, and remove or qualify any unsupported claim that RDPC reduces qubit-routing bottlenecks. Replace Section XX.
+[ ] E2. Entangle-Rotate-Entangle evidence: show where this structure appears in each evaluated benchmark and support or narrow the claim about rotation-heavy algorithms.
+[ ] E3. RDPC overhead: break down the roughly 7,000-physical-qubit overhead into two ancilla surface-code qubits, yoked surface-code storage, and required routing space.
+
+Reviewer F
+[ ] F1. Alternative gate-set architectures: add a qualitative discussion of the Clifford-plus-rotation architectures raised by the reviewer and position RDPC relative to them.
+[ ] F2. Fidelity modeling: provide the additional requested details and ensure they are consistent with the response to C6. Replace Section XX.
+[ ] F3. Yoked surface code: explain the 1D yoked surface-code construction, its use as storage, and the assumptions behind its footprint and routing costs. Replace Section XX.
+
+Final pass
+[ ] Replace every Section XX, Appendix XX, Table XX, Equation XX, and unanswered placeholder in the cover letter with the final location. Check that each stated result appears in the paper and that the letter's claims match the final data.

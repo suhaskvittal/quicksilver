@@ -1,6 +1,9 @@
 /*
  *  author: Suhas Vittal
  *  date:   12 March 2026
+ *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
+ *  contributor: OpenAI Codex (RAD execution integration, 10 November 2026)
  * */
 
 #ifndef SIM_DRIVER_h
@@ -10,6 +13,7 @@
 #include "sim/client.h"
 #include "sim/compute_subsystem.h"
 #include "sim/driver/rdr.h"
+#include "sim/driver/topols.h"
 #include "sim/memory_level.h"
 #include "sim/production.h"
 #include "sim/stall_monitor.h"
@@ -20,6 +24,8 @@
 
 namespace sim
 {
+
+namespace ds { class RADController; }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -44,8 +50,8 @@ public:
      *      to add to this type if you want new stats.
      *  `StallMonitor` tracks where these stalls occur.
      * */
-    enum class Stall { MEMORY, MAGIC_STATE, RPC, EPR, SIZE };
-    using stall_monitor_type = StallMonitor<static_cast<size_t>(Stall::SIZE), Stall>;
+    enum class StallType { MEMORY, MAGIC_STATE, EPR, RDR, SIZE };
+    using stall_monitor_type = StallMonitor<static_cast<size_t>(StallType::SIZE), StallType>;
 
     /*
      * Fidelity output type
@@ -99,24 +105,34 @@ private:
     std::vector<std::pair<Qubit*, Qubit*>> context_switch_memory_access_buffer_;
 
     ComputeSubsystem* compute_subsystem_;
-    std::vector<ProducerBase*> t_factories_;
+    ds::RADController* rad_{nullptr};
+    BulkProducer* t_producer_;
+    BulkProducer* epr_producer_;
     std::vector<MemoryLevel*> memory_subsystem_;
 
     /*
      * Rotation directed runahead logic (RDR):
      * */
     driver::RotationDirectedRunahead* rdr_{nullptr};
+    driver::TopoLS* topols_{nullptr};
 
     /*
      * `stall_monitor_` manages statistics related to stalls
      * */
     stall_monitor_type stall_monitor_;
+
+    /*
+     * This is set in `fetch_and_execute_instruction()`. Corresponds to the earliest
+     * ready cycle across all stalled instructions
+     * */
+    std::optional<cycle_type> skip_cycle_target_;
 public:
     Driver(std::vector<std::string> client_trace_files, 
             size_t concurrent_clients,
             uint64_t simulation_instructions,
             ComputeSubsystem*,
-            std::vector<ProducerBase*> top_level_t_factories,
+            BulkProducer* t_producer,
+            BulkProducer* epr_producer,
             std::vector<MemoryLevel*>);
     ~Driver();
 
@@ -124,6 +140,16 @@ public:
     void print_deadlock_info(std::ostream&) const override;
 
     bool done() const;
+
+    /*
+     * In simulations where memory access latency dominates, use
+     * `skip_to_cycle()` to jump to a point where a memory access
+     * has completed.
+     * 
+     * Whenever you add something, make sure `skip_to_cycle()` remains
+     * valid (or disable it).
+     * */
+    std::optional<cycle_type> skip_to_cycle() const;
 
     /*
      * This function should be called at the end of the simulation to cleanup any
@@ -139,9 +165,11 @@ public:
     fidelity_data_type application_fidelity(int client_id, uint64_t scale_to_inst, double p) const;
 
     ComputeSubsystem* compute_subsystem() const { return compute_subsystem_; }
+    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
+    driver::TopoLS* topols() const { return topols_; }
+
     const std::vector<Client*>& clients() const { return clients_; }
     const stall_monitor_type& stall_monitor() const { return stall_monitor_; }
-    driver::RotationDirectedRunahead* rdr() const { return rdr_; }
 protected:
     long operate() override;
 private:
@@ -164,6 +192,7 @@ private:
     void retire_instruction(Client*, inst_ptr, cycle_type instruction_latency);
 
     long fetch_and_execute_instructions_from_client(Client*);
+    long execute_fixup_instruction(Client*);
 
     /*
      * Updates instruction stats when it is iterated through the `front_layer` in 
@@ -196,9 +225,9 @@ private:
      * RDR implementation -------------------------------------------------------------
      * */
 
-    enum class RDRLookupResult { RETIRE, NEEDS_CORRECTION, IN_PROGRESS, NOT_FOUND };
+    enum class RDRHandleOutcome { RETIRE, RETRY, EXECUTE };
 
-    bool rdr_handle_instruction(Client*, inst_ptr, Qubit*);
+    RDRHandleOutcome rdr_handle_instruction(Client*, inst_ptr, Qubit*);
 };
 
 ////////////////////////////////////////////////////////////

@@ -34,9 +34,10 @@ Operable::tick()
         if (progress == 0)
         {
             cycles_with_no_progress_++;
-            if (cycles_with_no_progress_ >= GL_MAX_CYCLES_WITH_NO_PROGRESS)
+            if (deadlockable && cycles_with_no_progress_ >= GL_MAX_CYCLES_WITH_NO_PROGRESS)
             {
-                std::cerr << name << ": deadlock --------------------------------------\n";
+                std::cerr << name << ": deadlock -------------------------------------- cycle = "
+                            << current_cycle() << "\n";
                 print_deadlock_info(std::cerr);
                 exit(1);
             }
@@ -94,7 +95,13 @@ void
 fast_forward_all_operables_to_time_ns(std::vector<Operable*> operables, uint64_t target_time_ns)
 {
     for (auto* op : operables)
-        op->current_cycle_ = convert_time_ns_to_cycles(target_time_ns, op->freq_khz);
+    {
+        const auto target = convert_time_ns_to_cycles(target_time_ns, op->freq_khz);
+        op->fast_forward_to_cycle(target);
+        // Preserve the next clock edge rather than retaining the pre-skip phase.
+        const double elapsed_cycles = static_cast<double>(target_time_ns) * op->freq_khz / 1e6;
+        op->leap_ = std::max(0.0, (target - elapsed_cycles) * (op->clock_scale_ + 1.0));
+    }
 }
 
 ////////////////////////////////////////////////////////////

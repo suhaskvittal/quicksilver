@@ -550,7 +550,10 @@ ProgramInfo::cancel_adjacent_rotations()
         auto& prev_inst = instructions_[i-1];
         auto& curr_inst = instructions_[i];
 
-        if (is_rotation_instruction(curr_inst->type) && is_rotation_instruction(prev_inst->type))
+        // both must be the same rotation axis (RZ or RX) on the same qubit -- not just any
+        // two rotations whose angles happen to sum to zero.
+        if (is_rotation_instruction(curr_inst->type) && curr_inst->type == prev_inst->type
+                && curr_inst->qubits[0] == prev_inst->qubits[0])
         {
             auto angle_sum = fpa::add(curr_inst->angle, prev_inst->angle);
             if (angle_sum.popcount() == 0)

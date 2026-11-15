@@ -1,0 +1,659 @@
+//! Clifford+√T synthesis backend over Z[ζ].
+//!
+//! [`SynthesizerQ`] is one of two backends behind the unified user-facing
+//! [`crate::synthesis::Synthesizer`]; the other is
+//! [`crate::synthesis::clifford_t::SynthesizerT`] (Clifford+T, Z[ω]). Code
+//! shouldn't construct `SynthesizerQ` directly — use `Synthesizer` with
+//! `sqrt_t = true`. The struct stays public so the test suite can poke at
+//! it (`pub` instead of `pub(crate)`).
+//!
+//! ## Backend (hybrid, three modes)
+//!
+//! For `k ≤ BRUTE_LIMIT` (=3): brute-force enumeration via
+//! [`crate::synthesis::clifford_sqrt_t::lattice::brute::enumerate_unitary_norm_shell`] — cheap exact-find
+//! for small Clifford+√T targets (also the lattice pipeline's oracle).
+//!
+//! For larger `k`: single-shot 16D L²-LLL + Schnorr-Euchner via
+//! [`crate::synthesis::clifford_sqrt_t::lattice::find_aligned_lattice_points_with_stop`] (with an optional BKZ-β
+//! post-pass), plus an FGKM-prefix divide-and-conquer mode (`prefix_split_search_q`)
+//! for deep `k`. Adaptive leaf budget scales exponentially in `k`.
+//!
+//! ## Reconstruction
+//!
+//! Single det-phase reconstruction: `d = det_phase_of(target)` chosen
+//! once, then `solution_to_u2q_with_det_phase(sol, k, d)` per candidate. Column-1
+//! direction extracted directly from the target (no `/√det`
+//! normalization — unlike 8D's `unitary_to_uv` — because our `d` parameter
+//! in the reconstruction already absorbs the det-phase mismatch).
+
+use crate::matrix::u2::U2Q;
+use crate::rings::ZZeta;
+use crate::rings::types::Int;
+use crate::synthesis::angle::{angle_target, Angle, DEFAULT_COL_PREC};
+use crate::synthesis::cliffords::CLIFFORD_TABLE_T;
+use crate::synthesis::decomposer::BlochDecomposer;
+use crate::synthesis::distance::{diamond_distance_u2q_float, Mat2};
+use crate::synthesis::clifford_sqrt_t::lattice::{find_aligned_lattice_points_with_stop, find_aligned_lattice_points_mpfr, IntScratch16};
+use crate::synthesis::clifford_sqrt_t::lattice::brute::{enumerate_unitary_norm_shell, uv_to_lattice_y_zeta, uv_to_lattice_y_zeta_mpfr};
+use num_complex::Complex64;
+use std::collections::HashMap;
+use std::f64::consts::PI;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Result of a synthesis call: the gate string, its lde, and the diamond
+/// distance achieved.
+///
+/// Field shape matches `crate::synthesis::clifford_t::SynthResultT`, so the
+/// unified [`crate::synthesis::Synthesizer`] wrapper can return either
+/// backend's result through one type.
+#[derive(Debug, Clone)]
+pub struct SynthResultQ {
+    /// Clifford+√T gate string in the alphabet `{H, S, T, Q, X, Y, Z}` plus
+    /// the adjoints `{q=Q†, t=T†, s=S†}` (lowercase) that the decomposer
+    /// emits when collapsing a syllable to its minimal cost-class form.
+    /// Leftmost gate = first applied, matching the rest of cyclosynth's
+    /// composition convention. `None` if the gate string couldn't be
+    /// extracted.
+    pub gates: Option<String>,
+    /// Denominator exponent of the synthesized unitary.
+    pub lde: u32,
+    /// Diamond distance to the target.
+    pub distance: f64,
+}
+
+/// Optimality certificate from [`SynthesizerQ::synthesize_exhaustive_certified`].
+///
+/// `OPT ∈ [lower_half_units, upper_half_units]` is guaranteed, where
+/// costs are in half-units (`2T + 7Q`). `certified_optimal` is true
+/// when the interval closes: the returned circuit is provably the
+/// cheapest ε-approximation over the whole gate set.
+///
+/// Soundness rests on: (1) one full (unbudgeted) enumeration at shell
+/// `k_searched` covers every circuit with reduced lde ≤ k_searched —
+/// lower-lde circuits appear as √2-scaled lattice points on the shell;
+/// (2) both det-phase parity branches are searched (q ≡ d mod 2 and
+/// the ζ-automorphism collapse mean two branches are complete);
+/// (3) anything beyond the horizon costs ≥ `cost_lb_half_units(k+1)`
+/// (verified staircase, cost_bound.rs). The certificate inherits the
+/// pipeline's numeric trust boundary (f64+dd distance checks, cap
+/// margin `bound_sq`), like every other result of this crate.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))] // certificate fields are read by the certified-optimality tests
+pub(crate) struct CostCertificate {
+    /// Cost of the returned circuit (half-units).
+    pub(crate) upper_half_units: usize,
+    /// Proven lower bound on the optimum (half-units).
+    pub(crate) lower_half_units: usize,
+    /// Horizon: every circuit with lde ≤ this was enumerated.
+    pub(crate) k_searched: u32,
+    /// `upper ≤ L(k_searched + 1)`: nothing beyond the horizon can win.
+    pub(crate) certified_optimal: bool,
+}
+
+/// Clifford+√T synthesizer over `Z[ζ]`.
+///
+/// Field names mirror `clifford_t::SynthesizerT`. Defaults in [`Self::new`].
+#[derive(Clone)]
+pub struct SynthesizerQ {
+    /// Approximation precision in diamond distance. Private: paired with
+    /// lde-window tuning in [`Self::new`]; read via [`Self::epsilon`].
+    epsilon: f64,
+    /// Reduced-basis cache shared across the lde ladder (deep-ε path);
+    /// see [`lattice::scratch::BasisCache16`]. Opt-in: reusing bases is
+    /// sound (cached transforms are bit-identical to fresh reductions —
+    /// Q(k) = M/2^k), but the freed LLL time shifts what the wall-clock
+    /// deadlines explore, so default-on awaits a cost-telemetry eval.
+    basis_cache: Arc<lattice::scratch::BasisCache16>,
+    use_basis_cache: bool,
+    /// Maximum lde to search before giving up.
+    pub(crate) max_lde: u32,
+    /// Minimum lde to start searching from.
+    pub(crate) min_lde: u32,
+    /// FGKM-prefix divide-and-conquer split parameter; `None` = single
+    /// search. Builder: [`Self::with_prefix_split_m`].
+    pub(crate) prefix_split_m: Option<u32>,
+    /// Allowed `(d_target − d_L) mod 16` offsets for a prefix to be
+    /// processed; empty = no filter. Builder: [`Self::with_inner_det_phase_filter`].
+    pub(crate) inner_det_phase_filter: Vec<u32>,
+    /// BKZ-β post-pass syllable size (0 = off). Ambient default comes from
+    /// the `CYCLOSYNTH_BKZ` env var in [`Self::new`].
+    pub(crate) bkz_block_size: u32,
+    /// Number of lde levels the dc path dispatches concurrently, with a
+    /// cross-LDE abort so the first finder cancels its peers. ε-tuned in
+    /// [`Self::new`].
+    pub(crate) parallel_lde_window: u32,
+    /// Node count a predecessor LDE must burn without finding before the
+    /// next speculative LDE launches (0 = off). Budget-triggered rather
+    /// than time-based so easy targets never pay for speculation. ε-tuned
+    /// in [`Self::new`].
+    pub(crate) parallel_lde_trigger_nodes: u64,
+    /// Enumerate all ε-close candidates and return the min-cost one
+    /// (`cost = T + (q_cost_x2/2)·Q`) instead of the first hit.
+    /// Builder: [`Self::with_optimize_cost`].
+    pub(crate) optimize_cost: bool,
+    /// m values the enum stage runs per lde (m=0 = single-search, m≥1 =
+    /// D&C with that split); empty disables the sweep. Builder:
+    /// [`Self::with_optimal_m_sweep`].
+    pub(crate) optimal_m_sweep: Vec<u32>,
+    /// Multiplier on every budget cap in optimize mode: first-hit gets an
+    /// early-bail advantage that optimal-mode walkers must buy back with
+    /// budget. Builder: [`Self::with_optimal_budget_multiplier`].
+    pub(crate) optimal_budget_multiplier: u64,
+    /// Cross-parity shared incumbent (half-units). Both branches' prefix
+    /// prunes share it, and the screens poll it as a dynamic max_lde
+    /// clamp (cost c̃ ⇒ lde ≤ c̃ + 1), which is what lets the parity
+    /// branches run concurrently instead of serially capped.
+    global_best_cost: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    /// Unrotated target + ζ₃₂ power for the odd parity branch, consulted
+    /// at ε ≤ 2e-8: the f64 rotated product carries ~1e-16 error — equal
+    /// to the radial cap width ε² at 1e-8 — so the deep router must
+    /// re-derive v in MPFR from the exact source and rotate exactly
+    /// (the rotation commutes with the prefix product).
+    deep_rot_src: Option<(Mat2, u32)>,
+    /// A branch that finishes its screen first would flood the shared
+    /// rayon pool with frontier tasks and starve the peer's still-running
+    /// screen, so frontier dispatch waits (bounded at 4× the deadline)
+    /// until both screens are done.
+    my_screen_done: Option<Arc<AtomicBool>>,
+    peer_screen_done: Option<Arc<AtomicBool>>,
+    /// Extra lde levels enumerated above the first feasible one — the
+    /// lde-vs-cost relationship is not monotone, so the cost minimum can
+    /// sit above find-lde. Builder: [`Self::with_optimal_lde_window`].
+    pub(crate) optimal_lde_window: u32,
+    /// Per-parity-branch wall deadline (ms) for the merged enum frontier
+    /// (one cost-floor-ordered stream of prefix units across all (k, m)
+    /// arms); `None` = per-(k, m) node-budget grid. Never applies
+    /// in certify mode, which needs budget-truncation semantics.
+    /// Builder: [`Self::with_optimal_deadline_ms`].
+    pub(crate) optimal_deadline_ms: Option<u64>,
+    /// Add m = 0 full-level tasks (the only variant that proves a level
+    /// exhausted) and run the floor-driven extension. Set internally by the
+    /// certified entry points, not via a builder.
+    pub(crate) certify: bool,
+    /// Wall budget (ms) for the certify extension loop above the window.
+    /// Builder: [`Self::with_certify_extra_ms`].
+    pub(crate) certify_extra_ms: u64,
+    /// Also search e^{iπ/16}·target: one parity class reaches only
+    /// circuits with Q-count ≡ d(target) (mod 2) — half the pool. Set
+    /// internally by the optimal pipeline, not via a builder.
+    pub(crate) odd_parity_branch: bool,
+    /// Override the deep-ε sequential-parity schedule: `None` = ε rule
+    /// (sequential below 2.5e-8, where each branch saturates the pool
+    /// alone); `Some(false)` = concurrent branches (less wall, slightly
+    /// higher cost). Builder: [`Self::with_seq_parity`].
+    pub(crate) seq_parity: Option<bool>,
+    /// Run enum tasks with an open det-phase filter (all 16 classes):
+    /// the closed first-hit defaults exclude classes containing cost
+    /// optima. Builder: [`Self::with_optimal_open_dr_filter`].
+    pub(crate) optimal_open_dr_filter: bool,
+    /// Q-gate cost weight in half-units of a T gate: cost is computed as
+    /// integer `2·T + q_cost_x2·Q` so it stays exactly comparable (and
+    /// CAS-able). Builder: [`Self::with_q_cost`].
+    pub(crate) q_cost_x2: usize,
+}
+
+/// Smallest lde where a generic SU(2) target is reachable within ε,
+/// per the Gaussian heuristic over the Minkowski-embedded Z[ζ]
+/// lattice. We start the search 3 below this estimate so easy targets
+/// land without an extra full-shell sweep.
+fn lattice_lde_estimate(epsilon: f64) -> u32 {
+    if !(epsilon > 0.0 && epsilon < 1.0) {
+        return 0;
+    }
+    // −log₂ε ≤ 1074 for any positive f64 ε — fits i32/u32.
+    #[allow(clippy::cast_possible_truncation)]
+    let raw = (-epsilon.log2()).ceil() as i32 - 3;
+    raw.max(0) as u32
+}
+
+/// Default enum-stage m-sweep per ε band. m=2 only earns its keep below
+/// 1e-6. Below 1e-7 the sweep runs as sequential per-m phases (see
+/// `run_optimal_search_certified`): interleaving lets m=2's prefix
+/// fan-out starve the deep m=1 units that hold the decisive finds.
+fn default_optimal_m_sweep(epsilon: f64) -> Vec<u32> {
+    if epsilon >= 1e-6 {
+        vec![1]
+    } else {
+        vec![1, 2]
+    }
+}
+
+/// Default `inner_det_phase_filter` per m, mirroring the auto-defaults set in
+/// [`SynthesizerQ::new`]: m=1 → relaxed `[0, 1, 15]`, m=2 → strict `[0]`,
+/// anything else → open (no filter).
+fn default_inner_det_phase_filter(m: u32) -> Vec<u32> {
+    match m {
+        1 => vec![0, 1, 15],
+        2 => vec![0],
+        _ => Vec::new(),
+    }
+}
+
+/// Resource cost of a decomposed Clifford+√T gate string in half-units of
+/// a T gate. Cost is charged per *syllable* — a maximal run of gates
+/// with no off-diagonal `H`/`X`/`Y` between them — not per gate. The gates
+/// of a syllable commute and compose to a single net Z-rotation `Q^k` (with
+/// `Q = √T`), realizable by one magic-state injection of that rotation's
+/// class. Classifying by `k mod 4` (each `Q` adds 1, `T` adds 2, while
+/// `S`, `Z` add multiples of 4 and so never change the class):
+///   - `k` odd        → √T-class, one √T injection → `q_cost_x2` (default 6 = 3 T)
+///   - `k ≡ 2 (mod 4)` → T-class, one T injection   → `2` (= 1 T)
+///   - `k ≡ 0 (mod 4)` → Clifford                    → `0`
+///
+/// Hence `TQ = QT = Q³ = T^{3/2} = Q†S` costs 3 (not 4), and `QQ = T` costs
+/// 1: a `T` sharing a syllable with a `√T` is absorbed into one √T-class gate.
+/// Lowercase `q,t,s` are the adjoints `Q†,T†,S†` (powers −1,−2,−4) the
+/// decomposer emits in canonical syllable form; `rem_euclid` keeps the class
+/// correct for the negative powers. Integer so prefix-prune comparisons and
+/// atomic CAS stay exact.
+pub(crate) fn gates_cost(gates: &str, q_cost_x2: usize) -> usize {
+    gates
+        .split(['H', 'X', 'Y'])
+        .map(|syllable| {
+            let k: i32 = syllable.chars().map(q_power).sum();
+            match k.rem_euclid(4) {
+                1 | 3 => q_cost_x2,
+                2 => 2,
+                _ => 0,
+            }
+        })
+        .sum()
+}
+
+/// Inner (right-factor) det-phase for a left prefix `u_l`: the residual ζ
+/// power the suffix must carry so `det(u_l · u_r) = ζ^d_target`.
+pub(crate) fn inner_d_r(d_target: u32, u_l: &U2Q) -> u32 {
+    let d_l = det_phase_of(&u_l.to_float());
+    ((d_target as i32 - d_l as i32).rem_euclid(16)) as u32
+}
+
+/// Net √T-power of a single diagonal gate (`Q = √T`, so `T = Q²`, `S = Q⁴`,
+/// `Z = Q⁸`; lowercase are the adjoints). Off-diagonal gates contribute `0`.
+fn q_power(c: char) -> i32 {
+    match c {
+        'Q' => 1,
+        'T' => 2,
+        'S' => 4,
+        'Z' => 8,
+        'q' => -1,
+        't' => -2,
+        's' => -4,
+        _ => 0,
+    }
+}
+
+/// `(T_count, Q_count)` of a decomposed gate string: number of T-class
+/// (`T`/`T†`) and √T-class (`Q`/`Q†`) gates. Cliffords (`S`/`S†`/`Z`/…) are
+/// not counted.
+fn gates_tq(gates: &str) -> (usize, usize) {
+    let mut t = 0usize;
+    let mut q = 0usize;
+    for c in gates.chars() {
+        match c {
+            'T' | 't' => t += 1,
+            'Q' | 'q' => q += 1,
+            _ => {}
+        }
+    }
+    (t, q)
+}
+
+impl SynthesizerQ {
+    /// ε-tuned defaults: prefix-split D&C below 1e-6 (single search
+    /// becomes pathological at deeper ε) and BKZ-4 below 1e-7 (the SE
+    /// region is then large enough to pay for the tighter Hermite factor).
+    pub fn new(epsilon: f64) -> Self {
+        // m=2 strict at deep ε (lde_inner coverage); m=1 relaxed at 1e-6
+        // (m=2 has structural gaps at low lde); single search above.
+        let (prefix_split_m, inner_det_phase_filter) = if epsilon <= 1e-7 {
+            (Some(2u32), vec![0u32])
+        } else if epsilon <= 1e-6 {
+            (Some(1u32), vec![0u32, 1, 15])
+        } else {
+            (None, Vec::new())
+        };
+        let max_lde = if epsilon <= 1e-7 { 35 } else { 30 };
+
+        // At deep ε, scale [min_lde, max_lde] with log2(1/ε) to skip
+        // guaranteed-empty levels and still reach the hard-target tail.
+        let log2_recip = if epsilon > 0.0 && epsilon < 1.0 {
+            (1.0 / epsilon).log2()
+        } else { 0.0 };
+        // log₂(1/ε) ≤ 1074 for any positive f64 ε — the lde formulas fit u32.
+        #[allow(clippy::cast_possible_truncation)]
+        let min_lde = if epsilon <= 1e-8 {
+            (0.7 * log2_recip).floor() as u32
+        } else {
+            0
+        };
+        #[allow(clippy::cast_possible_truncation)] // same u32 bound as min_lde above
+        let max_lde_override = if epsilon <= 1e-8 {
+            (1.7 * log2_recip).ceil() as u32
+        } else {
+            max_lde
+        };
+
+        let bkz_block_size = std::env::var("CYCLOSYNTH_BKZ")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(if epsilon <= 1e-7 { 4 } else { 0 });
+
+        // Below 2.5e-8 a no-solution lde level burns its whole pass-1
+        // budget before the search advances; launching the next lde
+        // behind a consumed-nodes trigger overlaps that burn while
+        // keeping likely-solution levels sequential. At ≤1e-8 solution
+        // levels can consume ~1× cap before finding, so the trigger is
+        // raised to 3× cap to avoid spawning a peer that dilutes the find.
+        let (parallel_lde_window, parallel_lde_trigger_nodes) = if epsilon < 2.5e-8 {
+            let cap = pass1_prefix_leaf_cap_for(epsilon);
+            let mult: u64 = if epsilon <= 1e-8 { 3 } else { 1 };
+            (2, cap.saturating_mul(mult))
+        } else {
+            (1, 0)
+        };
+
+        Self {
+            epsilon,
+            basis_cache: Arc::default(),
+            use_basis_cache: false,
+            min_lde,
+            max_lde: max_lde_override,
+            prefix_split_m,
+            inner_det_phase_filter,
+            bkz_block_size,
+            parallel_lde_window,
+            parallel_lde_trigger_nodes,
+            // Cost-optimal by default: the user-facing objective is the
+            // weighted cost, and the Clifford+T baseline floor inside
+            // `synthesize_optimal` guarantees the result never costs
+            // more than Clifford+T on the same target.
+            optimize_cost: true,
+            optimal_m_sweep: default_optimal_m_sweep(epsilon),
+            optimal_budget_multiplier: 2,
+            global_best_cost: None,
+            deep_rot_src: None,
+            my_screen_done: None,
+            peer_screen_done: None,
+            // Window 2 is the cost-ratio winner across the sweep (best at
+            // both 1e-7 and 1e-8; window 1 underfits and 3+ dilute the
+            // deadline without recovering cost). See scripts/sweep_deep_eps.
+            optimal_lde_window: 2,
+            // Open the d_R filters only at ε ≤ 1e-5, where the closed
+            // first-hit filters exclude real cost optima; above that they
+            // recover nothing and only cost enum wall.
+            optimal_open_dr_filter: epsilon <= 1e-5,
+            odd_parity_branch: true,
+            seq_parity: None,
+            // ε-scaled enum-stage deadlines. Certify mode ignores these
+            // by construction. The 1e-7 cost is flat across a wide deadline
+            // range, so its deadline sits at the low end of that range.
+            optimal_deadline_ms: if epsilon >= 1e-5 {
+                Some(600)
+            } else if epsilon >= 1e-7 {
+                // 1e-6 and 1e-7 share this deadline (the flat 1e-7 cost range).
+                Some(1500)
+            } else {
+                Some(2_000)
+            },
+            certify: false,
+            certify_extra_ms: 2_000,
+            q_cost_x2: 6,
+        }
+    }
+
+    /// Approximation precision in diamond distance (set in [`Self::new`]).
+    /// Reuse LLL+BKZ-reduced bases across the lde ladder (the reduced
+    /// transform is lde-independent for a fixed prefix). Off by default
+    /// pending a cost-telemetry eval.
+    #[allow(dead_code)] // opt-in eval surface
+    pub(crate) fn with_lde_basis_cache(mut self, on: bool) -> Self {
+        self.use_basis_cache = on;
+        self
+    }
+
+    pub(crate) fn epsilon(&self) -> f64 {
+        self.epsilon
+    }
+
+    pub fn with_max_lde(mut self, max_lde: u32) -> Self {
+        self.max_lde = max_lde;
+        self
+    }
+
+    pub fn with_min_lde(mut self, min_lde: u32) -> Self {
+        self.min_lde = min_lde;
+        self
+    }
+
+    /// Enable FGKM-prefix divide-and-conquer at split parameter `m`.
+    /// Splits each lattice search at lde_total into a length-m FGKM prefix
+    /// `U_L` (enumerated from `L_m^Q`) plus an inner LLL+SE search at
+    /// lde_inner = lde_total − k_prefix, then composes. Off by default.
+    #[cfg_attr(not(test), allow(dead_code))] // test-only tuning knob
+    pub(crate) fn with_prefix_split_m(mut self, m: u32) -> Self {
+        self.prefix_split_m = Some(m);
+        self
+    }
+
+    /// Det-phase filter: only run the inner search for prefixes whose
+    /// `d_R = (d_target − d_L) mod 16` is in the set (empty = no filter);
+    /// the 16-valued analog of Clifford+T's `det_zeta_parity` check.
+    /// Completeness caveat: a target's right factorization may not lie
+    /// in any single d_R bucket — widening the set or iterating m covers
+    /// more cases.
+    #[cfg_attr(not(test), allow(dead_code))] // test-only tuning knob
+    pub(crate) fn with_inner_det_phase_filter(mut self, allowed_offsets: Vec<u32>) -> Self {
+        self.inner_det_phase_filter = allowed_offsets;
+        self
+    }
+
+    /// Toggle cost-optimal selection (vs first-hit). The enum-stage
+    /// m-sweep stays owned by the constructor defaults; this only flips
+    /// the flag.
+    pub fn with_optimize_cost(mut self, on: bool) -> Self {
+        self.optimize_cost = on;
+        self
+    }
+
+    /// Override the m-sweep list (m=0 = single-search, m≥1 = D&C with that
+    /// FGKM-prefix split). Empty Vec disables the m-sweep and falls back to
+    /// the configured `prefix_split_m`.
+    pub fn with_optimal_m_sweep(mut self, ms: Vec<u32>) -> Self {
+        self.optimal_m_sweep = ms;
+        self
+    }
+
+    /// Multiply every per-prefix and single-search budget cap by this
+    /// when `optimize_cost` is on. Default 2. Higher values reduce the
+    /// chance of budget-cap regressions but increase worst-case wall.
+    pub fn with_optimal_budget_multiplier(mut self, mult: u64) -> Self {
+        self.optimal_budget_multiplier = mult.max(1);
+        self
+    }
+
+    /// Set the optimal-mode lde-window (default 2).
+    /// 0 = strict min-lde-first. N > 0 = after finding at lde `f`, also
+    /// search lde `f+1..=f+N` and return the global min-cost candidate.
+    pub fn with_optimal_lde_window(mut self, window: u32) -> Self {
+        self.optimal_lde_window = window;
+        self
+    }
+
+    /// Set (or clear) the anytime enum-stage deadline in milliseconds.
+    /// See the `optimal_deadline_ms` field doc.
+    pub fn with_optimal_deadline_ms(mut self, ms: Option<u64>) -> Self {
+        self.optimal_deadline_ms = ms;
+        self
+    }
+
+    /// Force (`true`) or disable (`false`) sequential parity branches
+    /// at deep ε; `None` restores the ε rule. See the field doc.
+    pub(crate) fn with_seq_parity(mut self, seq: Option<bool>) -> Self {
+        self.seq_parity = seq;
+        self
+    }
+
+    /// Set the certify extension wall budget in milliseconds.
+    #[cfg_attr(not(test), allow(dead_code))] // test-only tuning knob
+    pub(crate) fn with_certify_extra_ms(mut self, ms: u64) -> Self {
+        self.certify_extra_ms = ms;
+        self
+    }
+
+    /// Lift the enum-stage d_R det-phase filters (see the field doc).
+    pub fn with_optimal_open_dr_filter(mut self, on: bool) -> Self {
+        self.optimal_open_dr_filter = on;
+        self
+    }
+
+    /// Set the Q-gate cost weight in T-gate units (e.g. `3` for the
+    /// `T + 3·Q` model). Stored in exact half-units; weights are
+    /// rounded to the nearest 0.5.
+    pub(crate) fn with_q_cost(mut self, weight: f64) -> Self {
+        debug_assert!(weight > 0.0 && weight.is_finite());
+        // f64→usize saturates; weight is a small user knob (debug-asserted finite).
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            self.q_cost_x2 = (2.0 * weight).round().max(1.0) as usize;
+        }
+        self
+    }
+
+
+    /// Find a minimum-lde Clifford+√T circuit approximating `target`.
+    ///
+    /// Returns `None` if no circuit within `max_lde` achieves diamond
+    /// distance < `epsilon`. Returns the FIRST candidate found at the
+    /// smallest k that works (not necessarily √T-count optimal).
+    pub(crate) fn synthesize(&self, target: Mat2) -> Option<SynthResultQ> {
+        self.synthesize_with_unverified_levels(target, None)
+    }
+
+    /// Synthesize the SU(2) rotation `Rz(alpha)·Ry(beta)·Rz(gamma)` from its
+    /// ZYZ Euler angles — the safe entry point. Builds the target via
+    /// [`crate::synthesis::angle::angle_target`] (which pairs it with the
+    /// exact MPFR column and checks the convention in debug builds); the √T
+    /// backend currently searches from the f64 target only, so the column is
+    /// dropped here.
+    pub fn synthesize_zyz(&self, alpha: Angle, beta: Angle, gamma: Angle) -> Option<SynthResultQ> {
+        let (target, _col) = angle_target(alpha, beta, gamma, DEFAULT_COL_PREC);
+        self.synthesize(target)
+    }
+
+    /// Synthesize a `U3(theta, phi, lambda)` gate (qiskit/bqskit convention)
+    /// from its angles; the global phase is unobservable and dropped.
+    pub fn synthesize_u3(&self, theta: Angle, phi: Angle, lam: Angle) -> Option<SynthResultQ> {
+        // U3(θ,φ,λ) ≡ ZYZ(α=φ, β=θ, γ=λ)
+        self.synthesize_zyz(phi, theta, lam)
+    }
+}
+
+/// One in-flight walk the incumbent watcher may kill: a static cost
+/// floor plus the abort flag its SE walk polls at recurse-entry.
+pub(crate) struct PrefixWatch {
+    pub(crate) abort: AtomicBool,
+    pub(crate) active: AtomicBool,
+    pub(crate) floor: usize,
+}
+
+/// Watcher poll loop: until `walks_done`, sweep active walks every ~20 ms
+/// and abort those the incumbent (or `extra_kill`) has condemned.
+fn incumbent_watcher_loop(
+    walks_done: &AtomicBool,
+    watches: &[PrefixWatch],
+    best_cost: &std::sync::atomic::AtomicUsize,
+    extra_kill: impl Fn() -> bool,
+    on_extra_kill: impl Fn(usize),
+) {
+    while !walks_done.load(Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let cur_best = best_cost.load(Ordering::Relaxed);
+        let extra = extra_kill();
+        for (i, w) in watches.iter().enumerate() {
+            if !w.active.load(Ordering::Relaxed) {
+                continue;
+            }
+            if cur_best <= w.floor {
+                w.abort.store(true, Ordering::Relaxed);
+            } else if extra {
+                w.abort.store(true, Ordering::Relaxed);
+                on_extra_kill(i);
+            }
+        }
+    }
+}
+
+/// Run `body` under a scoped incumbent watcher (shared by the two
+/// cost-pruned search drivers). Every ~20 ms the watcher kills active
+/// walks whose floor can no longer beat the incumbent — sound: only
+/// walks whose every candidate costs ≥ the incumbent are cut — and
+/// walks condemned by the driver-specific `extra_kill` condition
+/// (cross-branch abort in the prefix search; the deadline in the
+/// frontier, which also needs `on_extra_kill` to mark the unit's level
+/// truncated). The RAII guard stops the watcher even on unwind, so
+/// `thread::scope` can never join a watcher that won't exit.
+pub(crate) fn with_incumbent_watcher<R: Send>(
+    watches: &[PrefixWatch],
+    best_cost: &std::sync::atomic::AtomicUsize,
+    extra_kill: impl Fn() -> bool + Sync,
+    on_extra_kill: impl Fn(usize) + Sync,
+    body: impl FnOnce() -> R + Send,
+) -> R {
+    let walks_done = AtomicBool::new(false);
+    struct DoneGuard<'a>(&'a AtomicBool);
+    impl Drop for DoneGuard<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    std::thread::scope(|wscope| {
+        let _done_guard = DoneGuard(&walks_done);
+        let walks_done_ref = &walks_done;
+        let watches_ref = &watches;
+        let extra_kill = &extra_kill;
+        let on_extra_kill = &on_extra_kill;
+        wscope.spawn(move || {
+            incumbent_watcher_loop(
+                walks_done_ref,
+                watches_ref,
+                best_cost,
+                extra_kill,
+                on_extra_kill,
+            );
+        });
+        let r = body();
+        walks_done.store(true, Ordering::Relaxed);
+        r
+    })
+}
+
+pub(crate) mod cost_bound;
+pub mod lattice;
+pub(crate) mod rz;
+mod brute;
+mod first_hit;
+mod optimal;
+mod prefix;
+mod recon;
+
+pub(crate) use brute::*;
+pub(crate) use first_hit::*;
+pub(crate) use prefix::{
+    build_fgkm_prefix_coset_keys, build_fgkm_prefix_gate_counts,
+    build_fgkm_prefix_set,
+};
+pub(crate) use prefix::{coset_keep_mask, ZETA_COSET_DEDUP};
+#[cfg(test)]
+pub(crate) use prefix::{build_fgkm_prefix_orbits, canonical_key_q, lde0_cliffords_q};
+pub use recon::{det_phase_of, solution_to_u2q_with_det_phase, unitary_to_uv_zeta};
+#[cfg(test)]
+pub(crate) use recon::solution_to_u2q;
+pub use recon::project_det_to_zeta_coset;
+#[cfg(test)]
+pub(crate) use recon::zeta_pow;
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests;

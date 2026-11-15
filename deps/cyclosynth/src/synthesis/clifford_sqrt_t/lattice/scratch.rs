@@ -1,0 +1,184 @@
+//! Per-thread scratch buffers for the 16D Z[ζ] L²-LLL pipeline, the
+//! dimension-16 analog of `clifford_t::lattice::scratch`. All MPFR/i256
+//! storage is allocated up front so the inner LLL loop never allocates.
+//! MPFR Gram-Schmidt is mandatory at d=16 (Theorem 2 of Nguyen-Stehlé 2009
+//! covers only d ≤ 11 in f64). Gram entries reach ~2^214 (= 16·2^30·2^180
+//! from B² · Q_int), under the 2^240 overflow threshold; only extreme deep
+//! ε trips `GramOverflow`, where the caller must escalate the integer type.
+
+#![allow(clippy::needless_range_loop)]
+
+use i256::i256;
+use crate::rings::MpFloat;
+
+// ─── Adaptive precision constants ────────────────────────────────────────────
+
+pub(crate) use crate::synthesis::lattice::common::{
+    compute_lu_prec, compute_prec_q, compute_scale_bits, identity_basis, imat_zero,
+    rfv, rfz, rmat_zero, rvec_zero, TARGET_BITS,
+};
+
+/// MPFR Gram-Schmidt precision. d=16 is outside the NS09 f64 proof (d ≤ 11),
+/// and fplll's `l2_min_prec` needs ~42 bits at ε=1e-7; 80 leaves ~40-bit
+/// headroom while staying the fastest precision in practice. Per-construction
+/// override: [`IntScratch16::with_gs_prec`].
+pub(crate) const GS_PREC: u32 = 80;
+
+// ─── Type aliases ────────────────────────────────────────────────────────────
+
+pub(crate) type IMat16 = [[i64; 16]; 16];
+pub(crate) type Mat256_16 = [[i256; 16]; 16];
+
+
+// ─── IntScratch16 ────────────────────────────────────────────────────────────
+
+/// Per-thread scratch buffers for the 16D pipeline. All MPFR / i256 storage
+/// is allocated up front; the inner LLL loop performs zero allocation.
+pub struct IntScratch16 {
+    /// MPFR precision used for build_q.
+    pub(crate) prec_q: u32,
+    /// MPFR precision used for the LLL Gram-Schmidt state.
+    pub(crate) gs_prec: u32,
+    /// Adaptive scale `B` such that `Q_int[i][j] ≈ 2^B · Q[i][j]`.
+    pub(crate) scale_bits: i32,
+
+    // ── MPFR buffers for build_q ──
+    pub(crate) q_mpfr: [[MpFloat; 16]; 16],
+
+    // ── Integer LLL buffers ──
+    pub(crate) q_int: Mat256_16,
+    pub(crate) basis: IMat16,
+    pub(crate) gram: Mat256_16,
+    pub(crate) temp_bq: Mat256_16,
+
+    // ── L²-LLL Gram-Schmidt state, MPFR at GS_PREC bits ──
+    //
+    // r_bar[i][j] = <b_i*, b_j*>           (Gram-Schmidt inner products)
+    // mu_bar[i][j] = r_bar[i][j] / r_bar[j][j]
+    // s_bar[i][j] = ‖b_i‖² - Σ_{k<j} mu_bar[i][k] · r_bar[i][k]
+    //                (Lovász partial sums; s_bar[i][0] = ‖b_i‖² = gram[i][i],
+    //                 and r_bar[i][i] is defined as the final s_bar[i][i])
+    pub(crate) r_bar: [[MpFloat; 16]; 16],
+    pub(crate) mu_bar: [[MpFloat; 16]; 16],
+    pub(crate) s_bar: [[MpFloat; 16]; 16],
+
+    // ── Scratch MpFloats reused inside LLL ──
+    pub(crate) tmp_a: MpFloat,
+    pub(crate) tmp_b: MpFloat,
+
+    // ── post-LLL Cholesky output (f64) ──
+    pub(crate) l_f64: [[f64; 16]; 16],
+
+    // ── Cap center in MPFR (for the post-LLL LU solve) ──
+    /// `c[i] = y[i] · (1 + √(1−ε²))/2` — the cap-center in lattice coords,
+    /// computed by `build_q_mpfr_zeta`. After LLL this is solved against
+    /// `Bᵀ` to recover the cap-center in basis coords (`z_c`), which is the
+    /// SE walk's recursion center.
+    pub(crate) c: [MpFloat; 16],
+
+    // ── MPFR LU buffers at lu_prec (scales with ε) ──
+    pub(crate) lu_prec: u32,
+    pub(crate) lu_a: [[MpFloat; 16]; 16],
+    pub(crate) lu_rhs: [MpFloat; 16],
+    pub(crate) lu_x: [MpFloat; 16],
+    pub(crate) lu_tmp: MpFloat,
+    pub(crate) lu_acc: MpFloat,
+
+    /// BKZ block size (0 = off, 3..=8 = β-block SVP tours after LLL,
+    /// strengthening the basis most at deep ε). β=2 is LLL-equivalent.
+    pub bkz_block_size: u32,
+
+    /// Re-check every f64 prune-fire of the SE walk's Euclidean partial-norm
+    /// prune at dd precision (the dd verdict wins). Needed at ε < 2e-8 where
+    /// the f64 dot product suffers catastrophic cancellation and silently
+    /// drops valid candidates; pure overhead at shallower ε. Defaults to
+    /// `false`; the `clifford_sqrt_t` synthesize drivers set it per scratch
+    /// (see `first_hit::verify_prune_mpfr_for`), and
+    /// `find_aligned_lattice_points_mpfr` copies it onto the walk's
+    /// `SeCenter16`.
+    pub(crate) verify_prune_mpfr: bool,
+    /// Reduced-basis reuse across the lde ladder (deep-ε path only).
+    pub(crate) basis_cache: Option<std::sync::Arc<BasisCache16>>,
+    /// Cache key for the current prefix/target; `None` disables reuse.
+    pub(crate) cache_key: Option<u64>,
+}
+
+/// Per-synthesizer cache of LLL+BKZ-reduced bases for the deep-ε path.
+///
+/// For a fixed prefix direction the Q-metric satisfies Q(k) = M / 2^k —
+/// the entire lde-dependence is a uniform positive scalar — so the
+/// reduced unimodular transform is identical at every lde. Reusing it
+/// across the lde ladder removes the dominant per-(prefix, lde) LLL
+/// cost. Keys hash the prefix/target/rotation identity; a stale or
+/// colliding entry can only degrade basis QUALITY, never soundness (the
+/// enumeration bounds are derived from the exact Gram of whatever basis
+/// is in use).
+pub struct BasisCache16 {
+    map: std::sync::RwLock<std::collections::HashMap<u64, IMat16>>,
+}
+
+impl Default for BasisCache16 {
+    fn default() -> Self {
+        Self { map: std::sync::RwLock::new(std::collections::HashMap::new()) }
+    }
+}
+
+impl BasisCache16 {
+    pub(crate) fn get(&self, key: u64) -> Option<IMat16> {
+        self.map.read().ok()?.get(&key).copied()
+    }
+
+    pub(crate) fn insert(&self, key: u64, basis: IMat16) {
+        if let Ok(mut m) = self.map.write() {
+            // Bound the footprint for long-lived synthesizers.
+            if m.len() > 200_000 {
+                m.clear();
+            }
+            m.insert(key, basis);
+        }
+    }
+}
+
+impl IntScratch16 {
+    pub fn new(eps: f64) -> Self {
+        Self::with_gs_prec(eps, GS_PREC)
+    }
+
+    /// Construct with an overridden Gram-Schmidt precision (lower = faster
+    /// MPFR ops, less correctness margin). The default is [`GS_PREC`].
+    pub(crate) fn with_gs_prec(eps: f64, gs_prec: u32) -> Self {
+        let prec_q = compute_prec_q(eps);
+        let lu_prec = compute_lu_prec(eps);
+        Self {
+            prec_q,
+            gs_prec,
+            scale_bits: 0,
+            q_mpfr: rmat_zero(prec_q),
+            q_int: imat_zero(),
+            basis: identity_basis(),
+            gram: imat_zero(),
+            temp_bq: imat_zero(),
+            r_bar: rmat_zero(gs_prec),
+            mu_bar: rmat_zero(gs_prec),
+            s_bar: rmat_zero(gs_prec),
+            tmp_a: rfz(gs_prec),
+            tmp_b: rfz(gs_prec),
+            l_f64: [[0.0_f64; 16]; 16],
+            c: rvec_zero(prec_q),
+            lu_prec,
+            lu_a: std::array::from_fn(|_| std::array::from_fn(|_| rfz(lu_prec))),
+            lu_rhs: std::array::from_fn(|_| rfz(lu_prec)),
+            lu_x: std::array::from_fn(|_| rfz(lu_prec)),
+            lu_tmp: rfz(lu_prec),
+            lu_acc: rfz(lu_prec),
+            bkz_block_size: 0,
+            verify_prune_mpfr: false,
+            basis_cache: None,
+            cache_key: None,
+        }
+    }
+
+    pub(crate) fn reset_basis(&mut self) {
+        self.basis = identity_basis();
+    }
+}

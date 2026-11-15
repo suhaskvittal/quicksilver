@@ -5,6 +5,8 @@
 
 #include "compiler/pass/util.h"
 
+#include <algorithm>
+
 namespace compiler
 {
 namespace pass
@@ -70,17 +72,23 @@ IOUtility::write_instruction(inst_ptr inst)
 void
 IOUtility::drain_outgoing_buffer()
 {
-    auto begin = outgoing_buffer_.begin(),
-         end = outgoing_buffer_.begin() + OUTGOING_CAPACITY/2;
+    // Write out (and free) the oldest `min(OUTGOING_CAPACITY/2, size())` entries. The `min`
+    // makes this correct regardless of how large `outgoing_buffer_` actually is at the point
+    // this is called -- `write_instructions()`'s bulk-range overload can leave the buffer
+    // holding more than `OUTGOING_CAPACITY` entries when it calls this, and a fixed
+    // `begin + OUTGOING_CAPACITY/2` end iterator in that case used to erase part of the
+    // surviving tail (rather than only the entries just written) without writing or freeing
+    // it -- a silent loss + leak. `vector::erase` shifts the remaining tail down and resizes
+    // correctly for any size, so hand-rolling that with `std::move` isn't needed.
+    auto begin = outgoing_buffer_.begin();
+    auto end   = begin + std::min(OUTGOING_CAPACITY/2, outgoing_buffer_.size());
     std::for_each(begin, end,
             [this] (auto* inst)
             {
                 write_instruction_to_stream(ostrm, inst);
                 delete inst;
             });
-    // shift data and erase afterward
-    std::move(end, outgoing_buffer_.end(), begin);
-    outgoing_buffer_.erase(end, outgoing_buffer_.end());
+    outgoing_buffer_.erase(begin, end);
 }
 
 ////////////////////////////////////////////////////////////

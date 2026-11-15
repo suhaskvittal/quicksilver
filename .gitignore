@@ -33,3 +33,7 @@ plots/
 .claude.todo
 
 __pycache__
+
+.TODO.txt
+*.swp
+*.swo

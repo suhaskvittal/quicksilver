@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   4 January 2026
+ *  contributor: OpenAI Codex (RAD instruction transfer, 10 November 2026)
  * */
 
 #ifndef SIM_CLIENT_h
@@ -69,20 +70,15 @@ public:
     void warmup_dag(size_t);
 
     /*
-     * This gets all instructions in `dag_`'s front layer
-     * that meet the predicate.
-     *
-     * For example, this predicate could be all qubits
-     * that are ready and in the compute subsystem.
-     *
-     * Note that since this predicate is being given to
-     * `dag_`, the input to the predicate is an instruction
-     * pointer.
+     * This gets all instructions in `dag_`'s front layer and
+     * applies the given callback to them. Use this instead
+     * of `dag()->for_each_..` as it fills the DAG with
+     * instructions if they do not already exist.
      * */
-    template <class Pred>
-    std::vector<inst_ptr> get_ready_instructions(const Pred&);
+    template <class Callback>
+    void for_each_instruction_in_front_layer(const Callback&);
 
-    void retire_instruction(inst_ptr);
+    void retire_instruction(inst_ptr, bool delete_inst=true);
 
     bool eof() const { return generic_strm_eof(tristrm_); }
 
@@ -97,15 +93,15 @@ private:
 ////////////////////////////////////////////////////////////
 
 /*
- * Implementation of `Client::get_ready_instructions(const Pred&)`
+ * Implementation of `Client::for_each_instruction_in_front_layer(const Callback&)`
  * */
 
-template <class Pred> std::vector<Client::inst_ptr>
-Client::get_ready_instructions(const Pred& pred)
+template <class Callback> void
+Client::for_each_instruction_in_front_layer(const Callback& cb)
 {
     constexpr size_t DAG_WATERMARK = 16384;
     warmup_dag(DAG_WATERMARK);
-    return dag_->get_front_layer_if(pred);
+    dag_->for_each_instruction_in_front_layer(cb);
 }
 
 ////////////////////////////////////////////////////////////

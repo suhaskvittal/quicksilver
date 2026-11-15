@@ -11,7 +11,9 @@
 #include "compiler/pass/util.h"
 #include "stats.h"
 
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_set>
 
 namespace compiler
@@ -23,6 +25,25 @@ namespace memory_scheduler
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+
+// Forward declaration only -- the full definition (and the on-disk format
+// it writes) lives in "compiler/pass/memory_scheduler/memory_stream.h",
+// which is included by memory_scheduler.tpp where `MemoryStreamWriter` is
+// actually constructed and used. This header only needs a pointer.
+class MemoryStreamWriter;
+
+/*
+ * If non-null, `run` (see below) will construct a `MemoryStreamWriter`
+ * around `*strm` and record every epoch to it for later visualization
+ * (see `memory_stream_visualizer/`). `strm` must outlive the `run` call
+ * and must not already be closed; `run` does not close it.
+ * */
+struct MemoryStreamOptions
+{
+    generic_strm_type* strm;
+    uint32_t           scheduler_id;
+    std::string        scheduler_name;
+};
 
 /*
  * Type aliases for common types used throughout memory scheduler
@@ -72,6 +93,7 @@ struct Stats
     uint64_t memory_accesses{0};
     uint64_t scheduler_epochs{0};
     stats::Histogram<uint64_t> unused_bandwidth{"UNUSED_BANDWIDTH", 0, 32, 8};
+    stats::Histogram<uint64_t> memory_level_parallelism{"MEMORY_LEVEL_PARALLELISM", 0, 32, 8};
 };
 
 ////////////////////////////////////////////////////////////
@@ -151,9 +173,14 @@ bool instruction_is_ready(inst_ptr, const active_set_type&);
  *   Result emit_memory_instructions(const active_set_type&,
  *                                        const dag_ptr&,
  *                                        Config)
+ *
+ * If `mstream_opts` is non-null, every scheduling epoch is additionally
+ * recorded to a `MemoryStreamWriter` for later visualization (see
+ * `memory_stream_visualizer/`). This has no effect on the compiled output.
  * */
 template <class SchedulerImpl>
-Stats run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl&, Config);
+Stats run(generic_strm_type& ostrm, generic_strm_type& istrm, const SchedulerImpl&, Config,
+          const MemoryStreamOptions* mstream_opts = nullptr);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

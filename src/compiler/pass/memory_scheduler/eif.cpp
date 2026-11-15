@@ -52,15 +52,20 @@ eif(const active_set_type& active_set, const dag_ptr& dag, Config conf)
     }
 
     std::vector<double> scores(dag->qubit_count, 0.0);
+    active_set_type tainted(target_active_set);
     dag->for_each_instruction_in_layer_order(
             0,
             conf.eif_lookahead_depth,
-            [&scores, &target_active_set] (auto* inst, size_t)
+            [&] (auto* inst, size_t layer)
             {
-                size_t in_target = std::count_if(inst->q_begin(), inst->q_end(),
-                                        [&target_active_set] (qubit_type q) { return target_active_set.count(q) > 0; });
-                std::for_each(inst->q_begin(), inst->q_end(),
-                        [&scores, x= in_target] (auto q) { return scores[q] += x; });
+                bool dependent = std::any_of(inst->q_begin(), inst->q_end(),
+                                        [&] (qubit_type q) { return tainted.count(q) > 0; });
+                if (dependent)
+                {
+                    double x = fpdiv(1.0, layer+1);
+                    std::for_each(inst->q_begin(), inst->q_end(), 
+                            [&] (auto q) { tainted.insert(q); scores[q] += x; });
+                }
             });
 
     return transform_active_set(active_set, target_active_set, scores);

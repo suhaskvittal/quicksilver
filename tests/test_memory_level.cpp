@@ -7,11 +7,11 @@
  *  the level's `num_blocks` code blocks: qubit at position `i` is inserted into
  *  block `i % num_blocks`. Block membership is by pointer identity.
  *
- *  `MemoryLevel` is abstract, so we exercise it through the concrete `BBMemory`
+ *  `MemoryLevel` is abstract, so we exercise it through the concrete `QLDPCMemory`
  *  subclass and inspect placement via `MemoryLevel::blocks()`.
  * */
 
-#include "sim/memory/bivariate_bicycle.h"
+#include "sim/memory/qldpc_memory.h"
 #include "sim/qubit.h"
 #include "test_util.h"
 
@@ -62,13 +62,13 @@ void
 test_block_count_and_capacity()
 {
     // exact multiple: 48 / 12 -> 4 blocks, capacity 48
-    BBMemory exact(1000.0, /*qubit_count=*/48, BB_N, BB_K, BB_D);
+    QLDPCMemory exact(1000.0, /*qubit_count=*/48, BB_N, BB_K, BB_D);
     CHECK_EQ(exact.num_blocks,      size_t{4});
     CHECK_EQ(exact.total_capacity,  size_t{48});
     CHECK_EQ(exact.blocks().size(), size_t{4});
 
     // non-multiple rounds up: ceil(40 / 12) = 4 blocks, capacity 4*12 = 48
-    BBMemory rounded(1000.0, /*qubit_count=*/40, BB_N, BB_K, BB_D);
+    QLDPCMemory rounded(1000.0, /*qubit_count=*/40, BB_N, BB_K, BB_D);
     CHECK_EQ(rounded.num_blocks,     size_t{4});
     CHECK_EQ(rounded.total_capacity, size_t{48});
 }
@@ -80,7 +80,7 @@ test_block_count_and_capacity()
 void
 test_striped_mapping_round_robin()
 {
-    BBMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
+    QLDPCMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
     const size_t nb = mem.num_blocks;
 
     std::vector<Qubit> qubits(10);
@@ -121,7 +121,7 @@ test_striped_mapping_round_robin()
 void
 test_striped_mapping_fewer_than_blocks()
 {
-    BBMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
+    QLDPCMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
 
     std::vector<Qubit> qubits(3);
     auto ptrs = pointers_to(qubits);
@@ -139,7 +139,7 @@ test_striped_mapping_fewer_than_blocks()
 void
 test_striped_mapping_exact_multiple()
 {
-    BBMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
+    QLDPCMemory mem(1000.0, 48, BB_N, BB_K, BB_D);   // num_blocks = 4
     const size_t nb = mem.num_blocks;
 
     std::vector<Qubit> qubits(8);
@@ -159,7 +159,7 @@ test_striped_mapping_exact_multiple()
 void
 test_striped_mapping_empty()
 {
-    BBMemory mem(1000.0, 48, BB_N, BB_K, BB_D);
+    QLDPCMemory mem(1000.0, 48, BB_N, BB_K, BB_D);
 
     std::vector<Qubit*> none;
     mem.striped_mapping(none.begin(), none.end());

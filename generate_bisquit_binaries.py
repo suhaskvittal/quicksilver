@@ -2,11 +2,15 @@ import os
 
 LZMA_THREADS = 16
 
+os.system('rm -rf benchmarks/bin/* && rm -rf benchmarks/stats/*')
+
 def get_workload_name(f: str):
     basename = os.path.basename(f)
     return basename.split('.')[0]
 
 def build_binaries(extra_options=''):
+    os.system('cp bisquit/precompiled/* benchmarks/bin/')
+
     files = [f for f in os.listdir('bisquit/qasm') if f.endswith('.qasm') or f.endswith('.qasm.xz')]
     for f in files:
         filename = get_workload_name(f)

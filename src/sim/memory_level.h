@@ -7,12 +7,14 @@
 #define SIM_MEMORY_SUBSYSTEM_h
 
 #include "globals.h"
+#include "instruction.h"
 #include "sim/operable.h"
 #include "sim/qubit.h"
 
 #include <cassert>
 #include <iosfwd>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace sim
@@ -23,19 +25,23 @@ namespace sim
 
 struct MemoryAccessResult
 {
-    bool success{false};
+    enum class Code { SUCCESS, FAIL_UNAVAILABLE, FAIL_NO_CREDIT };
+
+    Code code{Code::FAIL_UNAVAILABLE};
 
     /*
      * Time it takes to get the "result" of the request back.
      * Return value is in the cycles in the clock domain of servicing
      * memory tier.
      * */
-    cycle_type latency;
+    cycle_type latency{0};
 
     /*
      * Frequency of the memory level that gave the result.
      * */
     double freq_khz;
+
+    bool success() const { return code == Code::SUCCESS; }
 };
 
 ////////////////////////////////////////////////////////////
@@ -75,11 +81,23 @@ public:
     const size_t num_blocks;
     const size_t total_capacity;
 
-    virtual ~MemoryLevel() = default;
+    /*
+     * Statistics:
+     * */
+    uint64_t s_surgery_operations{0};
+    uint64_t s_shift_automorphisms{0};
 protected:
     std::vector<storage_type> blocks_;
+
+    /*
+     * Cache of each resident qubit's block index, populated on store and refreshed
+     * opportunistically by `block_index_of()` whenever it has to fall back to a full
+     * scan. `mutable` because that fallback path is reached from a `const` caller.
+     * */
+    mutable std::unordered_map<Qubit*, size_t> qubit_to_block_idx_;
 public:
     MemoryLevel(std::string name, double freq_khz, size_t qubit_count, size_t n, size_t k, size_t d);
+    virtual ~MemoryLevel() = default;
 
     /*
      * Stripes all qubits within the range across all code blocks in the system.
@@ -103,6 +121,10 @@ public:
      * Estimates the next cycle when a load to the given qubit is possible.
      * */
     virtual cycle_type next_ready_cycle_for_load(Qubit*) const =0;
+    virtual cycle_type next_ready_cycle_for_access(Qubit* q, Instruction::Type) const
+    {
+        return next_ready_cycle_for_load(q);
+    }
 
     /*
      * Returns fidelity of memory subsystem for client's application.
@@ -111,8 +133,21 @@ public:
      * */
     virtual double log_fidelity(Client*, double scale, double d_freq_khz, double phys_error) const =0;
 
+    /*
+     * True if an access of the given type touching `q` currently has the EPR credit it
+     * would need to proceed (2 credits for `COUPLED_LOAD_STORE`, 1 otherwise). Trivially
+     * QLDPCMemory checks the shared EPR credit pool when a producer is present.
+     * */
+    virtual bool has_epr_credit(Qubit*, Instruction::Type) const { return true; }
+
     const std::vector<storage_type>& blocks() const { return blocks_; }
 protected:
+    /*
+     * Returns the index of the block holding `q`. If `q` is not resident in this
+     * level, returns 0.
+     * */
+    size_t block_index_of(Qubit*) const;
+
     virtual MemoryAccessResult load_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult store_impl(size_t idx, storage_type&, Qubit*) =0;
     virtual MemoryAccessResult coupled_load_store_impl(size_t idx, storage_type&, Qubit* ld, Qubit* st) =0;
@@ -137,6 +172,7 @@ MemoryLevel::striped_mapping(Iter begin, Iter end)
             [this, &block_idx] (Qubit* q)
             {
                 this->blocks_[block_idx].insert(q);
+                this->qubit_to_block_idx_[q] = block_idx;
                 block_idx = (block_idx+1) % num_blocks;
             });
 }

@@ -173,7 +173,10 @@ create_truncated_file(generic_strm_type& ostrm, generic_strm_type& istrm, int64_
         }
 
         if (is_software_instruction(inst->type))
+        {
+            delete inst;
             continue;
+        }
 
         std::vector<qubit_type> qubits(inst->q_begin(), inst->q_end());
         for (auto& q : qubits)

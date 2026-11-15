@@ -1,18 +1,24 @@
 /*
+ *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
  *  author: Suhas Vittal
  *  date:   16 January 2026
+ *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (phenomenological decoder integration, 10 November 2026)
+ *  contributor: OpenAI Codex (decoder switching CLI, 10 November 2026)
+ *  contributor: OpenAI Codex (RAD mode integration, 10 November 2026)
  * */
 
 #include "sim.h"
-#include "sim/configuration/allocator/impl.h"
-#include "sim/configuration/predefined_ed_protocols.h"
+#include "sim/configuration/allocator.h"
 #include "sim/configuration/resource_estimation.h"
 #include "sim/compute_subsystem.h"
+#include "sim/decoder_subsystem.h"
+#include "sim/decoder_subsystem/latency_sampler.h"
+#include "sim/decoder_subsystem/rad.h"
 #include "sim/driver.h"
-#include "sim/memory/bivariate_bicycle.h"
+#include "sim/memory/qldpc_memory.h"
 #include "sim/memory_level.h"
-#include "sim/production/epr.h"
-#include "sim/production/magic_state.h"
+#include "sim/production.h"
 
 #include "compiler/pass/memory_scheduler.h"
 #include "compiler/pass/memory_scheduler/impl.h"
@@ -27,16 +33,7 @@
 namespace 
 {
 
-using FactorySpecification = sim::configuration::FactorySpecification;
-using EDSpecification = sim::configuration::EDSpecification;
-
 std::vector<std::string> split_trace_string(std::string);
-
-/*
- * Compiles the given trace by performing memory access scheduler. The `trace`
- * reference is then overwritten with the new trace.
- * */
-void jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity);
 
 /*
  * Retrieves the number of qubits for the given trace:
@@ -44,30 +41,10 @@ void jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capaci
 size_t get_number_of_qubits(std::string_view);
 
 /*
- * Returns the code distance for the given error-rate regime
+ * Gets the default production specifications for magic state factories (parametrized by
+ * values that can be extended by the user).
  * */
-size_t get_compute_code_distance(std::string_view);
-size_t get_memory_code_distance(std::string_view);
-
-/*
- * These two functions get the default production specifications for magic state factories
- * and entanglement distillation (parametrized by values that can be extended by the user).
- * */
-std::vector<FactorySpecification> get_default_factory_specifications(std::string_view regime,
-                                                                      int64_t compute_cycle_time_ns,
-                                                                      int64_t ll_buffer_capacity);
-std::vector<EDSpecification>      get_default_ed_specifications(std::string_view regime,
-                                                                    int64_t compute_cycle_time_ns,
-                                                                    int64_t ll_buffer_capacity);
-
-/*
- * Computes the number of physical qubits required for ED on the faster substrate.
- * Unlike the slower substrate, the faster substrate can highly serialize ED, and does
- * not need many ED units either, so the overhead of ED is just the number of physical
- * qubits required for the last level of ED (first argument) and the amount of idling
- * time (can be computed using `substrate_mismatch_factor` and `EDSpecification`)
- * */
-size_t faster_substrate_ed_overhead(EDSpecification&, int64_t substrate_mismatch_factor);
+std::vector<sim::ProducerQuantum> get_default_factory_specifications(int64_t ll_buffer_capacity);
 
 } // anon
 
@@ -85,33 +62,47 @@ main(int argc, char* argv[])
     int64_t print_progress;
     int64_t ratemode;
     int64_t skip_threshold;
-    bool    jit;
-    std::string regime;
+    bool    skip_verbose;
     int64_t total_inst;
 
     int64_t concurrent_clients;
     int64_t compute_local_memory_capacity;
-    int64_t compute_cycle_time_ns;
+    int64_t compute_cycle_time_ns,
+            compute_code_distance;
+    std::string routing_layout;
 
-    int64_t memory_cycle_time_ns;
+    int64_t memory_cycle_time_ns,
+            memory_code_distance;
 
     int64_t factory_ll_buffer_capacity;
     int64_t factory_physical_qubit_budget;
 
+    bool    remote_memory;
+    int64_t remote_memory_ed_protocol;
+    int64_t remote_memory_epr_budget;
+
     int64_t oc_base_ro_latency;
     double oc_ro_latency_fraction;
+    double reaction_time_std;
+    std::string decoder_mode;
+    double l2_reaction_time_mean, l2_reaction_time_std, switching_rate;
+    int64_t switching_overhead;
+    double rad_l1_error_rate;
+    int64_t rad_rfifo_capacity, rad_wpfifo_depth;
 
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
         .required("simulation instructions", "Number of instructions to simulate (for each workload)", inst_sim)
 
         .optional("-pp", "--print-progress", "Progress print frequency (in compute cycles)", print_progress, 0)
+        .optional("-skip", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 0)
+        .optional("", "--skip-verbose", "Skip verbose", skip_verbose, false)
         .optional("", "--ratemode", "If a single trace file is provided, then number of clients using that file", ratemode, 1)
-        .optional("", "--skip-threshold", "Number of cycles without progress before skipping cycles", skip_threshold, 100)
-        .optional("-jit", "", "Just-in-time compilation for an input source file", jit, false)
-        .optional("", "--regime", 
-                    "Choose one of: M, G, T (megaquop, gigaqoup, terquop). This affects code distance + factory allocation",
-                    regime, "T")
+        .optional("", "--max-cycles-no-progress",
+                    "Maximum consecutive cycles any single component may spend with no progress before the "
+                    "simulation declares a deadlock and aborts",
+                    sim::GL_MAX_CYCLES_WITH_NO_PROGRESS, 1'000'000)
+
         .optional("", "--total-program-instructions", 
                     "Total instructions in the program. Used for resource estimates. Does not affect performance.",
                     total_inst, 1'000'000'000ll)
@@ -119,12 +110,26 @@ main(int argc, char* argv[])
         .optional("-c", "--concurrent-clients", "Number of active concurrent clients", concurrent_clients, 1)
         .optional("-a", "--compute-local-memory-capacity", "Number of active qubits in the compute subsystem's local memory", 
                       compute_local_memory_capacity, 12)
+        .optional("", "--routing-layout", "Compute routing layout: bus or edpc", routing_layout, "bus")
         .optional("", "--compute-cycle-time-ns", 
                       "Syndrome extraction round latency for surface code (in nanoseconds)", 
                       compute_cycle_time_ns, 1200)
+        .optional("", "--compute-code-distance", "Compute subsystem code distance", compute_code_distance, 25)
 
         .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
+        .optional("", "--reaction-time-std", "Decoder latency standard deviation in log space", reaction_time_std, 0.1)
+        .optional("", "--decoder-mode", "Decoder mode: mono, switching, or rad", decoder_mode, "mono")
+        .optional("", "--l2-reaction-time-mean", "L2 decoder mean latency in cycles", l2_reaction_time_mean, 100.0)
+        .optional("", "--l2-reaction-time-std", "L2 decoder latency standard deviation in log space", l2_reaction_time_std, 0.1)
+        .optional("", "--switching-rate", "Probability of switching to L2 per decode", switching_rate, 1e-4)
+        .optional("", "--switching-overhead", "Latency of confidence estimation in decoder switching", switching_overhead, 0)
+        .optional("", "--rad-l1-error-rate", "L1 decoding error probability per STV cycle", rad_l1_error_rate, 1e-8)
+        .optional("", "--rad-rfifo-capacity", "RAD retirement FIFO capacity per client", rad_rfifo_capacity, 4096)
+        .optional("", "--rad-wpfifo-depth", "Maximum nested wrong-path recovery depth", rad_wpfifo_depth, 4)
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
+
+        .optional("-topols", "", "Enable TopoLS rotation latency hiding", sim::GL_TOPOLS_ENABLED, false)
+        .optional("", "--topols-ancilla", "Dedicated TopoLS ancilla", sim::GL_TOPOLS_ANCILLA, 4)
 
         .optional("-rdr", "", "Enable rotation directed runahead", GL_USE_RDR_ISA, 0)
         .optional("", "--rdr-capacity", "Number of ancilla", sim::GL_RDR_CAPACITY, 2)
@@ -143,6 +148,7 @@ main(int argc, char* argv[])
         .optional("", "--memory-cycle-time-ns", 
                         "Syndrome extraction round latency for the QLDPC code (in nanoseconds)", 
                         memory_cycle_time_ns, 1300)
+        .optional("", "--memory-code-distance", "Memory subsystem code distance", memory_code_distance, 24)
 
         .optional("-f", "--factory-physical-qubit-budget", "Number of physical qubits allocated to factory allocator", 
                       factory_physical_qubit_budget, 50000)
@@ -150,8 +156,14 @@ main(int argc, char* argv[])
                       factory_ll_buffer_capacity, 2)
 
         /*
-         * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of
-         * it
+         *
+         * */
+        .optional("-rm", "--remote-memory", "Enable remote EPR distillation for memory access", remote_memory, false)
+        .optional("", "--remote-memory-ed-protocol-id", "Entanglement distillation protocol", remote_memory_ed_protocol, 1)
+        .optional("", "--remote-memory-epr-budget", "Number of physical qubits for EPR production", remote_memory_epr_budget, 100000)
+
+        /*
+         * These are parameters for analyzing *where* T bandwidth goes, since applications cannot saturate all of it
          * */
         .optional("", "--bsol-elide-cliffords", "BW SoL: Elide Clifford gates", sim::GL_ELIDE_CLIFFORDS, false)
         .optional("", "--bsol-zero-latency-t", "BW SoL: Zero latency T gates", sim::GL_ZERO_LATENCY_T_GATES, false)
@@ -168,6 +180,29 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+    if (sim::GL_REACTION_TIME <= 0 || reaction_time_std < 0 || compute_code_distance <= 0)
+        std::cerr << "Decoder mean, compute code distance must be positive; decoder log-space std must be nonnegative" << _die{};
+    if (decoder_mode != "mono" && decoder_mode != "switching" && decoder_mode != "rad")
+        std::cerr << "Unknown decoder mode: " << decoder_mode << _die{};
+    if (!std::isfinite(reaction_time_std) || !std::isfinite(l2_reaction_time_mean)
+            || !std::isfinite(l2_reaction_time_std) || !std::isfinite(switching_rate)
+            || l2_reaction_time_mean <= 0 || l2_reaction_time_std < 0
+            || switching_rate < 0 || switching_rate > 1)
+        std::cerr << "Invalid decoder latency or switching parameters" << _die{};
+    if (!std::isfinite(rad_l1_error_rate) || rad_l1_error_rate < 0 || rad_l1_error_rate > 1
+            || rad_rfifo_capacity <= 0 || rad_wpfifo_depth <= 0)
+        std::cerr << "Invalid RAD error rate, retirement FIFO capacity, or recovery depth" << _die{};
+    sim::GL_RAD_ENABLED = decoder_mode == "rad";
+    if (sim::GL_RAD_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_TOPOLS_ENABLED
+                               || sim::GL_RLTP_DEGREE > 0 || sim::GL_ELIDE_CLIFFORDS))
+        std::cerr << "RAD currently requires RDR, TopoLS, RLTP, and Clifford elision disabled" << _die{};
+    if (sim::GL_TOPOLS_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_RLTP_DEGREE > 0 || sim::GL_TOPOLS_ANCILLA <= 0))
+        std::cerr << "TopoLS requires positive ancilla capacity and exclusive use of rotation acceleration" << _die{};
+    if (routing_layout != "bus" && routing_layout != "edpc")
+        std::cerr << "Unknown routing layout: " << routing_layout << _die{};
+    const auto compute_routing_layout = routing_layout == "edpc"
+                                            ? sim::ComputeSubsystem::RoutingLayout::EDPC
+                                            : sim::ComputeSubsystem::RoutingLayout::BUS;
 
     if (oc_base_ro_latency >= 0)
     {
@@ -175,15 +210,9 @@ main(int argc, char* argv[])
         memory_cycle_time_ns = 600 + oc_base_ro_latency;
     }
 
-    /* Parse trace string and do jit compilation if neeeded */
-
     auto traces = split_trace_string(trace_string);
     if (ratemode > 1 && traces.size() > 1)
         std::cerr << "cannot have multiple input traces if ratemode > 1" << _die{};
-
-    if (jit)
-        for (std::string& trace : traces)
-            jit_compile(trace, inst_sim, compute_local_memory_capacity);
 
     if (ratemode > 1)
     {
@@ -192,47 +221,112 @@ main(int argc, char* argv[])
         std::fill(traces.begin(), traces.end(), trace);
     }
 
-    // from `regime`, set parameters:
-    const size_t compute_code_distance = get_compute_code_distance(regime),
-                 memory_code_distance = get_memory_code_distance(regime);
-
-    const size_t memory_block_physical_qubits = sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
-    const size_t memory_block_capacity = sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
+    const size_t memory_block_physical_qubits = 
+        sim::configuration::bivariate_bicycle_code_physical_qubit_count(memory_code_distance);
+    const size_t memory_block_capacity = 
+        sim::configuration::bivariate_bicycle_code_logical_qubit_count(memory_code_distance);
 
     /* initialize magic state factories */
 
-    auto ms_specs = get_default_factory_specifications(regime, compute_cycle_time_ns, factory_ll_buffer_capacity);
+    const double c_freq_khz = sim::compute_freq_khz(compute_cycle_time_ns);
+
+    auto ms_specs = get_default_factory_specifications(factory_ll_buffer_capacity);
     if (oc_base_ro_latency >= 0)
-        ms_specs.back().cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_ro_latency_fraction*oc_base_ro_latency ));
-    auto ms_alloc = sim::configuration::allocate_magic_state_factories(factory_physical_qubit_budget, ms_specs);
+    {
+        // The last production level runs its syndrome extraction on a separate (typically
+        // faster) clock. `BulkProducer` runs every level on a single clock (`c_freq_khz`), so
+        // fold that clock ratio into the level's cycle count instead.
+        const int64_t last_level_cycle_time_ns = static_cast<int64_t>(std::ceil( 400 + oc_ro_latency_fraction*oc_base_ro_latency ));
+        const double scale = static_cast<double>(last_level_cycle_time_ns) / static_cast<double>(compute_cycle_time_ns);
+        auto& last = ms_specs.back();
+        last.cycles_per_production = static_cast<cycle_type>(std::ceil(last.cycles_per_production * scale));
+    }
+    auto ms_alloc = sim::configuration::throughput_aware_allocation(factory_physical_qubit_budget, ms_specs, c_freq_khz);
+
+    auto* t_producer = new sim::BulkProducer("t_producer", c_freq_khz);
+    for (const auto& [quantum, count] : ms_alloc.levels)
+        t_producer->add_level(quantum, count);
 
     /* initialize memory subsystem */
 
     // determine number of qubits for each trace:
-    size_t main_memory_qubits = std::transform_reduce(traces.begin(), traces.end(), size_t{0},
+    size_t total_trace_qubits = std::transform_reduce(traces.begin(), traces.end(), size_t{0},
                                                 std::plus<size_t>{},
                                                 [] (const std::string& t) { return get_number_of_qubits(t); });
-    main_memory_qubits -= compute_local_memory_capacity;
+    // `compute_local_memory_capacity` may exceed the trace's own qubit count (e.g. small/synthetic
+    // traces run with the default local-capacity budget) -- clamp instead of underflowing `size_t`,
+    // which used to request a memory subsystem sized to ~2^64 qubits.
+    size_t main_memory_qubits = (total_trace_qubits > compute_local_memory_capacity)
+                                    ? total_trace_qubits - compute_local_memory_capacity
+                                    : 0;
     const double m_freq_khz = sim::compute_freq_khz(memory_cycle_time_ns);
+
+    /* Remote memory accesses consume EPR pairs from the distillation producer. */
+
     std::vector<sim::MemoryLevel*> memory_subsystem;
+    sim::BulkProducer* epr_producer{nullptr};
+    sim::configuration::Allocation epr_alloc{};
     if (main_memory_qubits > 0)
     {
-        sim::MemoryLevel* bb_memory = new sim::BBMemory(m_freq_khz, 
-                                                            main_memory_qubits, 
-                                                            memory_block_physical_qubits, 
-                                                            memory_block_capacity, 
-                                                            memory_code_distance);
-        memory_subsystem.push_back(bb_memory);
+        if (remote_memory)
+        {
+            epr_producer = new sim::BulkProducer("epr_producer", m_freq_khz);
+            std::vector<sim::ProducerQuantum> ed_specs;
+            if (remote_memory_ed_protocol == 1)
+                ed_specs = {sim::ed_protocol_1a(sim::EDImplMethod::DISAGGREGATED_TYPE_A), sim::ed_protocol_1b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+            else if (remote_memory_ed_protocol == 2)
+                ed_specs = {sim::ed_protocol_2a(sim::EDImplMethod::DISAGGREGATED_TYPE_A), sim::ed_protocol_2b(sim::EDImplMethod::DISAGGREGATED_TYPE_A)};
+            else
+                std::cerr << "quicksilver: unexpected ED protocol = " << remote_memory_ed_protocol << _die{};
+            epr_alloc = sim::configuration::throughput_aware_allocation(remote_memory_epr_budget, ed_specs, m_freq_khz);
+
+            for (const auto& [quantum, count] : epr_alloc.levels)
+                epr_producer->add_level(quantum, count);
+        }
+        memory_subsystem.push_back(new sim::QLDPCMemory(m_freq_khz, main_memory_qubits,
+                                                        memory_block_physical_qubits, memory_block_capacity,
+                                                        memory_code_distance, {}, epr_producer));
     }
 
     /* initialize compute subsystem */
 
-    double c_freq_khz = sim::compute_freq_khz(compute_cycle_time_ns);
-    auto* compute_subsystem = new sim::ComputeSubsystem(c_freq_khz, 
+    using lognormal_sampler = sim::ds::LognormalLatencySampler;
+    using rad_type = sim::ds::RADSystem<lognormal_sampler, lognormal_sampler>;
+    sim::DecoderSubsystemBase* decoder_subsystem;
+    rad_type* rad_decoder{nullptr};
+    lognormal_sampler l1_sampler(sim::GL_REACTION_TIME, reaction_time_std);
+    if (sim::GL_RAD_ENABLED)
+    {
+        rad_decoder = new rad_type(c_freq_khz, compute_code_distance, l1_sampler,
+                                   lognormal_sampler(l2_reaction_time_mean, l2_reaction_time_std),
+                                   rad_l1_error_rate, traces.size(),
+                                   static_cast<size_t>(rad_rfifo_capacity),
+                                   static_cast<size_t>(rad_wpfifo_depth));
+        decoder_subsystem = rad_decoder;
+    }
+    else if (decoder_mode == "switching")
+    {
+        using switching_sampler = sim::ds::SwitchingLatencySampler<lognormal_sampler, lognormal_sampler>;
+        decoder_subsystem = new sim::PhenoDecoderSubsystem<switching_sampler>(
+            c_freq_khz, compute_code_distance,
+            switching_sampler(l1_sampler,
+                              lognormal_sampler(l2_reaction_time_mean, l2_reaction_time_std),
+                              switching_rate,
+                              switching_overhead));
+    }
+    else
+    {
+        decoder_subsystem = new sim::PhenoDecoderSubsystem<lognormal_sampler>(
+            c_freq_khz, compute_code_distance, l1_sampler);
+    }
+
+    auto* compute_subsystem = new sim::ComputeSubsystem(c_freq_khz,
                                                          compute_code_distance,
                                                          compute_local_memory_capacity,
-                                                         ms_alloc.producers.back(),
-                                                         memory_subsystem);
+                                                         t_producer,
+                                                         memory_subsystem,
+                                                         decoder_subsystem,
+                                                         compute_routing_layout);
 
     /* initialize driver */
 
@@ -240,15 +334,20 @@ main(int argc, char* argv[])
                                             concurrent_clients,
                                             inst_sim,
                                             compute_subsystem,
-                                            ms_alloc.producers.back(),
+                                            t_producer,
+                                            epr_producer,
                                             memory_subsystem);
+    driver->deadlockable = true;
 
     /* initialize simulation */
 
-    std::vector<sim::Operable*> all_operables{driver, compute_subsystem};
+    std::vector<sim::Operable*> all_operables;
+    if (rad_decoder != nullptr)
+        all_operables.push_back(rad_decoder->l2_operable());
+    all_operables.insert(all_operables.end(), {decoder_subsystem, driver, compute_subsystem, t_producer});
+    if (epr_producer != nullptr)
+        all_operables.push_back(epr_producer);
     std::copy(memory_subsystem.begin(), memory_subsystem.end(), std::back_inserter(all_operables));
-    for (const auto& level : ms_alloc.producers)
-        std::copy(level.begin(), level.end(), std::back_inserter(all_operables));
     sim::coordinate_clock_scale(all_operables);
 
     /* run simulation */
@@ -272,17 +371,23 @@ main(int argc, char* argv[])
             x->tick();
 
         // check if we should do a skip:
-        /*
-        if (compute_subsystem->cycles_without_progress > skip_threshold)
+        if (skip_threshold > 0 && driver->cycles_with_no_progress() >= skip_threshold)
         {
-            auto skip = compute_subsystem->skip_to_cycle();
-            if (skip.has_value() && compute_subsystem->current_cycle() < *skip)
+            auto skip = driver->skip_to_cycle();
+            if (skip.has_value() && *skip > driver->current_cycle()+1)
             {
-                uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, compute_subsystem->freq_khz);
+                if (skip_verbose)
+                {
+                    std::cout << "==== ALERT ====\n"
+                                << "simulation has skipped to cycle " << *skip << ", was = " << driver->current_cycle() 
+                                << ", delta = " << (*skip - driver->current_cycle())
+                                << "\n";
+                }
+                
+                uint64_t skip_time_ns = sim::convert_cycles_to_time_ns(*skip, driver->freq_khz);
                 sim::fast_forward_all_operables_to_time_ns(all_operables, skip_time_ns);
             }
         }
-        */
     }
     while (!driver->done());
     driver->stop_simulation();
@@ -290,6 +395,16 @@ main(int argc, char* argv[])
     /* print stats */
 
     sim::print_sim_stats(std::cout, driver);
+    if (rad_decoder != nullptr)
+    {
+        print_stat_line(std::cout, "RAD_WRONG_PATHS", rad_decoder->s_wrong_paths);
+        print_stat_line(std::cout, "RAD_FIXUP_UOPS", rad_decoder->s_fixup_uops);
+        print_stat_line(std::cout, "RAD_RFIFO_MAX_OCCUPANCY", rad_decoder->s_max_rfifo_occupancy);
+        print_stat_line(std::cout, "RAD_MAX_RECURSION_DEPTH", rad_decoder->s_max_recursion_depth);
+        print_stat_line(std::cout, "RAD_L2_DECODER_COUNT", rad_decoder->l2().decoder_count);
+    }
+    if (epr_producer != nullptr)
+        sim::print_stats_for_factories(std::cout, "EPR_FACTORY", epr_producer);
 
     print_stat_line(std::cout, "COMPUTE_CODE_DISTANCE", compute_code_distance);
     print_stat_line(std::cout, "MEMORY_CODE_DISTANCE", memory_code_distance);
@@ -303,26 +418,39 @@ main(int argc, char* argv[])
            rltp_footprint,
            rdr_storage_overhead,
            rdr_footprint;
-    // program active memory overheads: multiply by 1.5x to account for routing overhead (assuming bus)
-    program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
+    // The bus estimate uses 0.5 routing patches per program patch. EDPC uses
+    // its allocated grid: one data patch per four physical patch positions.
+    if (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC)
+        program_active_memory_footprint =
+            (compute_subsystem->edpc_patch_count() - 4 * compute_subsystem->dedicated_ancilla_count)
+            * sc_footprint;
+    else
+        program_active_memory_footprint = 1.5 * compute_local_memory_capacity * sc_footprint;
     // RLTP physical qubit overheads:
     rltp_footprint = std::min( (7*sim::GL_RLTP_DEGREE),                         // O(n) method
                                 sqr(sim::GL_RLTP_DEGREE)/2 + 3*sim::GL_RLTP_DEGREE  // O(n^2) method
                              ) * sc_footprint;
     // RDR phsyical qubit overheads:
-    rdr_storage_overhead = sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
+    rdr_storage_overhead = sim::GL_RDR_ENABLED && sim::GL_RDR_COMPLETION_BUFFER_CAPACITY > 0
                               ? 1.5 * (sim::GL_RDR_COMPLETION_BUFFER_CAPACITY+2)
                                     * sim::configuration::surface_code_physical_qubit_count(13) // d = 13 for yoked surface code
                               : 0;
     rdr_footprint = sim::GL_RDR_ENABLED
-                        ? (1.5*sim::GL_RDR_CAPACITY*sc_footprint + rdr_storage_overhead)
+                        ? ((compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC
+                                ? 4 * sim::GL_RDR_CAPACITY * sc_footprint
+                                : 1.5 * sim::GL_RDR_CAPACITY * sc_footprint) + rdr_storage_overhead)
                         : 0;
-    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint;
+    const size_t topols_footprint = sim::GL_TOPOLS_ENABLED
+        ? (compute_routing_layout == sim::ComputeSubsystem::RoutingLayout::EDPC ? 4 : 1.5)
+            * sim::GL_TOPOLS_ANCILLA * sc_footprint
+        : 0;
+    const size_t total_compute_footprint = program_active_memory_footprint + rltp_footprint + rdr_footprint + topols_footprint;
 
     std::cout << "COMPUTE_FOOTPRINT\n";
     print_stat_line(std::cout, "    PROGRAM_MEMORY", program_active_memory_footprint);
     print_stat_line(std::cout, "    RLTP_WORKSPACE", rltp_footprint);
     print_stat_line(std::cout, "    RDR_WORKSPACE", rdr_footprint);
+    print_stat_line(std::cout, "    TOPOLS_WORKSPACE", topols_footprint);
     print_stat_line(std::cout, "    TOTAL", total_compute_footprint);
 
     /*
@@ -334,11 +462,9 @@ main(int argc, char* argv[])
                                                         memory_subsystem.end(),
                                                         size_t{0},
                                                         std::plus<size_t>{},
-                                                        [sc_footprint] (const auto* m)
+                                                        [] (const auto* m)
                                                         {
-                                                            size_t memory_overhead = m->storage_physical_qubit_count*m->num_blocks;
-                                                            size_t routing_overhead = 0.5*m->num_blocks*sc_footprint;
-                                                            return memory_overhead + routing_overhead;
+                                                            return m->storage_physical_qubit_count*m->num_blocks;
                                                         });
     
     std::cout << "MEMORY_FOOTPRINT\n";
@@ -347,7 +473,14 @@ main(int argc, char* argv[])
     std::cout << "FACTORY_FOOTPRINT\n";
     print_stat_line(std::cout, "    TOTAL", ms_alloc.physical_qubit_count);
 
-    const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint + ms_alloc.physical_qubit_count;
+    if (epr_producer != nullptr)
+    {
+        std::cout << "EPR_FOOTPRINT\n";
+        print_stat_line(std::cout, "    TOTAL", epr_alloc.physical_qubit_count);
+    }
+
+    const size_t total_footprint = total_compute_footprint + program_inactive_memory_footprint
+                                        + ms_alloc.physical_qubit_count + epr_alloc.physical_qubit_count;
     print_stat_line(std::cout, "TOTAL_FOOTPRINT", total_footprint);
 
     auto fidelity = driver->application_fidelity(0, total_inst, sim::GL_PHYSICAL_ERROR_RATE);
@@ -357,18 +490,32 @@ main(int argc, char* argv[])
     print_stat_line(std::cout, "    MEMORY", fidelity.mem);
     print_stat_line(std::cout, "    RDR", fidelity.rdr);
 
+    print_stat_line(std::cout, "COMPUTE_PER_CYCLE_ERROR_RATE", 
+                    sim::configuration::surface_code_logical_error_rate(compute_code_distance, sim::GL_PHYSICAL_ERROR_RATE));
+    print_stat_line(std::cout, "MEMORY_PER_CYCLE_ERROR_RATE", 
+                    sim::configuration::bivariate_bicycle_code_block_error_rate(memory_code_distance, sim::GL_PHYSICAL_ERROR_RATE));
+
     print_stat_line(std::cout, "T_BANDWIDTH_MAX_PER_S", ms_alloc.estimated_throughput);
+    print_stat_line(std::cout, "LOGICAL_EPR_BANDWIDTH_MAX_PER_S", epr_alloc.estimated_throughput);
+    if (epr_producer != nullptr)
+    {
+        // calculate L0 ingress rate (physical EPR generation rate)
+        auto [l0_q, l0_n] = epr_alloc.levels[0];
+        double l0_ingress_rate = l0_n * fpdiv(l0_q.d_input_states, l0_q.cycles_per_production) * (epr_producer->freq_khz * 1e3);
+
+        print_stat_line(std::cout, "PHYSICAL_EPR_DISTR_RATE_MAX_PER_S", l0_ingress_rate);
+    }
     print_stat_line(std::cout, "SIMULATION_WALLTIME_S", sim::walltime_s());
 
     /* cleanup simulation */
 
     delete driver;
     delete compute_subsystem;
+    delete decoder_subsystem;
+    delete t_producer;
     for (auto* m : memory_subsystem)
         delete m;
-    for (auto& p : ms_alloc.producers)
-        for (auto* f : p)
-            delete f;
+    delete epr_producer;
 
     return 0;
 }
@@ -404,50 +551,6 @@ split_trace_string(std::string s)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-void
-jit_compile(std::string& trace, int64_t inst_sim, int64_t active_set_capacity)
-{
-    constexpr auto MEMORY_ACCESS_SCHEDULER{compiler::pass::memory_scheduler::hint};
-
-    std::string trace_dir = trace.substr(0, trace.find_last_of("/\\") + 1) + "jit/";
-    std::string trace_filename = trace.substr(trace.find_last_of("/\\") + 1);
-
-    mkdir(trace_dir.c_str(), 0777);
-
-    auto ext_it = trace_filename.find(".gz");
-    if (ext_it == std::string::npos)
-        ext_it = trace_filename.find(".xz");
-    std::string base_name = trace_filename.substr(0, ext_it);
-    std::string active_set_capacity_str = std::to_string(active_set_capacity);
-    std::string inst_str = std::to_string(inst_sim/1'000'000) + "M";
-
-    std::string compiled_trace = trace_dir + base_name + "_a" + active_set_capacity_str + "_" + inst_str + ".gz";
-    
-    std::cout << "********* (jit) running memory access scheduler for " << trace 
-                << " -> " << compiled_trace << " *********\n";
-
-    generic_strm_type istrm, ostrm;
-    generic_strm_open(istrm, trace, "rb");
-    generic_strm_open(ostrm, compiled_trace, "wb");
-
-    compiler::pass::memory_scheduler::Config conf;
-    conf.active_set_capacity = active_set_capacity;
-    conf.inst_compile_limit = static_cast<int64_t>(5 * inst_sim);
-    conf.print_progress_frequency = 0;
-    conf.dag_inst_capacity = 100000;
-    conf.hint_lookahead_depth = 256;
-
-    run(ostrm, istrm, MEMORY_ACCESS_SCHEDULER, conf);
-
-    generic_strm_close(istrm);
-    generic_strm_close(ostrm);
-
-    trace = compiled_trace;
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
 size_t
 get_number_of_qubits(std::string_view trace)
 {
@@ -461,94 +564,14 @@ get_number_of_qubits(std::string_view trace)
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-size_t
-get_compute_code_distance(std::string_view regime)
+std::vector<sim::ProducerQuantum>
+get_default_factory_specifications(int64_t ll_buffer_capacity)
 {
-    if (regime == "T")
-        return 23;
-    else if (regime == "G")
-        return 17;
-    else if (regime == "M")
-        return 11;
-    else
-        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
-}
+    sim::ProducerQuantum l1 = sim::t_cc_cultivation(3);
+    sim::ProducerQuantum l2 = sim::t_15to1_distillation(27, 15, 15, l1.infidelity);
+    l2.buffer_size = ll_buffer_capacity;
 
-size_t
-get_memory_code_distance(std::string_view regime)
-{
-    if (regime == "T")
-        return 24;
-    else if (regime == "G")
-        return 18;
-    else if (regime == "M")
-        return 12;
-    else
-        std::cerr << "get_compute_code_distance: unknown regime \"" << regime << "\"" << _die{};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::vector<FactorySpecification>
-get_default_factory_specifications(std::string_view regime,
-                                    int64_t c_round_time_ns,
-                                    int64_t ll_buffer_capacity)
-{
-    FactorySpecification l1_spec /* d = 3 color code cultivation */
-    {
-        .is_cultivation=true,
-        .cycle_time_ns=c_round_time_ns,
-        .buffer_capacity=1,
-        .output_error_rate=1e-6,
-        .escape_distance=13,
-        .rounds=18,
-        .probability_of_success=0.2
-    };
-
-    FactorySpecification l2_spec /* 15:1, (dx,dz,dm) = (25,11,11) distillation */
-    {
-        .is_cultivation=false,
-        .cycle_time_ns=c_round_time_ns,
-        .buffer_capacity=ll_buffer_capacity,
-        .output_error_rate=1e-12,
-        .dx=25,
-        .dz=11,
-        .dm=11,
-        .input_count=4,
-        .output_count=1,
-        .rotations=11
-    };
-
-    if (regime == "G")
-    {
-        // change parameters of d = 3 cultivation to d = 5 cultivation
-        l1_spec.output_error_rate = 1e-8;
-        l1_spec.escape_distance = 15;
-        l1_spec.rounds = 25;
-        l1_spec.probability_of_success = 0.02;
-    }
-
-    if (regime == "T")
-        return {l1_spec, l2_spec};
-    else
-        return {l1_spec};
-}
-
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
-
-std::vector<EDSpecification>
-get_default_ed_specifications(std::string_view regime,
-                                int64_t c_round_time_ns,
-                                int64_t ll_buffer_capacity)
-{
-    /*
-    auto specs = sim::configuration::ed::protocol_3(ll_buffer_capacity);
-    for (auto& s : specs)
-        s.cycle_time_ns = c_round_time_ns;
-    return specs;
-    */
+    return {l1, l2};
 }
 
 ////////////////////////////////////////////////////////////

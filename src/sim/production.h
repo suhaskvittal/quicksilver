@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   18 February 2026
+ *  contributor: OpenAI Codex (compact 15-to-1 factory variant, 1 October 2026)
  * */
 
 #ifndef SIM_PRODUCTION_h
@@ -10,6 +11,7 @@
 #include "sim/operable.h"
 
 #include <deque>
+#include <optional>
 #include <vector>
 
 namespace sim
@@ -18,69 +20,244 @@ namespace sim
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
-class ProducerBase : public Operable
+enum class ResourceType { T, CCZ, EPR };
+    
+/*
+ * Represents one unit of production for the specified
+ * `resource`.
+ * */
+struct ProducerQuantum
+{
+    ResourceType resource;
+
+    /*
+     * Distillation data (un-needed for cultivation quantum)
+     * */
+    bool is_distiller;
+    size_t d_input_states,
+           d_output_states;
+
+    size_t buffer_size{1};
+
+    /*
+     * Resource estimation metadata:
+     * */
+    double infidelity;
+    size_t physical_qubit_count;
+    cycle_type cycles_per_production;
+    // Idle cycles between completing one batch and starting the next.
+    cycle_type restart_delay{1};
+};
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Bulk production object that manages creation of resource states.
+ *
+ * This takes away a lot of resolution from implementing magic states (i.e., distillation
+ * protocols can be pipelined as all states are not consumed at once), but this is faster
+ * for simulation.
+ *
+ * Plus, if that level of fidelity is really necessary, write a custom `ProducerQuantum` that
+ * models it.
+ * */
+class BulkProducer : public Operable
 {
 public:
-    const double output_error_probability;
-    const size_t buffer_capacity;
+    struct level_type
+    {
+        struct event_type
+        {
+            size_t prod_id;
+            size_t count;
+            cycle_type ready_cycle;
+        };
 
-    /*
-     * Producers that produce resource states for consumption
-     * by this producer. If empty, then it should be assumed
-     * that this is a first-level production (state-injection).
-     * */
-    std::vector<ProducerBase*> previous_level;
+        ProducerQuantum traits;
+        size_t          producer_count,
+                        unified_buffer_occupancy,
+                        unified_buffer_capacity;
 
-    /*
-     * Statistics:
-     * */
-    uint64_t s_production_attempts{0};
-    uint64_t s_failures{0};
-    uint64_t s_consumed{0};
+        // one entry per `producer_count`
+        std::vector<cycle_type> next_available_cycle,   // availabiliity cycle
+                                preq_resource_count;    // number of resources given to the producer
 
-    const size_t input_count;
-    const size_t output_count;
-protected:
+        // essentially a glorified event queue
+        std::deque<event_type> event_queue;
+
+        /*
+         * Statistics:
+         * */
+        uint64_t s_completions{0};
+        uint64_t s_cycles_stalled_on_input{0};
+        uint64_t s_cycles_stalled_on_buffer{0};
+
+        /*
+         * Constructor: quantum and count
+         * */
+        level_type(ProducerQuantum, size_t);
+
+        /*
+         * Adds an event to `event_queue` and updates other structures
+         * */
+        void add_event(size_t producer_id, size_t count, cycle_type ready_cycle);
+
+        /*
+         * Checks if the head of `event_queue` is at or earlier than `current_cycle`. If so, returns true
+         * and updates data structures.
+         * */
+        bool pop_event(cycle_type current_cycle);
+
+        size_t occupancy_remaining() const { return unified_buffer_capacity - unified_buffer_occupancy; }
+    };
+private:
     /*
-     * Number of resources in local buffer (max `buffer_capacity`)
+     * A higher level is further into `levels_` . So `levels_.back()` contains
+     * highest fidelity resource states.
      * */
-    size_t buffer_occupancy_{0};
+    std::vector<level_type> levels_;
 public:
-    ProducerBase(std::string_view name, 
-                    double freq_khz, 
-                    double output_error_prob,
-                    size_t buffer_capacity,
-                    size_t input_count,
-                    size_t output_count);
+    BulkProducer(std::string_view name, double freq_khz);
 
-    /*
-     * Safely consumes `count` resource states from the buffer.
-     * */
-    void consume(size_t count);
-
-    void print_deadlock_info(std::ostream&) const override;
-
-    size_t buffer_occupancy() const { return buffer_occupancy_; }
-protected:
     long operate() override;
 
-    /*
-     * Adds resource states to the buffer. Marked virtual
-     * in case other classes want to add any stats atop
-     * this function.
-     * */
-    virtual void install_resource_states();
+    void add_level(ProducerQuantum, size_t);
 
     /*
-     * `operate()` calls `production_step`, which advances
-     * magic state production by one cycle. Implementation
-     * is defined by descendant class.
-     *
-     * This function should return true if anything was
-     * attempted (regardless of failure).
+     * Drains `count` resource states from the top-level buffer. Returns false (and does
+     * nothing) if fewer than `count` are available.
      * */
-    virtual bool production_step() =0;
+    bool consume(size_t count);
+
+    size_t top_level_count() const { return levels_.back().producer_count; }
+    size_t top_level_buffer_occupancy() const { return levels_.back().unified_buffer_occupancy; }
+    size_t top_level_buffer_capacity() const { return levels_.back().unified_buffer_capacity; }
+    double top_level_infidelity() const { return levels_.back().traits.infidelity; }
+    ProducerQuantum level_traits(size_t i) const { return levels_[i].traits; }
+    ProducerQuantum top_level_traits() { return levels_.back().traits; }
+    const level_type& level(size_t i) const { return levels_[i]; }
+    const level_type& top_level() const { return levels_.back(); }
+    size_t level_count() const { return levels_.size(); }
+
+    /*
+     * Total physical qubit footprint across all levels (excludes buffer overheads, which
+     * are accounted for separately during allocation).
+     * */
+    size_t physical_qubit_count() const;
+
+    /*
+     * True if the top-level buffer is full -- i.e., production cannot make any further
+     * progress until the buffer is drained by a consumer.
+     * */
+    bool is_saturated() const { return top_level_buffer_occupancy() >= top_level_buffer_capacity(); }
+
+    /*
+     * Earliest actionable completion or initiation, accounting for backpressure. Used to compute
+     * skip-cycle targets.
+     * */
+    std::optional<cycle_type> next_event_cycle() const;
+
+    void print_deadlock_info(std::ostream&) const override;
+protected:
+    void fast_forward_to_cycle(cycle_type target) override;
+private:
+    long handle_resource_completions(level_type&, ssize_t level_idx);
+    long handle_resource_initiations(level_type&, ssize_t level_idx);
 };
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+cycle_type retry_adjusted_latency(cycle_type, size_t n_inputs, double e_input);
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/*
+ * Pre-defined `ProducerQuantum` objects. for T production
+ * */
+
+ProducerQuantum t_cc_cultivation(size_t d);
+
+/*
+ * This is Litinski's version of 15:1 distillation. This is spacetime optimal, but it takes
+ * up a lot space. 
+ * */
+ProducerQuantum t_15to1_distillation(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
+
+/*
+ * This is my version. It takes up about half the space but takes more than twice as long to produce
+ * a T gate, which is worthwhile in my opinion. The unused space in the diagram can be filled up by
+ * other factories.
+ *
+ * Layout:
+ *      * 2 3   * 
+ *      1 - - OUT/T
+ *      * 4 5   *
+ *
+ * OUT and 1 is `dx*dx`. 2 thru 5 is `dx*dz`.
+ * T is assumed to be `dm*dm` (but `dm == dz`, so who cares)
+ * Used routing space (dashes) are `dx` tall.
+ *
+ * Total space overhead is thus:
+ *      width = 2*dx + 2*dz
+ *      height = 3*dx
+ *      unused qubits = 8*dx*dx
+ * Total: 
+ *      2*(width)*(height) - unused = 2*(2*dx+2*dz)*(3*dx) - 8*dx*dx = 12*dx*dx + 12*dz*dx - 8*dx*dx = 4*dx*(dx + 3*dz)
+ *
+ * Latency:
+ *  initialization: `dx` cycles
+ *  checks: `dm` cycles * 11 such checks
+ *  output: `dx` cycles
+ * */
+ProducerQuantum t_15to1_distillation_compact(size_t dx, size_t dz, size_t dm, double input_state_infidelity);
+
+
+/*
+ * Pre-defined `ProducerQuantum objects` for EPR production
+ * */
+enum class EDImplMethod 
+{ 
+    BARE,
+    YOKED_SURFACE_CODE,
+    BIVARIATE_BICYCLE_CODE,
+
+    /*
+     * Disaggregated is where ED is implemented on two systems with very
+     * different latencies. For purposes of timing, we assume the time taken
+     * by the compute substrate is much lower than the memory substrate (which
+     * should always be true.) But, the compute substrate matters for physical
+     * qubit estimates.
+     * */
+    DISAGGREGATED_TYPE_A   // YSC on compute qubits, BB code on memory substrate
+};
+
+// Perfect EPR pairs, one every 4*d memory cycles, with an eight-pair buffer.
+ProducerQuantum ideal_epr_distribution(size_t memory_code_distance);
+
+/*
+ * Protocol 1:
+ *  [[14,6,4]] into [[32,25,3]]
+ *
+ *  First level infidelity: 4.4e-6
+ *  Second level infidelity: 6.1e-13
+ * */
+
+ProducerQuantum ed_protocol_1a(EDImplMethod);
+ProducerQuantum ed_protocol_1b(EDImplMethod);
+
+/*
+ * Protocol 2:
+ *  [[4,2,2]] into [[27,18,4]]
+ *
+ *  First level infidelity: 4.9e-4
+ *  Second level infidelity: 4.3e-10
+ * */
+
+ProducerQuantum ed_protocol_2a(EDImplMethod);
+ProducerQuantum ed_protocol_2b(EDImplMethod);
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////

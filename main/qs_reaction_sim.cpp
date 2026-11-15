@@ -65,7 +65,7 @@ main(int argc, char* argv[])
     while (driver->s_inst_done < inst_sim)
     {
         driver->tick();
-        if (driver->current_cycle() % print_progress_freq == 0)
+        if (print_progress_freq > 0 && driver->current_cycle() % print_progress_freq == 0)
             driver->print_progress(std::cout);
     }
 

@@ -109,14 +109,13 @@ Instruction::Instruction(const Instruction& other)
     corr_urotseq_array(other.corr_urotseq_array),
     qubit_count(other.qubit_count),
     number(other.number),
+    first_ready_cycle(other.first_ready_cycle),
     cycle_done(other.cycle_done),
     deletable(other.deletable),
-    first_ready_cycle(other.first_ready_cycle),
-    first_ready_cycle_for_current_uop(other.first_ready_cycle_for_current_uop),
-    first_cycle_with_all_load_results_available(other.first_cycle_with_all_load_results_available),
-    first_cycle_with_available_resource_state(other.first_cycle_with_available_resource_state),
     original_unrolled_inst_count(other.original_unrolled_inst_count),
+    stall_data(other.stall_data),
     rdr(other.rdr),
+    rx(other.rx),
     current_uop_(other.current_uop_ ? new Instruction(*other.current_uop_) : nullptr),
     uops_retired_(other.uops_retired_)
 {}
@@ -160,8 +159,11 @@ Instruction::retire_current_uop()
 void
 Instruction::reset_uops()
 {
+    delete current_uop_;
+    current_uop_ = nullptr;
     uops_retired_ = 0;
-    get_next_uop();
+    if (uop_count() > 0)
+        get_next_uop();
 }
 
 ////////////////////////////////////////////////////////////
