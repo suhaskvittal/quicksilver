@@ -17,8 +17,10 @@ bisquit/qasm/*
 bisquit/hamlib/*
 
 *.out
+*.html
 
 out/
+scripts/__pycache__
 
 bisquit/classiq
 bisquit/classiq/*
