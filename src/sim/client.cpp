@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   4 January 2026
+ *  contributor: OpenAI Codex (RAD instruction transfer, 10 November 2026)
  * */
 
 #include "sim/client.h"
@@ -67,7 +68,7 @@ Client::warmup_dag(size_t s)
 ////////////////////////////////////////////////////////////
 
 void
-Client::retire_instruction(inst_ptr inst)
+Client::retire_instruction(inst_ptr inst, bool delete_inst)
 {
     cycle_type inst_latency = inst->cycle_done - inst->first_ready_cycle;
 
@@ -97,7 +98,8 @@ Client::retire_instruction(inst_ptr inst)
 
 kill_instruction:
     dag_->remove_instruction_from_front_layer(inst);
-    delete inst;
+    if (delete_inst)
+        delete inst;
 }
 
 ////////////////////////////////////////////////////////////

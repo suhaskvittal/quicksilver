@@ -3,12 +3,18 @@
  *  author: Suhas Vittal
  *  date:   16 January 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (phenomenological decoder integration, 10 November 2026)
+ *  contributor: OpenAI Codex (decoder switching CLI, 10 November 2026)
+ *  contributor: OpenAI Codex (RAD mode integration, 10 November 2026)
  * */
 
 #include "sim.h"
 #include "sim/configuration/allocator.h"
 #include "sim/configuration/resource_estimation.h"
 #include "sim/compute_subsystem.h"
+#include "sim/decoder_subsystem.h"
+#include "sim/decoder_subsystem/latency_sampler.h"
+#include "sim/decoder_subsystem/rad.h"
 #include "sim/driver.h"
 #include "sim/memory/qldpc_memory.h"
 #include "sim/memory_level.h"
@@ -77,6 +83,12 @@ main(int argc, char* argv[])
 
     int64_t oc_base_ro_latency;
     double oc_ro_latency_fraction;
+    double reaction_time_std;
+    std::string decoder_mode;
+    double l2_reaction_time_mean, l2_reaction_time_std, switching_rate;
+    int64_t switching_overhead;
+    double rad_l1_error_rate;
+    int64_t rad_rfifo_capacity, rad_wpfifo_depth;
 
     ARGPARSE()
         .required("trace string", "Path to trace file (if single file or ratemode > 1), or paths separated by `;`", trace_string)
@@ -105,6 +117,15 @@ main(int argc, char* argv[])
         .optional("", "--compute-code-distance", "Compute subsystem code distance", compute_code_distance, 25)
 
         .optional("", "--reaction-time", "Control reaction time (in compute cycles)", sim::GL_REACTION_TIME, 10)
+        .optional("", "--reaction-time-std", "Decoder latency standard deviation in log space", reaction_time_std, 0.1)
+        .optional("", "--decoder-mode", "Decoder mode: mono, switching, or rad", decoder_mode, "mono")
+        .optional("", "--l2-reaction-time-mean", "L2 decoder mean latency in cycles", l2_reaction_time_mean, 100.0)
+        .optional("", "--l2-reaction-time-std", "L2 decoder latency standard deviation in log space", l2_reaction_time_std, 0.1)
+        .optional("", "--switching-rate", "Probability of switching to L2 per decode", switching_rate, 1e-4)
+        .optional("", "--switching-overhead", "Latency of confidence estimation in decoder switching", switching_overhead, 0)
+        .optional("", "--rad-l1-error-rate", "L1 decoding error probability per STV cycle", rad_l1_error_rate, 1e-8)
+        .optional("", "--rad-rfifo-capacity", "RAD retirement FIFO capacity per client", rad_rfifo_capacity, 4096)
+        .optional("", "--rad-wpfifo-depth", "Maximum nested wrong-path recovery depth", rad_wpfifo_depth, 4)
         .optional("", "--rltp-degree", "Reaction-limited T teleportation degree", sim::GL_RLTP_DEGREE, 0)
 
         .optional("-topols", "", "Enable TopoLS rotation latency hiding", sim::GL_TOPOLS_ENABLED, false)
@@ -159,6 +180,22 @@ main(int argc, char* argv[])
         .parse(argc, argv);
 
     sim::GL_RDR_ENABLED = (GL_USE_RDR_ISA > 0);
+    if (sim::GL_REACTION_TIME <= 0 || reaction_time_std < 0 || compute_code_distance <= 0)
+        std::cerr << "Decoder mean, compute code distance must be positive; decoder log-space std must be nonnegative" << _die{};
+    if (decoder_mode != "mono" && decoder_mode != "switching" && decoder_mode != "rad")
+        std::cerr << "Unknown decoder mode: " << decoder_mode << _die{};
+    if (!std::isfinite(reaction_time_std) || !std::isfinite(l2_reaction_time_mean)
+            || !std::isfinite(l2_reaction_time_std) || !std::isfinite(switching_rate)
+            || l2_reaction_time_mean <= 0 || l2_reaction_time_std < 0
+            || switching_rate < 0 || switching_rate > 1)
+        std::cerr << "Invalid decoder latency or switching parameters" << _die{};
+    if (!std::isfinite(rad_l1_error_rate) || rad_l1_error_rate < 0 || rad_l1_error_rate > 1
+            || rad_rfifo_capacity <= 0 || rad_wpfifo_depth <= 0)
+        std::cerr << "Invalid RAD error rate, retirement FIFO capacity, or recovery depth" << _die{};
+    sim::GL_RAD_ENABLED = decoder_mode == "rad";
+    if (sim::GL_RAD_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_TOPOLS_ENABLED
+                               || sim::GL_RLTP_DEGREE > 0 || sim::GL_ELIDE_CLIFFORDS))
+        std::cerr << "RAD currently requires RDR, TopoLS, RLTP, and Clifford elision disabled" << _die{};
     if (sim::GL_TOPOLS_ENABLED && (sim::GL_RDR_ENABLED || sim::GL_RLTP_DEGREE > 0 || sim::GL_TOPOLS_ANCILLA <= 0))
         std::cerr << "TopoLS requires positive ancilla capacity and exclusive use of rotation acceleration" << _die{};
     if (routing_layout != "bus" && routing_layout != "edpc")
@@ -253,11 +290,42 @@ main(int argc, char* argv[])
 
     /* initialize compute subsystem */
 
+    using lognormal_sampler = sim::ds::LognormalLatencySampler;
+    using rad_type = sim::ds::RADSystem<lognormal_sampler, lognormal_sampler>;
+    sim::DecoderSubsystemBase* decoder_subsystem;
+    rad_type* rad_decoder{nullptr};
+    lognormal_sampler l1_sampler(sim::GL_REACTION_TIME, reaction_time_std);
+    if (sim::GL_RAD_ENABLED)
+    {
+        rad_decoder = new rad_type(c_freq_khz, compute_code_distance, l1_sampler,
+                                   lognormal_sampler(l2_reaction_time_mean, l2_reaction_time_std),
+                                   rad_l1_error_rate, traces.size(),
+                                   static_cast<size_t>(rad_rfifo_capacity),
+                                   static_cast<size_t>(rad_wpfifo_depth));
+        decoder_subsystem = rad_decoder;
+    }
+    else if (decoder_mode == "switching")
+    {
+        using switching_sampler = sim::ds::SwitchingLatencySampler<lognormal_sampler, lognormal_sampler>;
+        decoder_subsystem = new sim::PhenoDecoderSubsystem<switching_sampler>(
+            c_freq_khz, compute_code_distance,
+            switching_sampler(l1_sampler,
+                              lognormal_sampler(l2_reaction_time_mean, l2_reaction_time_std),
+                              switching_rate,
+                              switching_overhead));
+    }
+    else
+    {
+        decoder_subsystem = new sim::PhenoDecoderSubsystem<lognormal_sampler>(
+            c_freq_khz, compute_code_distance, l1_sampler);
+    }
+
     auto* compute_subsystem = new sim::ComputeSubsystem(c_freq_khz,
                                                          compute_code_distance,
                                                          compute_local_memory_capacity,
                                                          t_producer,
                                                          memory_subsystem,
+                                                         decoder_subsystem,
                                                          compute_routing_layout);
 
     /* initialize driver */
@@ -273,7 +341,10 @@ main(int argc, char* argv[])
 
     /* initialize simulation */
 
-    std::vector<sim::Operable*> all_operables{driver, compute_subsystem, t_producer};
+    std::vector<sim::Operable*> all_operables;
+    if (rad_decoder != nullptr)
+        all_operables.push_back(rad_decoder->l2_operable());
+    all_operables.insert(all_operables.end(), {decoder_subsystem, driver, compute_subsystem, t_producer});
     if (epr_producer != nullptr)
         all_operables.push_back(epr_producer);
     std::copy(memory_subsystem.begin(), memory_subsystem.end(), std::back_inserter(all_operables));
@@ -324,6 +395,14 @@ main(int argc, char* argv[])
     /* print stats */
 
     sim::print_sim_stats(std::cout, driver);
+    if (rad_decoder != nullptr)
+    {
+        print_stat_line(std::cout, "RAD_WRONG_PATHS", rad_decoder->s_wrong_paths);
+        print_stat_line(std::cout, "RAD_FIXUP_UOPS", rad_decoder->s_fixup_uops);
+        print_stat_line(std::cout, "RAD_RFIFO_MAX_OCCUPANCY", rad_decoder->s_max_rfifo_occupancy);
+        print_stat_line(std::cout, "RAD_MAX_RECURSION_DEPTH", rad_decoder->s_max_recursion_depth);
+        print_stat_line(std::cout, "RAD_L2_DECODER_COUNT", rad_decoder->l2().decoder_count);
+    }
     if (epr_producer != nullptr)
         sim::print_stats_for_factories(std::cout, "EPR_FACTORY", epr_producer);
 
@@ -432,6 +511,7 @@ main(int argc, char* argv[])
 
     delete driver;
     delete compute_subsystem;
+    delete decoder_subsystem;
     delete t_producer;
     for (auto* m : memory_subsystem)
         delete m;

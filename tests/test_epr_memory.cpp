@@ -1,3 +1,4 @@
+// Contributor: OpenAI Codex (explicit decoder dependency in memory test, 10 November 2026).
 #include "sim/compute_subsystem.h"
 #include "sim/memory/qldpc_memory.h"
 #include "sim/qubit.h"
@@ -201,7 +202,7 @@ void test_compute_routing_still_blocks_memory_access()
     BulkProducer producer("ideal_epr", 1000.0);
     producer.add_level(ideal_epr_distribution(D), 1);
     QLDPCMemory memory(1000.0, 12, 72, 12, D, SINGLE_EXTRACTOR, &producer);
-    ComputeSubsystem compute(1000.0, D, 2, nullptr, {&memory});
+    ComputeSubsystem compute(1000.0, D, 2, nullptr, {&memory}, nullptr);
     Qubit st{.qubit_id=0, .client_id=0}, other{.qubit_id=1, .client_id=0},
           ld{.qubit_id=2, .client_id=0};
     compute.initialize_qubits({&st, &other, &ld});

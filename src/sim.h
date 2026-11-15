@@ -3,6 +3,7 @@
     author: Suhas Vittal
     date:   2025 August 18
     contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+    contributor: OpenAI Codex (RAD mode flag, 10 November 2026)
 
     The only functions are utility functions for printing stats.
 */
@@ -63,6 +64,7 @@ extern double GL_PHYSICAL_ERROR_RATE;
  * Reaction time in terms of compute cycles.
  * */
 extern int64_t GL_REACTION_TIME;
+extern bool GL_RAD_ENABLED;
 
 /*
  * Reaction-limited T teleportation

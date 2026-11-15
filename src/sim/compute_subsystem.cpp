@@ -3,6 +3,9 @@
  *  author: Suhas Vittal
  *  date:   11 March 2026
  *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (decoder event intervals, 10 November 2026)
+ *  contributor: OpenAI Codex (phenomenological decoder integration, 10 November 2026)
+ *  contributor: OpenAI Codex (RAD reaction time and memory guard, 10 November 2026)
  * */
 
 #include "sim/client.h"
@@ -118,6 +121,7 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
                                       size_t _local_memory_capacity,
                                       BulkProducer* t_producer,
                                       memory_subsystem_type memory_subsystem,
+                                      DecoderSubsystemBase* decoder_subsystem,
                                       RoutingLayout _routing_layout)
     :Operable("compute_subsystem", freq_khz),
     code_distance(_code_distance),
@@ -127,6 +131,7 @@ ComputeSubsystem::ComputeSubsystem(double freq_khz,
     local_memory_(local_memory_capacity),
     t_producer_(t_producer),
     memory_subsystem_(memory_subsystem),
+    decoder_subsystem_(decoder_subsystem),
     dedicated_ancilla_(dedicated_ancilla_count)
 {
     if (routing_layout == RoutingLayout::BUS)
@@ -432,6 +437,8 @@ ComputeSubsystem::do_s_like_gate(inst_ptr inst, Qubit* q)
     if (routing_->test_local_resource(q, current_cycle(), current_cycle()+code_distance))
     {
         routing_->lock_local_resource(q, current_cycle(), current_cycle()+code_distance);
+        decoder_subsystem_->process_event(current_cycle(), current_cycle()+code_distance,
+                                          2*code_distance, {q}, inst);
         return execute_result_type{.progress=1, .latency=code_distance};
     }
     return execute_result_type{};
@@ -442,7 +449,9 @@ ComputeSubsystem::do_cx_like_gate(inst_ptr inst, Qubit* c, Qubit* t)
 {
     if (routing_->test_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance))
     {
-        routing_->lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
+        size_t r = routing_->lock_resources_between(c, t, current_cycle(), current_cycle() + 2*code_distance);
+        decoder_subsystem_->process_event(current_cycle(), current_cycle()+2*code_distance,
+                                          (r+2)*code_distance, {c, t}, inst);
         return execute_result_type{.progress=1, .latency=2*code_distance};
     }
     return execute_result_type{};
@@ -467,10 +476,17 @@ ComputeSubsystem::do_t_like_gate(inst_ptr inst, Qubit* q)
     auto dst = _test_endpoints_and_return_first_lockable(routing_, q, t_start, t_end);
     if (!dst.has_value())
         return execute_result_type{};
-    routing_->lock_resources_between(q, *dst, t_start, t_end);
+    size_t r = routing_->lock_resources_between(q, *dst, t_start, t_end);
+
+    const cycle_type tr = decoder_subsystem_->reaction_time_for(q),
+                     xy_meas = ((code_distance/2)-1)/2;
+    const cycle_type total_latency = code_distance + tr + xy_meas;
+    decoder_subsystem_->process_event(t_start, current_cycle()+total_latency,
+                                        (r+2)*code_distance + 2*(tr+xy_meas),
+                                        {q},
+                                        inst);
 
     // estimate decoding latency:
-    const cycle_type total_latency = code_distance + GL_REACTION_TIME;
     t_producer_->consume(1);
     return execute_result_type{.progress=1, .latency=total_latency};
 }
@@ -497,6 +513,8 @@ ComputeSubsystem::next_memory_access_cycle(Qubit* ld, Instruction::Type t) const
 execute_result_type
 ComputeSubsystem::do_memory_access(inst_ptr inst, const std::vector<Qubit*>& args)
 {
+    if (GL_RAD_ENABLED)
+        std::cerr << "RAD does not support memory operations" << _die{};
     if (inst->type == Instruction::Type::LOAD || inst->type == Instruction::Type::STORE)
     {
         std::cerr << "ComputeSubsystem::do_memory_access: memory access of type "

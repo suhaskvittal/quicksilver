@@ -2,6 +2,7 @@
  *  author: Suhas Vittal
  *  date:   5 February 2026
  *  contributor: OpenAI Codex (RoutingSpace interface, 30 September 2026)
+ *  contributor: OpenAI Codex (resource count return, 10 November 2026)
  * */
 
 #ifndef SIM_ROUTING_MODEL_h
@@ -53,13 +54,13 @@ public:
     void lock_local_resource(T obj, cycle_type from, cycle_type to);
 
     template <class T, class U>
-    void lock_resources_between(T src, U dst, cycle_type from, cycle_type to);
+    size_t lock_resources_between(T src, U dst, cycle_type from, cycle_type to);
 
 protected:
     virtual bool _test_local_resource(routing::id_type, cycle_type, cycle_type) const = 0;
     virtual bool _test_resources_between(routing::id_type, routing::id_type, cycle_type, cycle_type) const = 0;
     virtual void _lock_local_resource(routing::id_type, cycle_type, cycle_type) = 0;
-    virtual void _lock_resources_between(routing::id_type, routing::id_type, cycle_type, cycle_type) = 0;
+    virtual size_t _lock_resources_between(routing::id_type, routing::id_type, cycle_type, cycle_type) = 0;
 
 private:
     Translator translator_;

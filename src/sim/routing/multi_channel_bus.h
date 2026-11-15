@@ -2,6 +2,7 @@
  *  author: Suhas Vittal
  *  date:   5 February 2026
  *  contributor: OpenAI Codex (RoutingBase migration, 30 September 2026)
+ *  contributor: OpenAI Codex (resource count return, 10 November 2026)
  * */
 
 #ifndef SIM_ROUTING_MODEL_MULTI_CHANNEL_BUS_h
@@ -104,7 +105,7 @@ private:
     bool _test_local_resource(id_type, cycle_type, cycle_type) const override;
     bool _test_resources_between(id_type, id_type, cycle_type, cycle_type) const override;
     void _lock_local_resource(id_type, cycle_type, cycle_type) override;
-    void _lock_resources_between(id_type, id_type, cycle_type, cycle_type) override;
+    size_t _lock_resources_between(id_type, id_type, cycle_type, cycle_type) override;
 
     template <class T>
     auto& get_local_resource_ref(this auto& self, T);

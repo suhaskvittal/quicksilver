@@ -1,6 +1,7 @@
 /*
  *  author: Suhas Vittal
  *  date:   4 January 2026
+ *  contributor: OpenAI Codex (RAD instruction transfer, 10 November 2026)
  * */
 
 #ifndef SIM_CLIENT_h
@@ -77,7 +78,7 @@ public:
     template <class Callback>
     void for_each_instruction_in_front_layer(const Callback&);
 
-    void retire_instruction(inst_ptr);
+    void retire_instruction(inst_ptr, bool delete_inst=true);
 
     bool eof() const { return generic_strm_eof(tristrm_); }
 

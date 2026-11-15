@@ -4,6 +4,7 @@
  * See Beverland, Kliuchnikov, and Schoute, PRX Quantum 3, 020342 (2022),
  * Section 3: data patches occupy even/even grid coordinates.
  * Contributor: OpenAI Codex (RoutingBase migration, 30 September 2026).
+ * Contributor: OpenAI Codex (resource count return, 10 November 2026).
  */
 
 #ifndef SIM_ROUTING_EDPC_LAYOUT_h
@@ -45,7 +46,7 @@ private:
     bool _test_local_resource(id_type, cycle_type, cycle_type) const override;
     bool _test_resources_between(id_type, id_type, cycle_type, cycle_type) const override;
     void _lock_local_resource(id_type, cycle_type, cycle_type) override;
-    void _lock_resources_between(id_type, id_type, cycle_type, cycle_type) override;
+    size_t _lock_resources_between(id_type, id_type, cycle_type, cycle_type) override;
 
     bool is_data(size_t cell) const;
     std::vector<size_t> adjacent_ancillas(size_t data_cell, bool vertical_only) const;

@@ -2,6 +2,7 @@
  *  author: Suhas Vittal
  *  date:   10 March 2026
  *  contributor: OpenAI Codex (RoutingBase migration, 30 September 2026)
+ *  contributor: OpenAI Codex (resource count return, 10 November 2026)
  * */
 
 #include <algorithm>
@@ -69,10 +70,15 @@ TEMPL_CLASS::_lock_local_resource(id_type obj, cycle_type a, cycle_type b)
     get_local_resource_ref(obj).lock_for_time_interval(a, b);
 }
 
-TEMPL_PARAMS void
+TEMPL_PARAMS size_t
 TEMPL_CLASS::_lock_resources_between(id_type src, id_type dst, cycle_type a, cycle_type b)
 {
-    _for_each_resource_between(src, dst, [a, b] (Resource& r) { r.lock_for_time_interval(a, b); });
+    size_t count{0};
+    _for_each_resource_between(src, dst, [a, b, &count] (Resource& r) {
+        r.lock_for_time_interval(a, b);
+        ++count;
+    });
+    return count;
 }
 
 ////////////////////////////////////////////////////////////

@@ -2,6 +2,8 @@
  *  author: Suhas Vittal
  *  date:   11 March 2026
  *  contributor: OpenAI Codex (routing and EDPC integration; TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (phenomenological decoder integration, 10 November 2026)
+ *  contributor: OpenAI Codex (RAD decoder access, 10 November 2026)
  * */
 
 #ifndef SIM_COMPUTE_SUBSYSTEM_h
@@ -10,6 +12,7 @@
 #include "globals.h"
 #include "instruction.h"
 #include "sim/production.h"
+#include "sim/decoder_subsystem.h"
 #include "sim/memory_level.h"
 #include "sim/routing/multi_channel_bus.h"
 #include "sim/routing/edpc_layout.h"
@@ -80,6 +83,7 @@ private:
     local_storage_type local_memory_;
     BulkProducer* t_producer_;
     memory_subsystem_type memory_subsystem_;
+    DecoderSubsystemBase* decoder_subsystem_;
 
     routing_ptr routing_;
 
@@ -102,6 +106,7 @@ public:
                         size_t local_memory_capacity,
                         BulkProducer* t_producer,
                         memory_subsystem_type memory_subsystem,
+                        DecoderSubsystemBase* decoder_subsystem,
                         RoutingLayout routing_layout = RoutingLayout::BUS);
     ~ComputeSubsystem();
 
@@ -157,6 +162,7 @@ public:
 
     const local_storage_type& local_memory() const { return local_memory_; }
     BulkProducer* t_producer() const { return t_producer_; }
+    DecoderSubsystemBase* decoder_subsystem() const { return decoder_subsystem_; }
     const memory_subsystem_type& memory_subsystem() const { return memory_subsystem_; }
     const local_storage_type& dedicated_ancilla() const { return dedicated_ancilla_; }
     size_t edpc_patch_count() const;

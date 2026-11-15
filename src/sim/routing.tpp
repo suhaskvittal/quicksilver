@@ -1,6 +1,7 @@
 /*
  *  author: OpenAI Codex
  *  date:   30 September 2026
+ *  contributor: OpenAI Codex (resource count return, 10 November 2026)
  * */
 
 #include <type_traits>
@@ -57,10 +58,10 @@ RoutingSpace<Translator>::lock_local_resource(T obj, cycle_type from, cycle_type
 
 template <class Translator>
 template <class T, class U>
-void
+size_t
 RoutingSpace<Translator>::lock_resources_between(T src, U dst, cycle_type from, cycle_type to)
 {
-    _lock_resources_between(translate(src), translate(dst), from, to);
+    return _lock_resources_between(translate(src), translate(dst), from, to);
 }
 
 } // namespace sim

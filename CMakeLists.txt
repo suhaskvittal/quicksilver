@@ -1,4 +1,5 @@
 # contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+# contributor: OpenAI Codex (RAD verification test, 10 November 2026)
 cmake_minimum_required(VERSION 3.20.3)
 project(quicksilver VERSION 1.0.0 LANGUAGES CXX)
 
@@ -346,6 +347,7 @@ if (BUILD_TESTING)
     qs_add_test(test_epr_memory)
     qs_add_test(test_operable)
     qs_add_test(test_routing)
+    qs_add_test(test_rad)
     qs_add_test(test_stall_monitor)
 endif()
 

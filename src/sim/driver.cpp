@@ -3,10 +3,12 @@
  *  author: Suhas Vittal
  *  date:   12 March 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+ *  contributor: OpenAI Codex (RAD execution integration, 10 November 2026)
  * */
 
 #include "sim/configuration/resource_estimation.h"
 #include "sim/driver.h"
+#include "sim/decoder_subsystem/rad.h"
 #include "sim/metrics.h"
 
 #include <algorithm>
@@ -90,6 +92,13 @@ Driver::Driver(std::vector<std::string> client_trace_files,
     for (auto* c : clients_)
         std::copy(c->qubits().begin(), c->qubits().end(), std::back_inserter(program_qubits));
     compute_subsystem_->initialize_qubits(program_qubits);
+
+    if (GL_RAD_ENABLED)
+    {
+        rad_ = dynamic_cast<ds::RADController*>(compute_subsystem_->decoder_subsystem());
+        if (rad_ == nullptr)
+            std::cerr << "RAD mode requires a RAD decoder subsystem" << _die{};
+    }
 
     if (GL_RDR_ENABLED)
         rdr_ = new driver::RotationDirectedRunahead(compute_subsystem_);
@@ -210,6 +219,8 @@ Driver::done() const
     for (auto* c : clients_)
     {
         bool d = _client_is_done(c, simulation_instructions);
+        if (GL_RAD_ENABLED)
+            d &= rad_->idle(c->id);
         if (d)
             c->s_cycle_complete = std::min(current_cycle(), c->s_cycle_complete);
         all_done &= d;
@@ -225,11 +236,17 @@ Driver::skip_to_cycle() const
 {
     // Producers catch up across the skipped interval before the next driver tick.
     const bool ok_to_skip = !GL_RDR_ENABLED && !GL_TOPOLS_ENABLED;
-    if (ok_to_skip && skip_cycle_target_.has_value())
+    if (ok_to_skip)
     {
-        auto s = *skip_cycle_target_;
-        s = std::max(current_cycle()+1, s);
-        return std::make_optional(s);
+        std::optional<cycle_type> target = skip_cycle_target_;
+        if (GL_RAD_ENABLED)
+        {
+            auto l2_target = rad_->next_l2_event_cycle();
+            if (l2_target)
+                target = target ? std::min(*target, *l2_target) : l2_target;
+        }
+        if (target)
+            return std::max(current_cycle()+1, *target);
     }
     return std::nullopt;
 }
@@ -334,6 +351,10 @@ Driver::operate()
     if (GL_TOPOLS_ENABLED)
         progress += topols_->operate();
 
+    if (GL_RAD_ENABLED)
+        for (auto* c : active_clients_)
+            progress += execute_fixup_instruction(c);
+
     //
     // `active_clients_.size()` is normally `concurrent_clients`, but can be smaller near the
     // end of a run: `handle_completed_clients()` (above) erases a finished client outright
@@ -369,13 +390,50 @@ Driver::operate()
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+long
+Driver::execute_fixup_instruction(Client* c)
+{
+    auto* inst = rad_->next_fixup(c->id);
+    if (inst == nullptr)
+        return 0;
+    if (!rad_->has_room(c->id))
+        return 0;
+
+    std::vector<Qubit*> operands;
+    for (auto q : inst->qubits)
+        operands.push_back(c->qubits().at(static_cast<size_t>(q)));
+
+    cycle_type ready = current_cycle();
+    for (auto* q : operands)
+        ready = std::max(ready, q->cycle_available);
+    if (ready > current_cycle())
+    {
+        skip_cycle_target_ = skip_cycle_target_ ? std::min(*skip_cycle_target_, ready) : ready;
+        return 0;
+    }
+
+    inst->first_ready_cycle = std::min(inst->first_ready_cycle, current_cycle());
+    auto result = compute_subsystem_->execute_instruction(inst, operands);
+    if (result.progress == 0)
+    {
+        skip_cycle_target_ = current_cycle()+1;
+        return 0;
+    }
+    inst->cycle_done = current_cycle()+result.latency;
+    rad_->retire_fixup(c->id);
+    return result.progress;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 void
 Driver::handle_completed_clients()
 {
     for (auto c_it = active_clients_.begin(); c_it != active_clients_.end(); )
     {
         Client* c = *c_it;
-        if (_client_is_done(c, simulation_instructions))
+        if (_client_is_done(c, simulation_instructions) && (!GL_RAD_ENABLED || rad_->idle(c->id)))
         {
             c->s_cycle_complete = current_cycle();
             if (!inactive_clients_.empty())
@@ -449,7 +507,15 @@ Driver::retire_instruction(Client* c, inst_ptr inst, cycle_type inst_latency)
     }
 
     inst->cycle_done = current_cycle() + inst_latency;
-    c->retire_instruction(inst);
+    if (GL_RAD_ENABLED && inst->uop_count() == 0)
+    {
+        c->retire_instruction(inst, false);
+        rad_->retire_instruction(c->id, std::unique_ptr<Instruction>(inst));
+    }
+    else
+    {
+        c->retire_instruction(inst);
+    }
 }
 
 ////////////////////////////////////////////////////////////
@@ -484,6 +550,15 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
             auto* executed_inst = (inst->uop_count() == 0) ? inst : inst->current_uop();
             std::transform(executed_inst->q_begin(), executed_inst->q_end(), std::back_inserter(operands),
                     [&c] (auto q_id) { return c->qubits()[q_id]; });
+
+            if (GL_RAD_ENABLED)
+            {
+                if (is_memory_access(executed_inst->type))
+                    std::cerr << "RAD does not support memory operations" << _die{};
+                if (!rad_->has_room(c->id, retired_inst.size())
+                        || !rad_->can_issue_program(c->id, operands))
+                    return;
+            }
 
             // TopoLS: do not proceed with any instructions that are dependent on an ongoing rotation
             if (GL_TOPOLS_ENABLED && topols_->is_instruction_blocked(c, inst))
@@ -592,7 +667,18 @@ Driver::fetch_and_execute_instructions_from_client(Client* c)
                 if (result.progress)
                 {
                     update_instruction_stats_before_retire(executed_inst);
-                    if (inst->uop_count() == 0 || inst->retire_current_uop())
+                    bool all_uops_done = inst->uop_count() == 0;
+                    if (!all_uops_done && GL_RAD_ENABLED)
+                    {
+                        auto* retired_uop = inst->current_uop();
+                        all_uops_done = inst->advance_uop();
+                        rad_->retire_instruction(c->id, std::unique_ptr<Instruction>(retired_uop));
+                    }
+                    else if (!all_uops_done)
+                    {
+                        all_uops_done = inst->retire_current_uop();
+                    }
+                    if (all_uops_done)
                     {
                         retired_inst.push_back(retired_inst_type{inst, result.latency});
                         // TopoLS: update dependency tracking upon retirement.

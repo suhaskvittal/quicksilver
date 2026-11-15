@@ -32,17 +32,16 @@ t_cc_cultivation(size_t d)
     }
 
     // estimate time to succesful cultivation. notes:
-    //  1. Assume error hapeens in the middle of `escape_cycles`
     size_t tries_until_success = static_cast<size_t>(std::round( 1.0/prob_success));
     //
     // assume that 50% of the failure occurs because of a nontrivial syndrome, and suppose that
     // the other 50% are because the syndrome's complementary gap is too low
     //
     //  1. overhead in first case is, on average, `escape_cycles/2`
-    //  2. overhead in second case is always `escape_cycles+GL_REACTION_TIME`
+    //  2. overhead in second case is always `escape_cycles+10`
     //
-    cycle_type mean_fail_latency = escape_cycles/4 + (escape_cycles+GL_REACTION_TIME)/2;
-    cycle_type latency = escape_cycles + GL_REACTION_TIME;
+    cycle_type mean_fail_latency = escape_cycles/4 + (escape_cycles+10)/2;
+    cycle_type latency = escape_cycles + 10;
     cycle_type t = mean_fail_latency*(tries_until_success-1) + latency;
 
     return ProducerQuantum

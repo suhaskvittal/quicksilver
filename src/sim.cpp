@@ -3,6 +3,7 @@
     author: Suhas Vittal
     date:   8 September 2025
     contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
+    contributor: OpenAI Codex (RAD mode flag, 10 November 2026)
 */
 
 #include "sim.h"
@@ -35,6 +36,7 @@ bool GL_T_GATE_DO_AUTOCORRECT{false};
 ////////////////////////////////////////////////////////////
 
 int64_t GL_REACTION_TIME{10};
+bool GL_RAD_ENABLED{false};
 
 int64_t GL_RLTP_DEGREE{0};
 

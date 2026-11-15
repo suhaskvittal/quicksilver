@@ -1,4 +1,4 @@
-/* Contributor: OpenAI Codex (RoutingBase migration, 30 September 2026). */
+/* Contributor: OpenAI Codex (RoutingBase migration, 30 September 2026; resource count return, 10 November 2026). */
 
 #include "sim/routing/multi_channel_bus.h" // boundary entry identifiers
 
@@ -173,13 +173,14 @@ TEMPL_CLASS::_test_resources_between(id_type src, id_type dst, cycle_type from, 
     return !route(src, dst, from, to).empty();
 }
 
-TEMPL_PARAMS void
+TEMPL_PARAMS size_t
 TEMPL_CLASS::_lock_resources_between(id_type src, id_type dst, cycle_type from, cycle_type to)
 {
     auto path = route(src, dst, from, to);
     assert(!path.empty());
     for (size_t cell : path)
         resources_[cell].lock_for_time_interval(from, to);
+    return path.size();
 }
 
 } // namespace sim::routing

@@ -3,6 +3,7 @@
  *  date:   12 March 2026
  *  contributor: OpenAI Codex (TopoLS model removal, 30 September 2026)
  *  contributor: OpenAI Codex (GPT-6.1 Sol), TopoLS integration, 1 October 2026
+ *  contributor: OpenAI Codex (RAD execution integration, 10 November 2026)
  * */
 
 #ifndef SIM_DRIVER_h
@@ -23,6 +24,8 @@
 
 namespace sim
 {
+
+namespace ds { class RADController; }
 
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
@@ -102,6 +105,7 @@ private:
     std::vector<std::pair<Qubit*, Qubit*>> context_switch_memory_access_buffer_;
 
     ComputeSubsystem* compute_subsystem_;
+    ds::RADController* rad_{nullptr};
     BulkProducer* t_producer_;
     BulkProducer* epr_producer_;
     std::vector<MemoryLevel*> memory_subsystem_;
@@ -188,6 +192,7 @@ private:
     void retire_instruction(Client*, inst_ptr, cycle_type instruction_latency);
 
     long fetch_and_execute_instructions_from_client(Client*);
+    long execute_fixup_instruction(Client*);
 
     /*
      * Updates instruction stats when it is iterated through the `front_layer` in 
