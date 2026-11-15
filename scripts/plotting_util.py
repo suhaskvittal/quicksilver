@@ -71,9 +71,12 @@ def parse_stats_file(filepath: str) -> dict:
 
     Top-level stats are stored as flat key → value pairs.
 
-    When a line has no value of its own and is followed by indented lines,
-    it is treated as a group header: its stats are collected into a nested
-    dictionary keyed by the full header text (e.g. "CLIENT 0", "L1_FACTORY").
+    When a line has no value of its own and is followed by more deeply
+    indented lines, it is treated as a group header: its stats are collected
+    into a nested dictionary keyed by the full header text (e.g. "CLIENT 0",
+    "L1_FACTORY"). Groups may nest arbitrarily deep (e.g. "CLIENT 0" ->
+    "MEMORY_LATENCY" -> "COUNT"); nesting depth is tracked by indentation
+    level rather than assumed to be exactly one level.
 
     Example output structure:
         {
@@ -82,6 +85,10 @@ def parse_stats_file(filepath: str) -> dict:
             "CLIENT 0": {
                 "IPC": 0.014,
                 "INSTRUCTIONS": 100000054,
+                "MEMORY_LATENCY": {
+                    "COUNT": 119893,
+                    ...
+                },
                 ...
             },
             "L1_FACTORY": { ... },
@@ -94,8 +101,8 @@ def parse_stats_file(filepath: str) -> dict:
     start = _find_stats_start(lines)
     stat_lines = lines[start:]
 
-    stats: dict = {}
-    current_group: str | None = None
+    root: dict = {}
+    stack: list[tuple[int, dict]] = [(-1, root)]  # (indent, dict) ancestry
 
     i = 0
     while i < len(stat_lines):
@@ -105,47 +112,41 @@ def parse_stats_file(filepath: str) -> dict:
             i += 1
             continue
 
-        is_indented = (line != line.lstrip())
+        indent = len(line) - len(line.lstrip())
+        content = line.strip()
 
-        if is_indented:
-            # ── group member ────────────────────────────────────────────────
-            if current_group is not None:
-                parts = line.split()
-                if len(parts) >= 2:
-                    key = parts[0]
-                    value = _parse_value(' '.join(parts[1:]))
-                    stats[current_group][key] = value
-                elif len(parts) == 1:
-                    stats[current_group][parts[0]] = None
+        # pop back to the nearest ancestor whose indent is less than ours
+        while stack[-1][0] >= indent:
+            stack.pop()
+        parent = stack[-1][1]
+
+        # peek ahead to the next non-empty line to see if this is a group header
+        j = i + 1
+        while j < len(stat_lines) and not stat_lines[j].strip():
+            j += 1
+        next_indent = None
+        if j < len(stat_lines):
+            next_line = stat_lines[j]
+            next_indent = len(next_line) - len(next_line.lstrip())
+
+        is_group_header = next_indent is not None and next_indent > indent
+
+        if is_group_header:
+            group: dict = {}
+            parent[content] = group
+            stack.append((indent, group))
         else:
-            # ── top-level line: group header OR plain stat ───────────────────
-            # Peek ahead to the next non-empty line to decide which it is.
-            j = i + 1
-            while j < len(stat_lines) and not stat_lines[j].strip():
-                j += 1
-            next_is_indented = (
-                j < len(stat_lines)
-                and stat_lines[j].strip()
-                and stat_lines[j] != stat_lines[j].lstrip()
-            )
-
-            parts = line.split()
-            if next_is_indented:
-                # group header: use the full stripped line as the key
-                current_group = line.strip()
-                stats[current_group] = {}
-            else:
-                current_group = None
-                if len(parts) >= 2:
-                    key = parts[0]
-                    value = _parse_value(' '.join(parts[1:]))
-                    stats[key] = value
-                elif len(parts) == 1:
-                    stats[parts[0]] = None
+            parts = content.split()
+            if len(parts) >= 2:
+                key = parts[0]
+                value = _parse_value(' '.join(parts[1:]))
+                parent[key] = value
+            elif len(parts) == 1:
+                parent[parts[0]] = None
 
         i += 1
 
-    return stats
+    return root
 
 ##############################################
 ##############################################
